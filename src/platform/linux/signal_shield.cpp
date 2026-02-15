@@ -40,6 +40,17 @@ sigset_t make_set() {
     return set;
 }
 
+const char* sig_desc(int signo) {
+    switch (signo) {
+    case SIGINT:  return "SIGINT";
+    case SIGTERM: return "SIGTERM";
+    case SIGHUP:  return "SIGHUP";
+    case SIGQUIT: return "SIGQUIT";
+    case SIGTSTP: return "SIGTSTP";
+    default:      return "SIGNAL";
+    }
+}
+
 } // namespace
 
 SignalShield::SignalShield(Callback cb) : cb_(std::move(cb)) {}
@@ -111,7 +122,7 @@ std::optional<SignalShield> SignalShield::enable(Callback cb) {
             if (st.stop_requested()) break;
 
             ++count;
-            if (cb2) cb2(signo, count);
+            if (cb2) cb2(sig_desc(signo), count);
         }
     });
 
