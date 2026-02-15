@@ -14,8 +14,8 @@ add_executable(brokkr
     src/app/md5_verify.cpp
 
     src/core/thread_pool.cpp
-    src/core/signal_shield.cpp
 
+    src/platform/linux/signal_shield.cpp
     src/platform/linux/single_instance.cpp
     src/platform/linux/sysfs_usb.cpp
     src/platform/linux/usbfs_device.cpp
