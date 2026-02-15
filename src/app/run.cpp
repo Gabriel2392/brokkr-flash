@@ -21,7 +21,7 @@
 #include "app/interface.hpp"
 #include "app/md5_verify.hpp"
 #include "core/str.hpp"
-#include "core/signal_shield.hpp"
+#include "platform/linux/signal_shield.hpp"
 #include "platform/linux/single_instance.hpp"
 #include "platform/linux/sysfs_usb.hpp"
 #include "platform/linux/tcp_transport.hpp"
