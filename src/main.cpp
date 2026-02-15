@@ -28,16 +28,16 @@ int main(int argc, char** argv) {
 
         if (opt.help) {
             std::cout << brokkr::app::usage_text();
-            return 0;
+            return EXIT_SUCCESS;
         }
         if (opt.version) {
             std::cout << "Brokkr Flash v" << brokkr::app::version_string() << "\n";
-            return 0;
+            return EXIT_SUCCESS;
         }
 
         return brokkr::app::run(opt);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
-        return 1;
+        return EXIT_FAILURE;
     }
 }
