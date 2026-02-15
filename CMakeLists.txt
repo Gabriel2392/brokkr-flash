@@ -61,15 +61,13 @@ target_compile_options(brokkr PRIVATE
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fdata-sections>
 )
 
-target_link_options(brokkr PRIVATE
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-flto=full>
-    $<$<AND:$<CONFIG:RelWithDebInfo>,$<CXX_COMPILER_ID:Clang>>:-flto=full>
-    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-flto>
-    $<$<AND:$<CONFIG:RelWithDebInfo>,$<CXX_COMPILER_ID:GNU>>:-flto>
-
-    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-Wl,--gc-sections>
-    $<$<CONFIG:Release>:-s>
-)
+# Check LTO support and enable it if available
+include(CheckIPOSupported)
+check_ipo_supported(RESULT LTO_SUPPORTED)
+if (LTO_SUPPORTED)
+  message(STATUS "Enabling LTO (Link time optimization)")
+  set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
 
 execute_process(
   COMMAND git rev-list --count HEAD
