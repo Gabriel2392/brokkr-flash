@@ -110,21 +110,27 @@ inline RequestBox make_request(RqtCommandType type,
                                std::span<const std::int32_t> ints = {},
                                std::span<const std::int8_t> chars = {})
 {
-    static_assert(std::endian::native == std::endian::little,
-                  "ODIN structs are assumed little-endian.");
 
     RequestBox r{};
     r.id   = static_cast<std::int32_t>(type);
     r.data = static_cast<std::int32_t>(param);
 
     if (!ints.empty()) {
-        const auto n = (ints.size() > RequestBox::DATA_INT_SIZE) ? RequestBox::DATA_INT_SIZE : ints.size();
+        const auto n = std::min(ints.size(), RequestBox::DATA_INT_SIZE);
         std::memcpy(r.intData, ints.data(), n * sizeof(std::int32_t));
     }
 
     if (!chars.empty()) {
-        const auto n = (chars.size() > RequestBox::DATA_CHAR_SIZE) ? RequestBox::DATA_CHAR_SIZE : chars.size();
+        const auto n = std::min(chars.size(), RequestBox::DATA_CHAR_SIZE);
         std::memcpy(r.charData, chars.data(), n * sizeof(std::int8_t));
+    }
+
+    if constexpr (std::endian::native != std::endian::little) {
+        r.id   = std::byteswap(r.id);
+        r.data = std::byteswap(r.data);
+        for (std::size_t i = 0; i < RequestBox::DATA_INT_SIZE; ++i) {
+            r.intData[i] = std::byteswap(r.intData[i]);
+		}
     }
 
     return r;

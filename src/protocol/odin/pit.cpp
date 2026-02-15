@@ -143,7 +143,7 @@ PitTable parse(std::span<const std::byte> bytes) {
     }
 
     for (auto& [dev, idxs] : by_dev) {
-        std::sort(idxs.begin(), idxs.end(), [&](std::size_t a, std::size_t b) {
+        std::ranges::sort(idxs, [&](std::size_t a, std::size_t b) {
             return out.partitions[a].begin_block < out.partitions[b].begin_block;
         });
 
@@ -180,7 +180,7 @@ PitTable parse(std::span<const std::byte> bytes) {
 const Partition* PitTable::find_by_file_name(std::string_view basename) const noexcept {
     if (basename.empty()) return nullptr;
 
-    auto it = std::find_if(partitions.begin(), partitions.end(),
+    auto it = std::ranges::find_if(partitions,
                            [&](const Partition& p) { return p.file_name == basename; });
     return (it == partitions.end()) ? nullptr : &*it;
 }
@@ -190,7 +190,7 @@ std::optional<std::int32_t> PitTable::common_block_size() const noexcept {
     const auto bs = partitions.front().block_bytes;
     if (bs <= 0) return std::nullopt;
 
-    if (std::all_of(partitions.begin(), partitions.end(),
+    if (std::ranges::all_of(partitions,
                     [&](const Partition& p) { return p.block_bytes == bs; })) {
         return bs;
     }
