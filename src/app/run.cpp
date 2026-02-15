@@ -201,14 +201,8 @@ static int run_wireless(const Options& opt) {
     auto conn = lst.accept_one();
     const std::string dev_id = "wifi:" + conn.peer_label();
 
-    auto shield = brokkr::core::SignalShield::enable([&](int signo, int count) {
-        const char* name = "SIGNAL";
-        if (signo == SIGINT)  name = "SIGINT";
-        if (signo == SIGTERM) name = "SIGTERM";
-        if (signo == SIGHUP)  name = "SIGHUP";
-        if (signo == SIGQUIT) name = "SIGQUIT";
-        if (signo == SIGTSTP) name = "SIGTSTP";
-        ui.notice(std::string(name) + " ignored (" + std::to_string(count) + ") - do not disconnect");
+    auto shield = brokkr::core::SignalShield::enable([&](const char* sig_desc, int count) {
+        ui.notice(std::string(sig_desc) + " ignored (" + std::to_string(count) + ") - do not disconnect");
     });
 
     brokkr::odin::Ui hooks;

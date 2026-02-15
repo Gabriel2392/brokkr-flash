@@ -5,6 +5,24 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Platform-specific source files and definitions
+if (LINUX)
+    add_compile_definitions(
+        BROKKR_LINUX
+    )
+    add_library(brokkr-platform INTERFACE)
+    target_sources(brokkr-platform INTERFACE
+        src/platform/linux/signal_shield.cpp
+        src/platform/linux/single_instance.cpp
+        src/platform/linux/sysfs_usb.cpp
+        src/platform/linux/usbfs_device.cpp
+        src/platform/linux/usbfs_conn.cpp
+        src/platform/linux/tcp_transport.cpp
+    )
+    target_include_directories(brokkr-platform INTERFACE src)
+endif()
+
+
 add_executable(brokkr
     src/main.cpp
 
@@ -14,13 +32,6 @@ add_executable(brokkr
     src/app/md5_verify.cpp
 
     src/core/thread_pool.cpp
-
-    src/platform/linux/signal_shield.cpp
-    src/platform/linux/single_instance.cpp
-    src/platform/linux/sysfs_usb.cpp
-    src/platform/linux/usbfs_device.cpp
-    src/platform/linux/usbfs_conn.cpp
-    src/platform/linux/tcp_transport.cpp
 
     src/io/tar.cpp
     src/io/source.cpp
@@ -55,6 +66,8 @@ target_compile_options(brokkr PRIVATE
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffunction-sections>
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fdata-sections>
 )
+
+target_link_libraries(brokkr PRIVATE brokkr-platform)
 
 # Check LTO support and enable it if available
 include(CheckIPOSupported)

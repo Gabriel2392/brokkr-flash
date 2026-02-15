@@ -26,7 +26,7 @@ namespace brokkr::core {
 
 class SignalShield {
 public:
-    using Callback = std::function<void(int signo, int count)>;
+    using Callback = std::function<void(const char* sig_desc, int count)>;
 
     SignalShield() = default;
     ~SignalShield();
