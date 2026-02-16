@@ -1,0 +1,11 @@
+WELCOME
+
+This installer will set up Brokkr Flash, an open-source Samsung device
+flashing utility.
+
+
+WHAT YOU GET
+
+✓ Command-line tool (brokkr)
+✓ GUI application (brokkr-gui)
+✓ Documentation and examples
