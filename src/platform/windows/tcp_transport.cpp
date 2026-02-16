@@ -50,20 +50,28 @@ namespace brokkr::windows {
 
 using ssize_t = std::make_signed_t<std::size_t>;
 
-static void throw_errno(const char* what) {
-    throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
+[[noreturn]] static void throw_winsockerr(const char* what) {
+    throw std::runtime_error(std::string(what) + ": " + std::to_string(WSAGetLastError()));
 }
 
 TcpConnection::TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port)
     : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port)
 {
+
+    if (int err = WSAStartup(MAKEWORD(2, 2), &ws_); err) {
+        throw std::runtime_error("Cannot initialize WSA: code " + std::to_string(err));
+    }
+
     (void)set_sock_timeouts_();
 
     int one = 1;
     (void)::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, (const char*) & one, sizeof(one));
 }
 
-TcpConnection::~TcpConnection() { close_(); }
+TcpConnection::~TcpConnection() { 
+    close_();
+    WSACleanup();
+}
 
 TcpConnection::TcpConnection(TcpConnection&& o) noexcept { *this = std::move(o); }
 
@@ -163,9 +171,16 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
     }
 }
 
+TcpListener::TcpListener() {
+    if (int err = WSAStartup(MAKEWORD(2, 2), &ws_); err) {
+        throw std::runtime_error("Cannot initialize WSA: code " + std::to_string(err));
+    }
+}
+
 TcpListener::~TcpListener() {
     if (fd_ != INVALID_SOCKET) ::closesocket(fd_);
     fd_ = INVALID_SOCKET;
+    WSACleanup();
 }
 
 void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog) {
@@ -175,7 +190,7 @@ void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port, int b
     port_ = port;
 
     fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd_ < 0) throw_errno("socket");
+    if (fd_ < 0) throw_winsockerr("socket");
 
     int one = 1;
     (void)::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, (const char* ) & one, sizeof(one));
@@ -188,10 +203,10 @@ void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port, int b
     }
 
     if (::bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
-        throw_errno("bind");
+        throw_winsockerr("bind");
     }
     if (::listen(fd_, backlog) != 0) {
-        throw_errno("listen");
+        throw_winsockerr("listen");
     }
 }
 
@@ -202,7 +217,7 @@ TcpConnection TcpListener::accept_one() {
     socklen_t peer_len = sizeof(peer);
 
     const int cfd = ::accept(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len);
-    if (cfd < 0) throw_errno("accept");
+    if (cfd < 0) throw_winsockerr("accept");
 
     char ipbuf[INET_ADDRSTRLEN]{};
     const char* ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));

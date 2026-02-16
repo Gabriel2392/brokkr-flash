@@ -60,6 +60,7 @@ private:
 
 private:
     SOCKET fd_ = INVALID_SOCKET;
+    WSADATA ws_;
     int timeout_ms_ = 1000;
 
     std::string peer_ip_;
@@ -68,7 +69,7 @@ private:
 
 class TcpListener {
 public:
-    TcpListener() = default;
+    TcpListener();
     ~TcpListener();
 
     TcpListener(const TcpListener&) = delete;
@@ -82,6 +83,7 @@ private:
     SOCKET fd_ = INVALID_SOCKET;
     std::string bind_ip_;
     std::uint16_t port_ = 0;
+    WSADATA ws_;
 };
 
 } // namespace brokkr::windows

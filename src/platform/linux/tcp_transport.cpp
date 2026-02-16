@@ -31,7 +31,7 @@
 
 namespace brokkr::linux {
 
-static void throw_errno(const char* what) {
+[[noreturn]] static void throw_errno(const char* what) {
     throw std::runtime_error(std::string(what) + ": " + std::strerror(errno));
 }
 
