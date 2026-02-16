@@ -18,8 +18,7 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
-#include "platform/linux/usbfs_conn.hpp"
-#include "platform/linux/usbfs_device.hpp"
+#include "platform/platform_all.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/odin_cmd.hpp"
 #include "protocol/odin/pit.hpp"
@@ -35,8 +34,8 @@ namespace brokkr::odin {
 
 struct UsbTarget {
     std::string id, devnode;
-    brokkr::linux::UsbFsDevice dev;
-    brokkr::linux::UsbFsConnection conn;
+    brokkr::platform::UsbFsDevice dev;
+    brokkr::platform::UsbFsConnection conn;
 
     InitTargetInfo init{};
     ProtocolVersion proto = ProtocolVersion::PROTOCOL_NONE;

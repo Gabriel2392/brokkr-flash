@@ -5,10 +5,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Enable Hot Reload for MSVC compilers if supported.
+if (POLICY CMP0141)
+  cmake_policy(SET CMP0141 NEW)
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+endif()
+
 # Platform-specific source files and definitions
 if (LINUX)
     add_compile_definitions(
-        BROKKR_LINUX
+        BROKKR_PLATFORM_LINUX
     )
     add_library(brokkr-platform INTERFACE)
     target_sources(brokkr-platform INTERFACE
@@ -18,6 +24,23 @@ if (LINUX)
         src/platform/linux/usbfs_device.cpp
         src/platform/linux/usbfs_conn.cpp
         src/platform/linux/tcp_transport.cpp
+    )
+    target_include_directories(brokkr-platform INTERFACE src)
+endif()
+if (WIN32)
+    add_compile_definitions(
+        BROKKR_PLATFORM_WINDOWS
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    add_library(brokkr-platform INTERFACE)
+    target_sources(brokkr-platform INTERFACE
+        src/platform/windows/signal_shield.cpp
+        src/platform/windows/single_instance.cpp
+        src/platform/windows/sysfs_usb.cpp
+        src/platform/windows/usbfs_device.cpp
+        src/platform/windows/usbfs_conn.cpp
+        src/platform/windows/tcp_transport.cpp
     )
     target_include_directories(brokkr-platform INTERFACE src)
 endif()

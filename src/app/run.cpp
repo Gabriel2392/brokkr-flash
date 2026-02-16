@@ -21,10 +21,7 @@
 #include "app/interface.hpp"
 #include "app/md5_verify.hpp"
 #include "core/str.hpp"
-#include "platform/linux/signal_shield.hpp"
-#include "platform/linux/single_instance.hpp"
-#include "platform/linux/sysfs_usb.hpp"
-#include "platform/linux/tcp_transport.hpp"
+#include "platform/platform_all.hpp"
 
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/group_flasher.hpp"
@@ -48,7 +45,7 @@
 
 namespace brokkr::app {
 
-using brokkr::linux::UsbDeviceSysfsInfo;
+using brokkr::platform::UsbDeviceSysfsInfo;
 
 static constexpr std::uint16_t SAMSUNG_VID = 0x04E8;
 static constexpr std::uint16_t ODIN_PIDS[] = { 0x6601, 0x685D, 0x68C3 };
@@ -58,8 +55,8 @@ static std::string short_id(const UsbDeviceSysfsInfo& d) { return std::to_string
 static bool is_pit_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".pit"); }
 
 static void print_connected() {
-    brokkr::linux::EnumerateFilter f{.vendor=SAMSUNG_VID,.products=default_pids()};
-    for (const auto& d : brokkr::linux::enumerate_usb_devices_sysfs(f)) {
+    brokkr::platform::EnumerateFilter f{.vendor=SAMSUNG_VID,.products=default_pids()};
+    for (const auto& d : brokkr::platform::enumerate_usb_devices_sysfs(f)) {
         std::cout << d.sysname << "\t" << short_id(d) << "\t"
                   << std::hex << "0x" << d.vendor << "\t0x" << d.product << std::dec
                   << "\t" << d.connected_duration_sec << "(sec)\n";
@@ -68,7 +65,7 @@ static void print_connected() {
 
 static UsbDeviceSysfsInfo select_target_or_throw(const Options& opt) {
     if (!opt.target_sysname) throw std::runtime_error("No --target specified");
-    auto info = brokkr::linux::find_by_sysname(*opt.target_sysname);
+    auto info = brokkr::platform::find_by_sysname(*opt.target_sysname);
     if (!info) throw std::runtime_error("Target sysname not found: " + *opt.target_sysname);
     if (info->vendor != SAMSUNG_VID) throw std::runtime_error("Target is not Samsung VID 0x04e8");
     const auto pids = default_pids();
@@ -78,8 +75,8 @@ static UsbDeviceSysfsInfo select_target_or_throw(const Options& opt) {
 
 static std::vector<UsbDeviceSysfsInfo> enumerate_targets(const Options& opt) {
     if (opt.target_sysname) return { select_target_or_throw(opt) };
-    brokkr::linux::EnumerateFilter f{.vendor=SAMSUNG_VID,.products=default_pids()};
-    return brokkr::linux::enumerate_usb_devices_sysfs(f);
+    brokkr::platform::EnumerateFilter f{.vendor=SAMSUNG_VID,.products=default_pids()};
+    return brokkr::platform::enumerate_usb_devices_sysfs(f);
 }
 
 static std::vector<std::byte> read_file_all(const std::filesystem::path& p) {
@@ -189,13 +186,13 @@ static int run_wireless(const Options& opt) {
         return 0;
     }
 
-    auto lock = brokkr::linux::SingleInstanceLock::try_acquire("brokkr-engine");
+    auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
     if (!lock) { std::cerr << "Another instance is already running\n"; return 2; }
 
     FlashInterface ui;
     ui.stage("Waiting for wireless device");
 
-    brokkr::linux::TcpListener lst;
+    brokkr::platform::TcpListener lst;
     lst.bind_and_listen("0.0.0.0", 13579);
 
     auto conn = lst.accept_one();
@@ -297,7 +294,7 @@ int run(const Options& opt) {
         return 0;
     }
 
-    auto lock = brokkr::linux::SingleInstanceLock::try_acquire("brokkr-engine");
+    auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
     if (!lock) { std::cerr << "Another instance is already running\n"; return 2; }
 
     auto targets = enumerate_targets(opt);
@@ -313,16 +310,16 @@ int run(const Options& opt) {
                                                 : brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
 
     auto usb_one = [&](const UsbDeviceSysfsInfo& info, auto&& fn) {
-        brokkr::linux::UsbFsDevice dev(info.devnode());
+        brokkr::platform::UsbFsDevice dev(info.devnode());
         dev.open_and_init();
-        brokkr::linux::UsbFsConnection conn(dev);
+        brokkr::platform::UsbFsConnection conn(dev);
         if (!conn.open()) throw std::runtime_error("Failed to open USB connection");
         return fn(conn);
     };
 
     if (opt.print_pit && !opt.pit_print_in) {
         if (targets.size() != 1) { std::cerr << "--print-pit without a file requires exactly one device (use --target).\n"; return 4; }
-        usb_one(targets.front(), [&](brokkr::linux::UsbFsConnection& conn) {
+        usb_one(targets.front(), [&](brokkr::platform::UsbFsConnection& conn) {
             const auto bytes = with_odin(conn, cfg, [&](brokkr::odin::OdinCommands& odin) { return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries); });
             print_pit_table(brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
             brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
@@ -333,7 +330,7 @@ int run(const Options& opt) {
 
     if (opt.pit_get_out) {
         if (targets.size() != 1) { std::cerr << "PIT get requires exactly one device (use --target).\n"; return 4; }
-        usb_one(targets.front(), [&](brokkr::linux::UsbFsConnection& conn) {
+        usb_one(targets.front(), [&](brokkr::platform::UsbFsConnection& conn) {
             const auto bytes = with_odin(conn, cfg, [&](brokkr::odin::OdinCommands& odin) { return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries); });
             write_file_all(*opt.pit_get_out, bytes);
             std::cout << "Saved PIT to " << opt.pit_get_out->string() << "\n";
@@ -361,14 +358,8 @@ int run(const Options& opt) {
 
     FlashInterface ui;
 
-    auto shield = brokkr::core::SignalShield::enable([&](int signo, int count) {
-        const char* name = "SIGNAL";
-        if (signo == SIGINT)  name = "SIGINT";
-        if (signo == SIGTERM) name = "SIGTERM";
-        if (signo == SIGHUP)  name = "SIGHUP";
-        if (signo == SIGQUIT) name = "SIGQUIT";
-        if (signo == SIGTSTP) name = "SIGTSTP";
-        ui.notice(std::string(name) + " ignored (" + std::to_string(count) + ") - do not disconnect");
+    auto shield = brokkr::core::SignalShield::enable([&](const char* sig_desc, int count) {
+        ui.notice(std::string(sig_desc) + " ignored (" + std::to_string(count) + ") - do not disconnect");
     });
 
     brokkr::odin::Ui hooks;
