@@ -6,7 +6,7 @@
 * Details:    Implementation of the MD5 hashing algorithm.
 				  Algorithm specification can be found here:
 				   * http://tools.ietf.org/html/rfc1321
-				  This implementation uses little endian byte order.
+				  This implementation uses little endian MD5_BYTE order.
 *********************************************************************/
 
 /*************************** HEADER FILES ***************************/
@@ -32,12 +32,12 @@
                             a = b + ROTLEFT(a,s); }
 
 /*********************** FUNCTION DEFINITIONS ***********************/
-void md5_transform(MD5_CTX *ctx, const BYTE data[])
+void md5_transform(MD5_CTX *ctx, const MD5_BYTE data[])
 {
-	WORD a, b, c, d, m[16], i, j;
+	MD5_WORD a, b, c, d, m[16], i, j;
 
-	// MD5 specifies big endian byte order, but this implementation assumes a little
-	// endian byte order CPU. Reverse all the bytes upon input, and re-reverse them
+	// MD5 specifies big endian MD5_BYTE order, but this implementation assumes a little
+	// endian MD5_BYTE order CPU. Reverse all the bytes upon input, and re-reverse them
 	// on output (in md5_final()).
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
 		m[i] = (data[j]) + (data[j + 1] << 8) + (data[j + 2] << 16) + (data[j + 3] << 24);
@@ -131,7 +131,7 @@ void md5_init(MD5_CTX *ctx)
 	ctx->state[3] = 0x10325476;
 }
 
-void md5_update(MD5_CTX *ctx, const BYTE data[], size_t len)
+void md5_update(MD5_CTX *ctx, const MD5_BYTE data[], size_t len)
 {
 	size_t i;
 
@@ -146,7 +146,7 @@ void md5_update(MD5_CTX *ctx, const BYTE data[], size_t len)
 	}
 }
 
-void md5_final(MD5_CTX *ctx, BYTE hash[])
+void md5_final(MD5_CTX *ctx, MD5_BYTE hash[])
 {
 	size_t i;
 
@@ -178,7 +178,7 @@ void md5_final(MD5_CTX *ctx, BYTE hash[])
 	ctx->data[63] = ctx->bitlen >> 56;
 	md5_transform(ctx, ctx->data);
 
-	// Since this implementation uses little endian byte ordering and MD uses big endian,
+	// Since this implementation uses little endian MD5_BYTE ordering and MD uses big endian,
 	// reverse all the bytes when copying the final state to the output hash.
 	for (i = 0; i < 4; ++i) {
 		hash[i]      = (ctx->state[0] >> (i * 8)) & 0x000000ff;

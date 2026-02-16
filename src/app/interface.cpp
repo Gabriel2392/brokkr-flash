@@ -26,12 +26,29 @@
 #include <iostream>
 #include <sstream>
 
+#ifdef __linux__
 #include <sys/ioctl.h>
 #include <unistd.h>
+#endif // __linux__
 
 namespace brokkr::app {
 
 namespace {
+static std::string join_ids(const std::vector<std::string>& ids) {
+    std::ostringstream oss;
+    for (std::size_t i = 0; i < ids.size(); ++i) { if (i) oss << ' '; oss << ids[i]; }
+    return oss.str();
+}
+
+static std::size_t u8_advance(std::string_view s, std::size_t i) {
+    if (i >= s.size()) return s.size();
+    const auto c = static_cast<unsigned char>(s[i]);
+    if (c < 0x80) return i + 1;
+    if ((c & 0xE0) == 0xC0) return std::min(i + 2, s.size());
+    if ((c & 0xF0) == 0xE0) return std::min(i + 3, s.size());
+    if ((c & 0xF8) == 0xF0) return std::min(i + 4, s.size());
+    return i + 1;
+}
 
 constexpr const char* kAltOn      = "\x1b[?1049h";
 constexpr const char* kAltOff     = "\x1b[?1049l";
@@ -49,11 +66,10 @@ constexpr const char* kBlue   = "\x1b[34m";
 constexpr const char* kCyan   = "\x1b[36m";
 constexpr const char* kGray   = "\x1b[90m";
 
-static std::string join_ids(const std::vector<std::string>& ids) {
-    std::ostringstream oss;
-    for (std::size_t i = 0; i < ids.size(); ++i) { if (i) oss << ' '; oss << ids[i]; }
-    return oss.str();
 }
+
+#ifdef __linux__
+namespace {
 
 static bool env_has_utf8() {
     auto has = [](const char* v) {
@@ -74,16 +90,6 @@ static bool env_has_utf8() {
         return ci("utf-8") || ci("utf8");
     };
     return has(std::getenv("LC_ALL")) || has(std::getenv("LC_CTYPE")) || has(std::getenv("LANG"));
-}
-
-static std::size_t u8_advance(std::string_view s, std::size_t i) {
-    if (i >= s.size()) return s.size();
-    const auto c = static_cast<unsigned char>(s[i]);
-    if (c < 0x80) return i + 1;
-    if ((c & 0xE0) == 0xC0) return std::min(i + 2, s.size());
-    if ((c & 0xF0) == 0xE0) return std::min(i + 3, s.size());
-    if ((c & 0xF8) == 0xF0) return std::min(i + 4, s.size());
-    return i + 1;
 }
 
 struct TermSignalGuard {
@@ -126,15 +132,33 @@ struct TermSignalGuard {
 
 } // namespace
 
-bool FlashInterface::is_tty_() { return ::isatty(1) == 1; }
+#endif // __linux__
+
+bool FlashInterface::is_tty_() { 
+#ifdef __linux__
+    return ::isatty(1) == 1;
+#else
+	return false;
+#endif
+}
 
 bool FlashInterface::colors_enabled_() {
+#ifdef __linux__
     if (!is_tty_()) return false;
     const char* no = std::getenv("NO_COLOR");
     return !(no && *no);
+#else
+	return false;
+#endif
 }
 
-bool FlashInterface::utf8_enabled_() { return is_tty_() && env_has_utf8(); }
+bool FlashInterface::utf8_enabled_() { 
+#ifdef __linux__
+    return is_tty_() && env_has_utf8(); 
+#else
+	return false;
+#endif
+}
 
 FlashInterface::FlashInterface() {
     tty_ = is_tty_();
@@ -142,10 +166,12 @@ FlashInterface::FlashInterface() {
     utf8_ = utf8_enabled_();
     start_ = last_rate_ts_ = last_redraw_ = std::chrono::steady_clock::now();
 
+#ifdef __linux__
     if (tty_) {
         TermSignalGuard::install();
         std::cout << kAltOn << kHideCursor << std::flush;
     }
+#endif
 }
 
 FlashInterface::~FlashInterface() {
@@ -153,10 +179,12 @@ FlashInterface::~FlashInterface() {
     bool fatal = false;
     { std::lock_guard lk(mtx_); final = status_line_; fatal = fatal_; }
 
+#ifdef __linux__
     if (tty_) {
         std::cout << kShowCursor << kAltOff << std::flush;
         TermSignalGuard::uninstall();
     }
+#endif
 
     if (!final.empty()) (fatal ? std::cerr : std::cout) << final << "\n" << std::flush;
 }
@@ -262,8 +290,10 @@ void FlashInterface::done(std::string msg) {
 }
 
 FlashInterface::TermSize FlashInterface::term_size_() const {
+#ifdef __linux__
     winsize ws{};
     if (::ioctl(1, TIOCGWINSZ, &ws) == 0) return {static_cast<int>(ws.ws_row), static_cast<int>(ws.ws_col)};
+#endif
     return {24, 80};
 }
 
@@ -393,7 +423,7 @@ void FlashInterface::redraw_(bool force) {
     out << "\x1b[H\x1b[J";
 
     auto emit = [&](const char* c, std::string_view plain) {
-        const auto clipped = clip_(plain, static_cast<std::size_t>(cols)).s;
+        const auto& clipped = clip_(plain, static_cast<std::size_t>(cols)).s;
         if (color_) out << c;
         out << clipped;
         if (color_) out << kReset;
