@@ -77,6 +77,7 @@ target_compile_definitions(brokkr PRIVATE
     _LARGEFILE_SOURCE
 )
 
+if (NOT MSVC)
 target_compile_options(brokkr PRIVATE
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:RelWithDebInfo>:-O3>
@@ -89,6 +90,7 @@ target_compile_options(brokkr PRIVATE
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffunction-sections>
     $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fdata-sections>
 )
+endif()
 
 target_link_libraries(brokkr PRIVATE brokkr-platform)
 
