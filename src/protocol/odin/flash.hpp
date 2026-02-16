@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include "protocol/odin/pit.hpp"
 #include "io/source.hpp"
 #include "io/tar.hpp"
+#include "protocol/odin/pit.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -40,70 +40,76 @@ class Lz4BlockStreamReader;
 namespace brokkr::odin {
 
 struct ImageSpec {
-    enum class Kind { RawFile, TarEntry };
+  enum class Kind { RawFile, TarEntry };
 
-    Kind kind{};
-    std::filesystem::path path;
-    io::TarEntry entry{};
+  Kind kind{};
+  std::filesystem::path path;
+  io::TarEntry entry{};
 
-    std::string basename;
-    std::string source_basename;
+  std::string basename;
+  std::string source_basename;
 
-    std::uint64_t size = 0;
-    std::uint64_t disk_size = 0;
+  std::uint64_t size = 0;
+  std::uint64_t disk_size = 0;
 
-    bool lz4 = false;
-    bool download_list_mode = false;
+  bool lz4 = false;
+  bool download_list_mode = false;
 
-    std::string display;
+  std::string display;
 
-    std::unique_ptr<io::ByteSource> open() const;
+  std::unique_ptr<io::ByteSource> open() const;
 };
 
 struct FlashItem {
-    pit::Partition part;
-    ImageSpec spec;
+  pit::Partition part;
+  ImageSpec spec;
 };
 
-std::vector<ImageSpec> expand_inputs_tar_or_raw(const std::vector<std::filesystem::path>& inputs);
-std::vector<FlashItem> map_to_pit(const pit::PitTable& pit_table, const std::vector<ImageSpec>& sources);
+std::vector<ImageSpec>
+expand_inputs_tar_or_raw(const std::vector<std::filesystem::path> &inputs);
+std::vector<FlashItem> map_to_pit(const pit::PitTable &pit_table,
+                                  const std::vector<ImageSpec> &sources);
 
 namespace detail {
 
-inline void checked_add_u64(std::uint64_t& acc, std::uint64_t v, std::string_view what) {
-    if (std::numeric_limits<std::uint64_t>::max() - acc < v) {
-        throw std::runtime_error("Overflow while computing " + std::string(what));
-    }
-    acc += v;
+inline void checked_add_u64(std::uint64_t &acc, std::uint64_t v,
+                            std::string_view what) {
+  if (std::numeric_limits<std::uint64_t>::max() - acc < v) {
+    throw std::overflow_error("Overflow while computing " + std::string(what));
+  }
+  acc += v;
 }
 
-constexpr std::uint64_t round_up64(std::uint64_t n, std::uint64_t base) noexcept {
-    if (base == 0) return n;
-    const auto r = n % base;
-    return r ? (n + (base - r)) : n;
+constexpr std::uint64_t round_up64(std::uint64_t n,
+                                   std::uint64_t base) noexcept {
+  if (base == 0)
+    return n;
+  const auto r = n % base;
+  return r ? (n + (base - r)) : n;
 }
 
 inline constexpr std::uint64_t kOneMiB = 1024ull * 1024ull;
 
 inline constexpr std::size_t kMaxNonFinalLz4Blocks = 31;
 
-inline std::size_t lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
-    const auto want = static_cast<std::size_t>(buffer_bytes / kOneMiB);
-    return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
+inline std::size_t
+lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
+  const auto want = static_cast<std::size_t>(buffer_bytes / kOneMiB);
+  return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
 }
 
 struct PreparedLz4Window {
-    std::uint64_t comp_size = 0;
-    std::uint64_t rounded_size = 0;
-    std::uint64_t decomp_size = 0;
-    bool last = false;
+  std::uint64_t comp_size = 0;
+  std::uint64_t rounded_size = 0;
+  std::uint64_t decomp_size = 0;
+  bool last = false;
 };
 
-PreparedLz4Window prepare_lz4_window(brokkr::io::Lz4BlockStreamReader& r,
+PreparedLz4Window prepare_lz4_window(brokkr::io::Lz4BlockStreamReader &r,
                                      std::uint64_t decomp_sent,
                                      std::size_t max_blocks,
                                      std::size_t packet_size,
-                                     std::vector<std::byte>& stream);
+                                     std::vector<std::byte> &stream);
 
 } // namespace detail
 } // namespace brokkr::odin

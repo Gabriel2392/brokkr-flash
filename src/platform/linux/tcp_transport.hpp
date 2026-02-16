@@ -26,59 +26,62 @@ namespace brokkr::linux {
 
 class TcpConnection final : public brokkr::core::IByteTransport {
 public:
-    Kind kind() const noexcept override { return Kind::TcpStream; }
+  Kind kind() const noexcept override { return Kind::TcpStream; }
 
-    TcpConnection() = default;
-    explicit TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port);
+  TcpConnection() = default;
+  explicit TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port);
 
-    TcpConnection(const TcpConnection&) = delete;
-    TcpConnection& operator=(const TcpConnection&) = delete;
+  TcpConnection(const TcpConnection &) = delete;
+  TcpConnection &operator=(const TcpConnection &) = delete;
 
-    TcpConnection(TcpConnection&&) noexcept;
-    TcpConnection& operator=(TcpConnection&&) noexcept;
+  TcpConnection(TcpConnection &&) noexcept;
+  TcpConnection &operator=(TcpConnection &&) noexcept;
 
-    ~TcpConnection();
+  ~TcpConnection();
 
-    bool connected() const noexcept override;
+  bool connected() const noexcept override;
 
-    void set_timeout_ms(int ms) noexcept override;
-    int timeout_ms() const noexcept override { return timeout_ms_; }
+  void set_timeout_ms(int ms) noexcept override;
+  int timeout_ms() const noexcept override { return timeout_ms_; }
 
-    int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
-    int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
+  int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
+  int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
 
-    int recv_zlp(unsigned /*retries*/ = 0) override { return 0; } // not used on tcp
+  int recv_zlp(unsigned /*retries*/ = 0) override {
+    return 0;
+  } // not used on tcp
 
-    std::string peer_label() const;
-
-private:
-    void close_() noexcept;
-    bool set_sock_timeouts_() noexcept;
+  std::string peer_label() const;
 
 private:
-    int fd_ = -1;
-    int timeout_ms_ = 1000;
+  void close_() noexcept;
+  bool set_sock_timeouts_() noexcept;
 
-    std::string peer_ip_;
-    std::uint16_t peer_port_ = 0;
+private:
+  int fd_ = -1;
+  int timeout_ms_ = 1000;
+
+  std::string peer_ip_;
+  std::uint16_t peer_port_ = 0;
 };
 
 class TcpListener {
 public:
-    TcpListener() = default;
-    ~TcpListener();
+  TcpListener() = default;
+  ~TcpListener();
 
-    TcpListener(const TcpListener&) = delete;
-    TcpListener& operator=(const TcpListener&) = delete;
+  TcpListener(const TcpListener &) = delete;
+  TcpListener &operator=(const TcpListener &) = delete;
 
-    void bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog = 4);
+  void bind_and_listen(std::string bind_ip, std::uint16_t port,
+                       int backlog = 4);
 
-    TcpConnection accept_one();
+  TcpConnection accept_one();
 
 private:
-    int fd_ = -1;
-    std::string bind_ip_;
-    std::uint16_t port_ = 0;
+  int fd_ = -1;
+  std::string bind_ip_;
+  std::uint16_t port_ = 0;
 };
 
 } // namespace brokkr::linux

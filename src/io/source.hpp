@@ -30,16 +30,20 @@ namespace brokkr::io {
 
 class ByteSource {
 public:
-    virtual ~ByteSource() = default;
+  virtual ~ByteSource() = default;
 
-    virtual std::string display_name() const = 0;
-    virtual std::uint64_t size() const = 0;
+  virtual std::string display_name() const = 0;
+  virtual std::uint64_t size() const = 0;
 
-    virtual std::size_t read(std::span<std::byte> out) = 0;
+  virtual std::size_t read(std::span<std::byte> out) = 0;
 };
 
-std::unique_ptr<ByteSource> open_raw_file(const std::filesystem::path& path);
-std::unique_ptr<ByteSource> open_tar_entry(const std::filesystem::path& tar_path, const TarEntry& entry);
-std::string basename(std::string_view path_like);
+std::unique_ptr<ByteSource> open_raw_file(const std::filesystem::path &path);
+std::unique_ptr<ByteSource>
+open_tar_entry(const std::filesystem::path &tar_path, const TarEntry &entry);
+inline std::string basename(std::string_view path_like) {
+  std::filesystem::path p(path_like);
+  return p.filename().string();
+}
 
 } // namespace brokkr::io

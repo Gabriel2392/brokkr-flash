@@ -25,32 +25,33 @@
 namespace brokkr::app {
 
 struct Options {
-    bool help = false;
-    bool version = false;
-    bool print_connected = false;
-    bool print_pit = false;
-    std::optional<std::filesystem::path> pit_print_in;
+  bool help = false;
+  bool version = false;
+  bool print_connected = false;
+  bool print_pit = false;
+  std::optional<std::filesystem::path> pit_print_in;
 
-    bool wireless = false; // Send bytes over tcp. Just listen on :13579 for connection. Protocol is exactly the same.
+  bool wireless = false; // Send bytes over tcp. Just listen on :13579 for
+                         // connection. Protocol is exactly the same.
 
-    bool reboot_only = false;
-    bool redownload = false;
+  bool reboot_only = false;
+  bool redownload = false;
 
-    std::optional<std::string> target_sysname;
+  std::optional<std::string> target_sysname;
 
-    std::optional<std::filesystem::path> pit_get_out;
-    std::optional<std::filesystem::path> pit_set_in;
+  std::optional<std::filesystem::path> pit_get_out;
+  std::optional<std::filesystem::path> pit_set_in;
 
-    bool reboot_after_flash = true;
+  bool reboot_after_flash = true;
 
-    std::optional<std::filesystem::path> file_a;
-    std::optional<std::filesystem::path> file_b;
-    std::optional<std::filesystem::path> file_c;
-    std::optional<std::filesystem::path> file_s;
-    std::optional<std::filesystem::path> file_u;
+  std::optional<std::filesystem::path> file_a;
+  std::optional<std::filesystem::path> file_b;
+  std::optional<std::filesystem::path> file_c;
+  std::optional<std::filesystem::path> file_s;
+  std::optional<std::filesystem::path> file_u;
 };
 
-Options parse_cli(int argc, char** argv);
+Options parse_cli(int argc, char **argv);
 std::string usage_text();
 
 } // namespace brokkr::app

@@ -26,20 +26,22 @@
 #define BROKKR_COMMIT_COUNT "0"
 #endif
 
+#include <fmt/format.h>
+
 namespace brokkr::app {
 
-inline const std::string& version_string() {
-    static const std::string v = [] {
-        const std::string base  = BROKKR_VERSION_BASE;
-        const std::string stage = BROKKR_VERSION_STAGE;
-        const std::string cnt   = BROKKR_COMMIT_COUNT;
+inline const std::string &version_string() {
+  static const std::string v = [] {
+    const std::string base = BROKKR_VERSION_BASE;
+    const std::string stage = BROKKR_VERSION_STAGE;
+    const std::string cnt = BROKKR_COMMIT_COUNT;
 
-        if (stage == "release") {
-            return base + "+" + cnt;
-        }
-        return base + "-" + stage + "+" + cnt;
-    }();
-    return v;
+    if (stage == "release") {
+      return fmt::format("{}-{}", base, stage);
+    }
+    return fmt::format("{}-{}+{}", base, stage, cnt);
+  }();
+  return v;
 }
 
 } // namespace brokkr::app

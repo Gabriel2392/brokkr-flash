@@ -26,31 +26,31 @@ namespace brokkr::core {
 
 class SignalShield {
 public:
-    using Callback = std::function<void(const char* sig_desc, int count)>;
+  using Callback = std::function<void(const char *sig_desc, int count)>;
 
-    SignalShield() = default;
-    ~SignalShield();
+  SignalShield() = default;
+  ~SignalShield();
 
-    SignalShield(const SignalShield&) = delete;
-    SignalShield& operator=(const SignalShield&) = delete;
+  SignalShield(const SignalShield &) = delete;
+  SignalShield &operator=(const SignalShield &) = delete;
 
-    SignalShield(SignalShield&& o) noexcept;
-    SignalShield& operator=(SignalShield&& o) noexcept;
+  SignalShield(SignalShield &&o) noexcept;
+  SignalShield &operator=(SignalShield &&o) noexcept;
 
-    static std::optional<SignalShield> enable(Callback cb);
-
-private:
-    explicit SignalShield(Callback cb);
-
-    void stop_and_restore_() noexcept;
+  static std::optional<SignalShield> enable(Callback cb);
 
 private:
-    Callback cb_{};
-    std::jthread watcher_{};
-    bool active_ = false;
+  explicit SignalShield(Callback cb);
 
-    sigset_t old_mask_{};
-    bool have_old_mask_ = false;
+  void stop_and_restore_() noexcept;
+
+private:
+  Callback cb_{};
+  std::jthread watcher_{};
+  bool active_ = false;
+
+  sigset_t old_mask_{};
+  bool have_old_mask_ = false;
 };
 
 } // namespace brokkr::core

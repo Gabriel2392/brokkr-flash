@@ -5,6 +5,36 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Include spdlog as a dependency using FetchContent
+include(FetchContent)
+FetchContent_Declare(
+   spdlog
+   GIT_REPOSITORY https://github.com/gabime/spdlog.git
+   GIT_TAG        v1.17.0
+)
+
+FetchContent_GetProperties(spdlog)
+if (NOT spdlog_POPULATED)
+    FetchContent_MakeAvailable(spdlog)
+endif()
+
+# Disable fmt tests to avoid pulling in extra dependencies
+set(FMT_TEST OFF CACHE INTERNAL "disabling fmt tests")
+
+# Include fmt as a dependency using FetchContent
+FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY  https://github.com/fmtlib/fmt.git
+        GIT_TAG         12.1.0
+        GIT_PROGRESS    TRUE
+        USES_TERMINAL_DOWNLOAD TRUE
+)
+
+FetchContent_GetProperties(fmt)
+if (NOT fmt_POPULATED)
+    FetchContent_MakeAvailable(fmt)
+endif()
+
 # Enable Hot Reload for MSVC compilers if supported.
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
@@ -25,7 +55,6 @@ if (LINUX)
         src/platform/linux/usbfs_conn.cpp
         src/platform/linux/tcp_transport.cpp
     )
-    target_include_directories(brokkr-platform INTERFACE src)
 endif()
 if (WIN32)
     add_compile_definitions(
@@ -42,9 +71,10 @@ if (WIN32)
         src/platform/windows/usbfs_conn.cpp
         src/platform/windows/tcp_transport.cpp
     )
-    target_include_directories(brokkr-platform INTERFACE src)
 endif()
 
+target_include_directories(brokkr-platform INTERFACE src)
+target_link_libraries(brokkr-platform INTERFACE spdlog::spdlog_header_only fmt::fmt-header-only)
 
 add_executable(brokkr
     src/main.cpp
@@ -118,4 +148,4 @@ target_compile_definitions(brokkr PRIVATE
 )
 
 find_package(Threads REQUIRED)
-target_link_libraries(brokkr PRIVATE Threads::Threads)
+target_link_libraries(brokkr PRIVATE Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only)

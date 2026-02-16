@@ -28,47 +28,54 @@
 namespace brokkr::linux {
 
 SingleInstanceLock::~SingleInstanceLock() {
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
-    }
+  if (fd_ >= 0) {
+    ::close(fd_);
+    fd_ = -1;
+  }
 }
 
-SingleInstanceLock::SingleInstanceLock(SingleInstanceLock&& o) noexcept { *this = std::move(o); }
+SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
+  *this = std::move(o);
+}
 
-SingleInstanceLock& SingleInstanceLock::operator=(SingleInstanceLock&& o) noexcept {
-    if (this == &o) return *this;
-    if (fd_ >= 0) ::close(fd_);
-    fd_ = o.fd_; o.fd_ = -1;
-    name_ = std::move(o.name_);
+SingleInstanceLock &
+SingleInstanceLock::operator=(SingleInstanceLock &&o) noexcept {
+  if (this == &o)
     return *this;
+  if (fd_ >= 0)
+    ::close(fd_);
+  fd_ = o.fd_;
+  o.fd_ = -1;
+  name_ = std::move(o.name_);
+  return *this;
 }
 
-std::optional<SingleInstanceLock> SingleInstanceLock::try_acquire(std::string name) {
-    const int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return std::nullopt;
+std::optional<SingleInstanceLock>
+SingleInstanceLock::try_acquire(std::string name) {
+  const int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0)
+    return std::nullopt;
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
 
-    if (name.size() + 1 > sizeof(addr.sun_path)) {
-        ::close(fd);
-        return std::nullopt;
-    }
+  if (name.size() + 1 > sizeof(addr.sun_path)) {
+    ::close(fd);
+    return std::nullopt;
+  }
 
-    addr.sun_path[0] = '\0';
-    std::memcpy(addr.sun_path + 1, name.data(), name.size());
+  addr.sun_path[0] = '\0';
+  std::memcpy(addr.sun_path + 1, name.data(), name.size());
 
-    const socklen_t len = static_cast<socklen_t>(
-        offsetof(sockaddr_un, sun_path) + 1 + name.size()
-    );
+  const socklen_t len =
+      static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name.size());
 
-    if (::bind(fd, reinterpret_cast<const sockaddr*>(&addr), len) != 0) {
-        ::close(fd);
-        return std::nullopt;
-    }
+  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), len) != 0) {
+    ::close(fd);
+    return std::nullopt;
+  }
 
-    return SingleInstanceLock{fd, std::move(name)};
+  return SingleInstanceLock{fd, std::move(name)};
 }
 
 } // namespace brokkr::linux

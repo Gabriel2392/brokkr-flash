@@ -27,7 +27,8 @@
 
 namespace brokkr::odin {
 
-std::vector<std::byte> download_pit_bytes(OdinCommands& odin, unsigned retries = 8);
-pit::PitTable download_pit_table(OdinCommands& odin, unsigned retries = 8);
+std::vector<std::byte> download_pit_bytes(OdinCommands &odin,
+                                          unsigned retries = 8);
+pit::PitTable download_pit_table(OdinCommands &odin, unsigned retries = 8);
 
 } // namespace brokkr::odin

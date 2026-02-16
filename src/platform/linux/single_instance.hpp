@@ -24,24 +24,25 @@ namespace brokkr::linux {
 
 class SingleInstanceLock {
 public:
-    SingleInstanceLock() = default;
-    ~SingleInstanceLock();
+  SingleInstanceLock() = default;
+  ~SingleInstanceLock();
 
-    SingleInstanceLock(const SingleInstanceLock&) = delete;
-    SingleInstanceLock& operator=(const SingleInstanceLock&) = delete;
+  SingleInstanceLock(const SingleInstanceLock &) = delete;
+  SingleInstanceLock &operator=(const SingleInstanceLock &) = delete;
 
-    SingleInstanceLock(SingleInstanceLock&&) noexcept;
-    SingleInstanceLock& operator=(SingleInstanceLock&&) noexcept;
+  SingleInstanceLock(SingleInstanceLock &&) noexcept;
+  SingleInstanceLock &operator=(SingleInstanceLock &&) noexcept;
 
-    static std::optional<SingleInstanceLock> try_acquire(std::string name);
+  static std::optional<SingleInstanceLock> try_acquire(std::string name);
 
-    bool acquired() const noexcept { return fd_ >= 0; }
+  bool acquired() const noexcept { return fd_ >= 0; }
 
 private:
-    explicit SingleInstanceLock(int fd, std::string name) : fd_(fd), name_(std::move(name)) {}
+  explicit SingleInstanceLock(int fd, std::string name)
+      : fd_(fd), name_(std::move(name)) {}
 
-    int fd_ = -1;
-    std::string name_;
+  int fd_ = -1;
+  std::string name_;
 };
 
 } // namespace brokkr::linux

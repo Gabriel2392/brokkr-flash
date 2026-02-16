@@ -28,34 +28,35 @@ namespace brokkr::linux {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
 public:
-    Kind kind() const noexcept override { return Kind::UsbBulk; }
+  Kind kind() const noexcept override { return Kind::UsbBulk; }
 
-    explicit UsbFsConnection(UsbFsDevice& dev);
+  explicit UsbFsConnection(UsbFsDevice &dev);
 
-    bool open();
-    void close() noexcept;
+  bool open();
+  void close() noexcept;
 
-    bool connected() const noexcept override { return connected_; }
+  bool connected() const noexcept override { return connected_; }
 
-    int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
-    int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
+  int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
+  int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
 
-    // Important: Hack reversed from original odin: If len==0, try receive ZLP and return 0.
-    int recv_zlp(unsigned retries = 0) override;
+  // Important: Hack reversed from original odin: If len==0, try receive ZLP and
+  // return 0.
+  int recv_zlp(unsigned retries = 0) override;
 
-    void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
-    int timeout_ms() const noexcept override { return timeout_ms_; }
+  void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
+  int timeout_ms() const noexcept override { return timeout_ms_; }
 
-    std::size_t max_packet_size() const noexcept { return max_pack_size_; }
+  std::size_t max_packet_size() const noexcept { return max_pack_size_; }
 
 private:
-    UsbFsDevice& dev_;
-    bool connected_ = false;
+  UsbFsDevice &dev_;
+  bool connected_ = false;
 
-    int timeout_ms_ = 200;
+  int timeout_ms_ = 200;
 
-    bool zlp_needed_ = true;
-    std::size_t max_pack_size_ = 16 * 1024;
+  bool zlp_needed_ = true;
+  std::size_t max_pack_size_ = 16 * 1024;
 };
 
 } // namespace brokkr::linux

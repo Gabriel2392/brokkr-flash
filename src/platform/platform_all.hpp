@@ -3,10 +3,10 @@
 #include "platform/linux/single_instance.hpp"
 #include "platform/linux/sysfs_usb.hpp"
 #include "platform/linux/tcp_transport.hpp"
-#include "platform/linux/usbfs_device.hpp"
 #include "platform/linux/usbfs_conn.hpp"
+#include "platform/linux/usbfs_device.hpp"
 namespace brokkr::platform {
-	using namespace linux;
+using namespace linux;
 }
 
 #elif defined(BROKKR_PLATFORM_WINDOWS)
@@ -14,11 +14,11 @@ namespace brokkr::platform {
 #include "platform/windows/single_instance.hpp"
 #include "platform/windows/sysfs_usb.hpp"
 #include "platform/windows/tcp_transport.hpp"
-#include "platform/windows/usbfs_device.hpp"
 #include "platform/windows/usbfs_conn.hpp"
+#include "platform/windows/usbfs_device.hpp"
 
 namespace brokkr::platform {
-	using namespace windows;
+using namespace windows;
 }
 #else
 #error "Unsupported platform"

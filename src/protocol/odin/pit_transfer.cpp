@@ -21,18 +21,20 @@
 
 namespace brokkr::odin {
 
-std::vector<std::byte> download_pit_bytes(OdinCommands& odin, unsigned retries) {
-    const auto pit_size = odin.get_pit_size(retries);
-    if (pit_size <= 0) throw std::runtime_error("Device returned invalid PIT size");
+std::vector<std::byte> download_pit_bytes(OdinCommands &odin,
+                                          unsigned retries) {
+  const auto pit_size = odin.get_pit_size(retries);
+  if (pit_size <= 0)
+    throw std::runtime_error("Device returned invalid PIT size");
 
-    std::vector<std::byte> buf(static_cast<std::size_t>(pit_size));
-    odin.get_pit(std::span<std::byte>(buf.data(), buf.size()), retries);
-    return buf;
+  std::vector<std::byte> buf(static_cast<std::size_t>(pit_size));
+  odin.get_pit(std::span<std::byte>(buf.data(), buf.size()), retries);
+  return buf;
 }
 
-pit::PitTable download_pit_table(OdinCommands& odin, unsigned retries) {
-    auto bytes = download_pit_bytes(odin, retries);
-    return pit::parse(std::span<const std::byte>(bytes.data(), bytes.size()));
+pit::PitTable download_pit_table(OdinCommands &odin, unsigned retries) {
+  auto bytes = download_pit_bytes(odin, retries);
+  return pit::parse(std::span<const std::byte>(bytes.data(), bytes.size()));
 }
 
 } // namespace brokkr::odin

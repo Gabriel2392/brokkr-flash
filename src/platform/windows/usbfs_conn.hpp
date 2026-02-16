@@ -19,36 +19,36 @@
 
 #include "core/byte_transport.hpp"
 #include "usbfs_device.hpp"
-#include <span>
 #include <cstdint>
+#include <span>
 
 namespace brokkr::windows {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
 public:
-    explicit UsbFsConnection(UsbFsDevice& dev);
+  explicit UsbFsConnection(UsbFsDevice &dev);
 
-    Kind kind() const noexcept override { return Kind::UsbBulk; }
+  Kind kind() const noexcept override { return Kind::UsbBulk; }
 
-    bool open();
-    void close() noexcept;
-    bool connected() const noexcept override { return connected_; }
+  bool open();
+  void close() noexcept;
+  bool connected() const noexcept override { return connected_; }
 
-    int send(std::span<const std::uint8_t> data, unsigned retries = 0) override;
-    int recv(std::span<std::uint8_t> data, unsigned retries = 0) override;
-    int recv_zlp(unsigned retries = 0) override;
+  int send(std::span<const std::uint8_t> data, unsigned retries = 0) override;
+  int recv(std::span<std::uint8_t> data, unsigned retries = 0) override;
+  int recv_zlp(unsigned retries = 0) override;
 
-    void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
-	int timeout_ms() const noexcept override { return timeout_ms_; }
+  void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
+  int timeout_ms() const noexcept override { return timeout_ms_; }
 
 private:
-    UsbFsDevice& dev_;
-    bool connected_ = false;
-    int timeout_ms_ = 1000;
+  UsbFsDevice &dev_;
+  bool connected_ = false;
+  int timeout_ms_ = 1000;
 
-    // WinUSB handles large transfers better, but we keep the logic 
-    // for API parity with the Linux version.
-    std::size_t max_pack_size_ = 128 * 1024;
+  // WinUSB handles large transfers better, but we keep the logic
+  // for API parity with the Linux version.
+  std::size_t max_pack_size_ = 128 * 1024;
 };
 
 } // namespace brokkr::windows

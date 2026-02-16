@@ -20,32 +20,32 @@
 #include <optional>
 #include <string>
 
-#include <windows.h>
 #include <WinSock2.h>
-
+#include <windows.h>
 
 namespace brokkr::windows {
 
 class SingleInstanceLock {
 public:
-    SingleInstanceLock() = default;
-    ~SingleInstanceLock();
+  SingleInstanceLock() = default;
+  ~SingleInstanceLock();
 
-    SingleInstanceLock(const SingleInstanceLock&) = delete;
-    SingleInstanceLock& operator=(const SingleInstanceLock&) = delete;
+  SingleInstanceLock(const SingleInstanceLock &) = delete;
+  SingleInstanceLock &operator=(const SingleInstanceLock &) = delete;
 
-    SingleInstanceLock(SingleInstanceLock&&) noexcept;
-    SingleInstanceLock& operator=(SingleInstanceLock&&) noexcept;
+  SingleInstanceLock(SingleInstanceLock &&) noexcept;
+  SingleInstanceLock &operator=(SingleInstanceLock &&) noexcept;
 
-    static std::optional<SingleInstanceLock> try_acquire(std::string name);
+  static std::optional<SingleInstanceLock> try_acquire(std::string name);
 
-    bool acquired() const noexcept { return handle_ != INVALID_HANDLE_VALUE; }
+  bool acquired() const noexcept { return handle_ != INVALID_HANDLE_VALUE; }
 
 private:
-    explicit SingleInstanceLock(HANDLE fd, std::string name) : handle_(fd), name_(std::move(name)) {}
+  explicit SingleInstanceLock(HANDLE fd, std::string name)
+      : handle_(fd), name_(std::move(name)) {}
 
-    HANDLE handle_ = INVALID_HANDLE_VALUE;
-    std::string name_;
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+  std::string name_;
 };
 
 } // namespace brokkr::windows
