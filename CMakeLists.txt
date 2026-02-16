@@ -55,8 +55,7 @@ if (LINUX)
         src/platform/linux/usbfs_conn.cpp
         src/platform/linux/tcp_transport.cpp
     )
-endif()
-if (WIN32)
+elseif (WIN32)
     add_compile_definitions(
         BROKKR_PLATFORM_WINDOWS
         WIN32_LEAN_AND_MEAN
@@ -71,6 +70,25 @@ if (WIN32)
         src/platform/windows/usbfs_conn.cpp
         src/platform/windows/tcp_transport.cpp
     )
+elseif (APPLE)
+    add_compile_definitions(
+        BROKKR_PLATFORM_MACOS
+    )
+    add_library(brokkr-platform INTERFACE)
+    target_sources(brokkr-platform INTERFACE
+        src/platform/macos/signal_shield.cpp
+        src/platform/macos/single_instance.cpp      
+        src/platform/macos/sysfs_usb.cpp
+        src/platform/macos/usbfs_device.cpp
+        src/platform/macos/usbfs_conn.cpp
+        src/platform/macos/tcp_transport.cpp
+    )
+    target_link_libraries(brokkr-platform INTERFACE
+        "-framework IOKit"
+        "-framework CoreFoundation"
+    )
+else()
+    message(FATAL_ERROR "Unsupported platform")
 endif()
 
 target_include_directories(brokkr-platform INTERFACE src)
