@@ -32,37 +32,39 @@ namespace brokkr::core {
 
 class ThreadPool {
 public:
-    using Task = std::function<void()>;
+  using Task = std::function<void()>;
 
-    explicit ThreadPool(std::size_t thread_count);
-    ~ThreadPool();
+  explicit ThreadPool(std::size_t thread_count);
+  ~ThreadPool();
 
-    ThreadPool(const ThreadPool&) = delete;
-    ThreadPool& operator=(const ThreadPool&) = delete;
+  ThreadPool(const ThreadPool &) = delete;
+  ThreadPool &operator=(const ThreadPool &) = delete;
 
-    void submit(Task t);
-    void stop();
-    void wait();
+  void submit(Task t);
+  void stop();
+  void wait();
 
-    std::size_t active() const noexcept { return active_.load(std::memory_order_relaxed); }
-    std::vector<std::exception_ptr> take_exceptions();
+  std::size_t active() const noexcept {
+    return active_.load(std::memory_order_relaxed);
+  }
+  std::vector<std::exception_ptr> take_exceptions();
 
 private:
-    void worker_loop_();
+  void worker_loop_();
 
-    std::vector<std::thread> workers_;
+  std::vector<std::thread> workers_;
 
-    mutable std::mutex mtx_;
-    std::condition_variable cv_;
-    std::condition_variable cv_done_;
+  mutable std::mutex mtx_;
+  std::condition_variable cv_;
+  std::condition_variable cv_done_;
 
-    std::queue<Task> q_;
-    bool stopping_ = false;
+  std::queue<Task> q_;
+  bool stopping_ = false;
 
-    std::atomic<std::size_t> active_{0};
+  std::atomic<std::size_t> active_{0};
 
-    std::mutex ex_mtx_;
-    std::vector<std::exception_ptr> exceptions_;
+  std::mutex ex_mtx_;
+  std::vector<std::exception_ptr> exceptions_;
 };
 
 } // namespace brokkr::core

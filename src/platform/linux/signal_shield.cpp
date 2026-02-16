@@ -28,105 +28,112 @@ namespace brokkr::core {
 namespace {
 
 sigset_t make_set() {
-    sigset_t set{};
-    ::sigemptyset(&set);
+  sigset_t set{};
+  ::sigemptyset(&set);
 
-    ::sigaddset(&set, SIGINT);
-    ::sigaddset(&set, SIGTERM);
-    ::sigaddset(&set, SIGHUP);
-    ::sigaddset(&set, SIGQUIT);
-    ::sigaddset(&set, SIGTSTP);
+  ::sigaddset(&set, SIGINT);
+  ::sigaddset(&set, SIGTERM);
+  ::sigaddset(&set, SIGHUP);
+  ::sigaddset(&set, SIGQUIT);
+  ::sigaddset(&set, SIGTSTP);
 
-    return set;
+  return set;
 }
 
-const char* sig_desc(int signo) {
-    switch (signo) {
-    case SIGINT:  return "SIGINT";
-    case SIGTERM: return "SIGTERM";
-    case SIGHUP:  return "SIGHUP";
-    case SIGQUIT: return "SIGQUIT";
-    case SIGTSTP: return "SIGTSTP";
-    default:      return "SIGNAL";
-    }
+const char *sig_desc(int signo) {
+  switch (signo) {
+  case SIGINT:
+    return "SIGINT";
+  case SIGTERM:
+    return "SIGTERM";
+  case SIGHUP:
+    return "SIGHUP";
+  case SIGQUIT:
+    return "SIGQUIT";
+  case SIGTSTP:
+    return "SIGTSTP";
+  default:
+    return "SIGNAL";
+  }
 }
 
 } // namespace
 
 SignalShield::SignalShield(Callback cb) : cb_(std::move(cb)) {}
 
-SignalShield::~SignalShield() {
-    stop_and_restore_();
-}
+SignalShield::~SignalShield() { stop_and_restore_(); }
 
-SignalShield::SignalShield(SignalShield&& o) noexcept {
-    *this = std::move(o);
-}
+SignalShield::SignalShield(SignalShield &&o) noexcept { *this = std::move(o); }
 
-SignalShield& SignalShield::operator=(SignalShield&& o) noexcept {
-    if (this == &o) return *this;
-
-    stop_and_restore_();
-
-    cb_ = std::move(o.cb_);
-    watcher_ = std::move(o.watcher_);
-    active_ = o.active_;
-    old_mask_ = o.old_mask_;
-    have_old_mask_ = o.have_old_mask_;
-
-    o.active_ = false;
-    o.have_old_mask_ = false;
+SignalShield &SignalShield::operator=(SignalShield &&o) noexcept {
+  if (this == &o)
     return *this;
+
+  stop_and_restore_();
+
+  cb_ = std::move(o.cb_);
+  watcher_ = std::move(o.watcher_);
+  active_ = o.active_;
+  old_mask_ = o.old_mask_;
+  have_old_mask_ = o.have_old_mask_;
+
+  o.active_ = false;
+  o.have_old_mask_ = false;
+  return *this;
 }
 
 void SignalShield::stop_and_restore_() noexcept {
-    if (active_) {
-        watcher_.request_stop();
+  if (active_) {
+    watcher_.request_stop();
 
-        ::kill(::getpid(), SIGTERM);
+    ::kill(::getpid(), SIGTERM);
 
-        if (watcher_.joinable()) watcher_.join();
-        active_ = false;
-    }
+    if (watcher_.joinable())
+      watcher_.join();
+    active_ = false;
+  }
 
-    if (have_old_mask_) {
-        (void)::pthread_sigmask(SIG_SETMASK, &old_mask_, nullptr);
-        have_old_mask_ = false;
-    }
+  if (have_old_mask_) {
+    (void)::pthread_sigmask(SIG_SETMASK, &old_mask_, nullptr);
+    have_old_mask_ = false;
+  }
 }
 
 std::optional<SignalShield> SignalShield::enable(Callback cb) {
-    ::signal(SIGPIPE, SIG_IGN);
+  ::signal(SIGPIPE, SIG_IGN);
 
-    const sigset_t set = make_set();
+  const sigset_t set = make_set();
 
-    sigset_t old{};
-    if (::pthread_sigmask(SIG_BLOCK, &set, &old) != 0) {
-        return std::nullopt;
+  sigset_t old{};
+  if (::pthread_sigmask(SIG_BLOCK, &set, &old) != 0) {
+    return std::nullopt;
+  }
+
+  SignalShield sh(std::move(cb));
+  sh.active_ = true;
+  sh.old_mask_ = old;
+  sh.have_old_mask_ = true;
+
+  sh.watcher_ = std::jthread([cb2 = sh.cb_](std::stop_token st) mutable {
+    sigset_t waitset = make_set();
+    int count = 0;
+
+    for (;;) {
+      int signo = 0;
+      const int r = ::sigwait(&waitset, &signo);
+      if (r != 0)
+        continue;
+
+      if (st.stop_requested())
+        break;
+
+      ++count;
+      if (cb2)
+        cb2(sig_desc(signo), count);
     }
+  });
 
-    SignalShield sh(std::move(cb));
-    sh.active_ = true;
-    sh.old_mask_ = old;
-    sh.have_old_mask_ = true;
-
-    sh.watcher_ = std::jthread([cb2 = sh.cb_](std::stop_token st) mutable {
-        sigset_t waitset = make_set();
-        int count = 0;
-
-        for (;;) {
-            int signo = 0;
-            const int r = ::sigwait(&waitset, &signo);
-            if (r != 0) continue;
-
-            if (st.stop_requested()) break;
-
-            ++count;
-            if (cb2) cb2(sig_desc(signo), count);
-        }
-    });
-
-    return std::optional<SignalShield>{std::move(sh)};
+  return std::optional<SignalShield>{std::move(sh)};
 }
 
 } // namespace brokkr::core

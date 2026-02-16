@@ -28,12 +28,12 @@
 namespace brokkr::app {
 
 struct Md5Job {
-    std::filesystem::path path;
-    std::uint64_t bytes_to_hash = 0;
-    std::array<unsigned char, 16> expected{};
+  std::filesystem::path path;
+  std::uint64_t bytes_to_hash = 0;
+  std::array<unsigned char, 16> expected{};
 };
 
-std::vector<Md5Job> md5_jobs(const std::vector<std::filesystem::path>& inputs);
-void md5_verify(const std::vector<Md5Job>& jobs, FlashInterface& ui);
+std::vector<Md5Job> md5_jobs(const std::vector<std::filesystem::path> &inputs);
+bool md5_verify(const std::vector<Md5Job> &jobs, FlashInterface &ui);
 
 } // namespace brokkr::app

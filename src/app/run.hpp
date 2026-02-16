@@ -21,6 +21,6 @@
 
 namespace brokkr::app {
 
-int run(const Options& opt);
+int run(const Options &opt);
 
 } // namespace brokkr::app

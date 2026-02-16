@@ -23,71 +23,71 @@
 namespace brokkr::linux {
 
 struct UsbIds {
-    std::uint16_t vendor = 0;
-    std::uint16_t product = 0;
+  std::uint16_t vendor = 0;
+  std::uint16_t product = 0;
 };
 
 struct UsbEndpoints {
-    std::uint8_t  bulk_in  = 0;
-    std::uint8_t  bulk_out = 0;
+  std::uint8_t bulk_in = 0;
+  std::uint8_t bulk_out = 0;
 
-    std::uint16_t bulk_in_max_packet  = 0;
-    std::uint16_t bulk_out_max_packet = 0;
+  std::uint16_t bulk_in_max_packet = 0;
+  std::uint16_t bulk_out_max_packet = 0;
 };
 
 class UsbFsDevice {
 public:
-    explicit UsbFsDevice(std::string devnode);
-    ~UsbFsDevice();
+  explicit UsbFsDevice(std::string devnode);
+  ~UsbFsDevice();
 
-    UsbFsDevice(const UsbFsDevice&) = delete;
-    UsbFsDevice& operator=(const UsbFsDevice&) = delete;
+  UsbFsDevice(const UsbFsDevice &) = delete;
+  UsbFsDevice &operator=(const UsbFsDevice &) = delete;
 
-    UsbFsDevice(UsbFsDevice&&) noexcept;
-    UsbFsDevice& operator=(UsbFsDevice&&) noexcept;
+  UsbFsDevice(UsbFsDevice &&) noexcept;
+  UsbFsDevice &operator=(UsbFsDevice &&) noexcept;
 
-    void open_and_init();
+  void open_and_init();
 
-    void close() noexcept;
-    bool is_open() const noexcept { return fd_ >= 0; }
+  void close() noexcept;
+  bool is_open() const noexcept { return fd_ >= 0; }
 
-    int fd() const noexcept { return fd_; }
-    bool writable() const noexcept { return writable_; }
+  int fd() const noexcept { return fd_; }
+  bool writable() const noexcept { return writable_; }
 
-    UsbIds ids() const noexcept { return ids_; }
-    UsbEndpoints endpoints() const noexcept { return eps_; }
-    int interface_number() const noexcept { return ifc_num_; }
+  UsbIds ids() const noexcept { return ids_; }
+  UsbEndpoints endpoints() const noexcept { return eps_; }
+  int interface_number() const noexcept { return ifc_num_; }
 
-    std::uint32_t caps() const noexcept { return caps_; }
-    bool has_packet_size_limit() const noexcept;
+  std::uint32_t caps() const noexcept { return caps_; }
+  bool has_packet_size_limit() const noexcept;
 
-    const std::string& devnode() const noexcept { return devnode_; }
+  const std::string &devnode() const noexcept { return devnode_; }
 
-    void reset_device();
-
-private:
-    bool parse_descriptors_();
-    void query_caps_();
-    bool kernel_driver_active_() const;
-    bool detach_kernel_driver_();
-    bool attach_kernel_driver_();
-    bool claim_interface_();
-    bool release_interface_();
+  void reset_device();
 
 private:
-    std::string devnode_;
-    int fd_ = -1;
+  bool parse_descriptors_();
+  void query_caps_();
+  bool kernel_driver_active_() const;
+  bool detach_kernel_driver_();
+  bool attach_kernel_driver_();
+  bool claim_interface_();
+  bool release_interface_();
 
-    bool writable_ = true;
+private:
+  std::string devnode_;
+  int fd_ = -1;
 
-    bool claimed_ = false;
-    bool driver_detached_ = false;
+  bool writable_ = true;
 
-    UsbIds ids_{};
-    UsbEndpoints eps_{};
-    int ifc_num_ = -1;
+  bool claimed_ = false;
+  bool driver_detached_ = false;
 
-    std::uint32_t caps_ = 0;
+  UsbIds ids_{};
+  UsbEndpoints eps_{};
+  int ifc_num_ = -1;
+
+  std::uint32_t caps_ = 0;
 };
 
 } // namespace brokkr::linux

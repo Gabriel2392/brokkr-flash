@@ -26,22 +26,23 @@
 namespace brokkr::linux {
 
 struct UsbDeviceSysfsInfo {
-    std::string sysname;
-    int busnum = -1;
-    int devnum = -1;
-    std::uint16_t vendor = 0;
-    std::uint16_t product = 0;
-    int connected_duration_sec = 0;
+  std::string sysname;
+  int busnum = -1;
+  int devnum = -1;
+  std::uint16_t vendor = 0;
+  std::uint16_t product = 0;
+  int connected_duration_sec = 0;
 
-    std::string devnode() const;
+  std::string devnode() const;
 };
 
 struct EnumerateFilter {
-    std::uint16_t vendor = 0x04E8;
-    std::vector<std::uint16_t> products;
+  std::uint16_t vendor = 0x04E8;
+  std::vector<std::uint16_t> products;
 };
 
-std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter);
+std::vector<UsbDeviceSysfsInfo>
+enumerate_usb_devices_sysfs(const EnumerateFilter &filter);
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname);
 
 } // namespace brokkr::linux

@@ -22,22 +22,26 @@
 #include <exception>
 #include <iostream>
 
-int main(int argc, char** argv) {
-    try {
-        auto opt = brokkr::app::parse_cli(argc, argv);
+#include <spdlog/spdlog.h>
 
-        if (opt.help) {
-            std::cout << brokkr::app::usage_text();
-            return EXIT_SUCCESS;
-        }
-        if (opt.version) {
-            std::cout << "Brokkr Flash v" << brokkr::app::version_string() << "\n";
-            return EXIT_SUCCESS;
-        }
+int main(int argc, char **argv) {
+  spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
 
-        return brokkr::app::run(opt);
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
-        return EXIT_FAILURE;
+  try {
+    auto opt = brokkr::app::parse_cli(argc, argv);
+
+    if (opt.help) {
+      spdlog::info(brokkr::app::usage_text());
+      return EXIT_SUCCESS;
     }
+    if (opt.version) {
+      spdlog::info("Brokkr Flash v{}", brokkr::app::version_string());
+      return EXIT_SUCCESS;
+    }
+
+    return brokkr::app::run(opt);
+  } catch (const std::exception &e) {
+    spdlog::error(e.what());
+    return EXIT_FAILURE;
+  }
 }
