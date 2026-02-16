@@ -165,7 +165,10 @@ if (Qt6_FOUND)
         Qt6::Gui 
         Qt6::Widgets
     )
-    target_compile_options(brokkr-gui PRIVATE /Zc:__cplusplus)
+    if (MSVC)
+        # Need it to define __cplusplus correctly for Qt headers, otherwise we get errors about missing C++17 features
+        target_compile_options(brokkr-gui PRIVATE /Zc:__cplusplus)
+    endif()
     if(WIN32)
         # Find the windeployqt tool inside your Qt installation
         get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
