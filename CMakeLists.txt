@@ -153,9 +153,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+set(BROKKR_GUI OFF)
 find_package(Qt6 COMPONENTS Core Gui Widgets)
 if (Qt6_FOUND)
     message(STATUS "Qt6 found, enabling GUI target")
+    set(BROKKR_GUI ON)
     add_executable(brokkr-gui WIN32 
         src-gui/main_gui.cpp 
         src-gui/brokkr_wrapper.cpp
@@ -169,23 +171,22 @@ if (Qt6_FOUND)
         # Need it to define __cplusplus correctly for Qt headers, otherwise we get errors about missing C++17 features
         target_compile_options(brokkr-gui PRIVATE /Zc:__cplusplus)
     endif()
-    if(WIN32)
-        # Find the windeployqt tool inside your Qt installation
-        get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
-        get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
-        find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
-
-        if(WINDEPLOYQT_EXEC)
-            add_custom_command(TARGET brokkr-gui POST_BUILD
-                COMMAND "${WINDEPLOYQT_EXEC}"
-                # --compiler-runtime copies the C++ runtime DLLs too, making it fully portable!
-                ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr-gui>"
-                COMMENT "Running windeployqt to deploy Qt libraries..."
-            )
-        else()
-            message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
-        endif()
-    endif()
 else()
     message(WARNING "Qt6 not found, GUI target will not be built")
+endif()
+
+# Install rules
+install(TARGETS brokkr
+    RUNTIME DESTINATION bin
+)
+if (BROKKR_GUI)
+install(TARGETS brokkr-gui
+    RUNTIME DESTINATION bin
+)
+qt_generate_deploy_app_script(
+    TARGET brokkr-gui
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT ${deploy_script})
 endif()
