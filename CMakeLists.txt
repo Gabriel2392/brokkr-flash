@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(brokkr LANGUAGES C CXX)
+project(Brokkr LANGUAGES C CXX VERSION 0.3.0)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -190,3 +190,45 @@ qt_generate_deploy_app_script(
 )
 install(SCRIPT ${deploy_script})
 endif()
+
+# Packaging with CPack
+
+# Set CPack configurations
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open-Source Implementation of Samsung Odin3")
+set(CPACK_PACKAGE_CONTACT "roynatech@gmail.com")
+set(CPACK_GENERATOR "ZIP;TGZ")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "${PROJECT_NAME}-v${CPACK_PACKAGE_VERSION}")
+set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/assets/brokkr.ico)
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/assets/INSTALLER_README.txt)
+set(CPACK_RESOURCE_FILE_WELCOME ${CMAKE_SOURCE_DIR}/assets/INSTALLER_WELCOME.txt)
+
+if(WIN32)
+  # NSIS
+  list(APPEND CPACK_GENERATOR NSIS)
+  set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+  set(CPACK_NSIS_MUI_ICON ${CMAKE_SOURCE_DIR}/assets/brokkr.ico)
+  set(CPACK_NSIS_MUI_UNIICON ${CMAKE_SOURCE_DIR}/assets/uninstall.ico)
+  set(CPACK_NSIS_DISPLAY_NAME "The ${PROJECT_NAME} Project")
+  set(CPACK_NSIS_WELCOME_TITLE "Welcome to The ${PROJECT_NAME} Project Installer")
+  set(CPACK_NSIS_BRANDING_TEXT "Open source Samsung Odin, in your hands")
+  set(CPACK_NSIS_MANIFEST_DPI_AWARE TRUE)
+endif()
+
+if (LINUX)
+  # DEB
+  list(APPEND CPACK_GENERATOR DEB)
+  set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soo Hwan Na <roynatech@gmail.com>")
+  set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6")
+  set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+endif()
+
+set(CPACK_PACKAGE_FILE_NAME 
+    "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
+)
+
+# Include CPack
+include(CPack)
