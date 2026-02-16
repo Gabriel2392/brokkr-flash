@@ -1,6 +1,6 @@
 # Brokkr Flash
 
-![brokkr](https://raw.githubusercontent.com/Gabriel2392/brokkr-flash/main/assets/brokkr.ico)
+![brokkr](https://raw.githubusercontent.com/Gabriel2392/brokkr-flash/main/assets/brokkr.jpg)
 
 A modern, cross-platform Samsung device flashing utility written in C++23. Brokkr provides a command-line interface for flashing firmware partitions to Samsung Android devices using the ODIN protocol.
 
