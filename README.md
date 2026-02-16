@@ -1,18 +1,21 @@
 # Brokkr Flash
 
+![brokkr](https://raw.githubusercontent.com/Gabriel2392/brokkr-flash/main/assets/brokkr.ico)
+
 A modern, cross-platform Samsung device flashing utility written in C++23. Brokkr provides a command-line interface for flashing firmware partitions to Samsung Android devices using the ODIN protocol.
 
 ## Features
 
 - **Multi-device support**: Flash multiple Samsung devices simultaneously
 - **Multiple partition types**: Support for AP (Application Processor), BL (Bootloader), CP (Cellular Processor), CSC (Consumer Software Customization), and USERDATA partitions
-- **Compression support**: Built-in LZ4 compression for efficient firmware transfers
+- **In-place Decompression support**: Built-in LZ4 decompression for efficient firmware transfers
 - **Wireless flashing**: Support for TCP-based flashing for Galaxy Watch and other wireless devices
 - **PIT management**: Get, set, and print PIT (Partition Information Table) files
 - **Cross-platform**: Native support for Windows and Linux
 - **USB and TCP transport**: Direct USB and TCP connectivity options
 - **MD5 verification**: Built-in MD5 verification for data integrity
-
+- **Compressed download** support; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compresssed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
+- 
 ## Requirements
 
 ### Build Requirements
