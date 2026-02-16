@@ -97,8 +97,7 @@ add_executable(brokkr
     src/protocol/odin/pit.cpp
     src/protocol/odin/flash.cpp
     src/protocol/odin/group_flasher.cpp
-    src/protocol/odin/pit_transfer.cpp
-)
+    src/protocol/odin/pit_transfer.cpp)
 
 target_include_directories(brokkr PRIVATE src src/lz4)
 
@@ -149,3 +148,41 @@ target_compile_definitions(brokkr PRIVATE
 
 find_package(Threads REQUIRED)
 target_link_libraries(brokkr PRIVATE Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
+find_package(Qt6 COMPONENTS Core Gui Widgets)
+if (Qt6_FOUND)
+    message(STATUS "Qt6 found, enabling GUI target")
+    add_executable(brokkr-gui WIN32 
+        src-gui/main_gui.cpp 
+        src-gui/brokkr_wrapper.cpp
+    )
+    target_link_libraries(brokkr-gui PRIVATE 
+        Qt6::Core 
+        Qt6::Gui 
+        Qt6::Widgets
+    )
+    target_compile_options(brokkr-gui PRIVATE /Zc:__cplusplus)
+    if(WIN32)
+        # Find the windeployqt tool inside your Qt installation
+        get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
+        get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
+        find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
+
+        if(WINDEPLOYQT_EXEC)
+            add_custom_command(TARGET brokkr-gui POST_BUILD
+                COMMAND "${WINDEPLOYQT_EXEC}"
+                # --compiler-runtime copies the C++ runtime DLLs too, making it fully portable!
+                ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr-gui>"
+                COMMENT "Running windeployqt to deploy Qt libraries..."
+            )
+        else()
+            message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
+        endif()
+    endif()
+else()
+    message(WARNING "Qt6 not found, GUI target will not be built")
+endif()
