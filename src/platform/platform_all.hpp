@@ -20,6 +20,18 @@ using namespace linux;
 namespace brokkr::platform {
 using namespace windows;
 }
+
+#elif defined(BROKKR_PLATFORM_MACOS)
+#include "platform/macos/signal_shield.hpp"
+#include "platform/macos/single_instance.hpp"
+#include "platform/macos/sysfs_usb.hpp"
+#include "platform/macos/tcp_transport.hpp"
+#include "platform/macos/usbfs_conn.hpp"
+#include "platform/macos/usbfs_device.hpp"
+
+namespace brokkr::platform {
+using namespace macos;
+}
 #else
 #error "Unsupported platform"
 #endif
