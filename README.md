@@ -14,8 +14,8 @@ A modern, cross-platform Samsung device flashing utility written in C++23. Brokk
 - **Cross-platform**: Native support for Windows and Linux
 - **USB and TCP transport**: Direct USB and TCP connectivity options
 - **MD5 verification**: Built-in MD5 verification for data integrity
-- **Compressed download** support; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compresssed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
-- 
+- **Compressed download support**; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compresssed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
+
 ## Requirements
 
 ### Build Requirements
@@ -23,13 +23,14 @@ A modern, cross-platform Samsung device flashing utility written in C++23. Brokk
 - **C++ Standard**: C++23
 - **CMake**: 3.22 or higher
 - **Build System**: Ninja (or compatible)
-- **Compiler**: MSVC (Windows) or GCC/Clang (Linux)
+- **Compiler**: MSVC (Windows) or GCC/Clang (Linux), Apple Clang (macOS)
 - **Threads**: Standard library threading support
 
 ### Runtime Requirements
 
 - **Windows**: Windows 7 or later
 - **Linux**: Any modern Linux distribution with USB support
+- **macOS**: macOS 10.15 or later
 
 ## Building
 
@@ -44,7 +45,7 @@ ninja
 
 The compiled executable will be located at `build/brokkr.exe`
 
-### On Linux
+### On Linux / macOS
 
 ```bash
 mkdir build
@@ -140,7 +141,8 @@ brokkr-flash/
 │   ├── io/               # I/O operations (TAR, LZ4)
 │   ├── platform/         # Platform-specific code (Windows/Linux)
 │   │   ├── linux/        # Linux implementations
-│   │   └── windows/      # Windows implementations
+│   │   |─- windows/      # Windows implementations
+|   |   └── macos/        # macOS implementations
 │   └── protocol/         # Device communication protocols
 │       └── odin/         # ODIN protocol implementation
 ├── CMakeLists.txt        # Build configuration
@@ -170,6 +172,7 @@ Multiple transport backends support different connection types:
 Platform-specific device enumeration:
 - **Windows**: Uses Windows USB APIs to detect connected devices
 - **Linux**: Uses sysfs interface for device detection
+- **macOS** Uses IOKit for device detection
 
 ## Partition Types
 
