@@ -16,21 +16,16 @@
  */
 
 #include "single_instance.hpp"
+#include "platform/posix-common/filehandle.hpp"
 
 #include <utility>
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 namespace brokkr::posix_common {
 
-SingleInstanceLock::~SingleInstanceLock() {
-  if (fd_ >= 0) {
-    ::close(fd_);
-    fd_ = -1;
-  }
-}
+SingleInstanceLock::~SingleInstanceLock() = default;
 
 SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
   *this = std::move(o);
@@ -40,28 +35,36 @@ SingleInstanceLock &
 SingleInstanceLock::operator=(SingleInstanceLock &&o) noexcept {
   if (this == &o)
     return *this;
-  if (fd_ >= 0)
-    ::close(fd_);
-  fd_ = o.fd_;
-  o.fd_ = -1;
+  fd_ = std::move(o.fd_);
   name_ = std::move(o.name_);
   return *this;
 }
 
 std::optional<SingleInstanceLock>
 SingleInstanceLock::try_acquire(std::string name) {
-  std::string path = "/tmp/" + name + ".lock";
-
-  const int fd = ::open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-  if (fd < 0)
+  FileHandle fd{do_socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0)};
+  if (!fd.valid())
     return std::nullopt;
 
-  if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
-    ::close(fd);
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+
+  if (name.size() + 1 > sizeof(addr.sun_path)) {
+    fd.close();
     return std::nullopt;
   }
 
-  return SingleInstanceLock{fd, std::move(name)};
-}
+  addr.sun_path[0] = '\0';
+  std::memcpy(addr.sun_path + 1, name.data(), name.size());
 
+  const socklen_t len =
+      static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name.size());
+
+  if (do_bind(fd, reinterpret_cast<const sockaddr *>(&addr), len) != 0) {
+    fd.close();
+    return std::nullopt;
+  }
+
+  return SingleInstanceLock{std::move(fd), std::move(name)};
+}
 } // namespace brokkr::posix_common

@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "filehandle.hpp"
 #include <optional>
 #include <string>
 
@@ -35,13 +36,13 @@ public:
 
   static std::optional<SingleInstanceLock> try_acquire(std::string name);
 
-  bool acquired() const noexcept { return fd_ >= 0; }
+  bool acquired() const noexcept { return fd_.valid(); }
 
 private:
-  explicit SingleInstanceLock(int fd, std::string name)
-      : fd_(fd), name_(std::move(name)) {}
+  explicit SingleInstanceLock(FileHandle fd, std::string name)
+      : fd_(std::move(fd)), name_(std::move(name)) {}
 
-  int fd_ = -1;
+  FileHandle fd_;
   std::string name_;
 };
 
