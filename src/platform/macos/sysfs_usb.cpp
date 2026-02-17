@@ -100,8 +100,6 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
     info.sysname = fmt::format("0x{:08x}", locationID);
     info.vendor = vendor;
     info.product = product;
-    info.busnum = static_cast<int>((locationID >> 24) & 0xFF);
-    info.devnum = static_cast<int>(locationID & 0xFFFF);
 
     spdlog::info("Matched USB device: {}", info.describe());
 
@@ -159,10 +157,6 @@ enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
     enumerate_class("IOUSBDevice", filter, out);
   }
 
-  std::ranges::sort(out, [](const auto &a, const auto &b) {
-    return a.connected_duration_sec > b.connected_duration_sec;
-  });
-
   return out;
 }
 
@@ -195,8 +189,6 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   info.sysname = std::string(sysname);
   info.vendor = static_cast<std::uint16_t>(*vid_opt);
   info.product = static_cast<std::uint16_t>(*pid_opt);
-  info.busnum = static_cast<int>((locationID >> 24) & 0xFF);
-  info.devnum = static_cast<int>(locationID & 0xFFFF);
 
   return info;
 }
