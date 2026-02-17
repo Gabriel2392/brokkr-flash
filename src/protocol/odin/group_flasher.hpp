@@ -33,7 +33,7 @@
 namespace brokkr::odin {
 
 struct UsbTarget {
-    std::string id, devnode;
+    std::string devnode;
     brokkr::platform::UsbFsDevice dev;
     brokkr::platform::UsbFsConnection conn;
 
@@ -43,8 +43,8 @@ struct UsbTarget {
     std::vector<std::byte> pit_bytes{};
     pit::PitTable pit_table{};
 
-    explicit UsbTarget(std::string short_id, std::string devnode_path)
-        : id(std::move(short_id)), devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
+    explicit UsbTarget(std::string devnode_path)
+        : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
 };
 
 struct Target {

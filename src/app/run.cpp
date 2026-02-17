@@ -56,21 +56,20 @@ static constexpr std::uint16_t ODIN_PIDS[] = {0x6601, 0x685D, 0x68C3};
 static std::vector<std::uint16_t> default_pids() {
   return {std::begin(ODIN_PIDS), std::end(ODIN_PIDS)};
 }
-static std::string short_id(const UsbDeviceSysfsInfo &d) {
-  return fmt::format("{}:{}", d.busnum, d.devnum);
-}
 static bool is_pit_name(std::string_view base) {
   return brokkr::core::ends_with_ci(base, ".pit");
 }
 
-static void print_connected() {
+static void print_connected(bool only) {
   brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID,
                                       .products = default_pids()};
   for (const auto &d : brokkr::platform::enumerate_usb_devices_sysfs(f)) {
-    spdlog::info("Found device: {} ({}), VID: 0x{:04x}, PID: 0x{:04x}, "
-                 "connected for {} seconds",
-                 d.sysname, short_id(d), d.vendor, d.product,
-                 d.connected_duration_sec);
+    if (only) {
+       std::cout << d.sysname << "\n";
+	   continue;
+    }
+
+    spdlog::info("Found device: {}", d.describe());
   }
 }
 
@@ -436,7 +435,13 @@ int run(const Options &opt) {
   if (opt.wireless)
     return !run_wireless(opt);
   if (opt.print_connected) {
-    print_connected();
+	// Enable the logging back (To show the device info) and print all devices, not just the sysname.
+	spdlog::set_level(spdlog::level::info);
+    print_connected(false);
+    return 0;
+  }
+  if (opt.print_connected_only) {
+    print_connected(true);
     return 0;
   }
 
@@ -554,8 +559,7 @@ int run(const Options &opt) {
   devs.reserve(targets.size());
 
   for (const auto &t : targets) {
-    auto ctx =
-        std::make_unique<brokkr::odin::UsbTarget>(short_id(t), t.devnode());
+    auto ctx = std::make_unique<brokkr::odin::UsbTarget>(t.devnode());
     devs.push_back(ctx.get());
     storage.push_back(std::move(ctx));
   }

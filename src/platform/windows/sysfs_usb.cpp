@@ -154,7 +154,6 @@ enumerate_usb_devices_windows(uint16_t target_vid,
     }
   }
   SetupDiDestroyDeviceInfoList(hDevInfo);
-  spdlog::info("Total matching devices found: {}", result.size());
   return result;
 }
 } // namespace
@@ -163,6 +162,10 @@ namespace brokkr::windows {
 
 std::string UsbDeviceSysfsInfo::devnode() const {
   return sysname; // On Windows, we can treat the device path as the "devnode"
+}
+std::string UsbDeviceSysfsInfo::describe() const {
+  return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor,
+                     product);
 }
 
 std::vector<UsbDeviceSysfsInfo>
@@ -178,6 +181,7 @@ enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
     // we leave them as -1.
     result.push_back(info);
   }
+  spdlog::info("Total matching USB devices found: {}", result.size());
   return result;
 }
 

@@ -586,14 +586,14 @@ void flash(std::vector<UsbTarget*>& devs,
     if (ui.on_devices) {
         std::vector<std::string> ids;
         ids.reserve(devs.size());
-        for (auto* d : devs) ids.push_back(d->id);
+        for (auto* d : devs) ids.push_back(d->devnode);
         ui.on_devices(devs.size(), ids);
     }
 
     if (ui.on_stage) ui.on_stage("Opening USB devices");
     for (auto* d : devs) {
         d->dev.open_and_init();
-        if (!d->conn.open()) throw std::runtime_error("Failed to open USB connection: " + d->id);
+        if (!d->conn.open()) throw std::runtime_error("Failed to open USB connection: " + d->devnode);
         d->conn.set_timeout_ms(cfg.preflash_timeout_ms);
     }
 
@@ -602,8 +602,8 @@ void flash(std::vector<UsbTarget*>& devs,
     std::vector<Target*> ptrs;
     ptrs.reserve(devs.size());
 
-    for (auto* d : devs) tmp.push_back(Target{.id=d->id,.link=&d->conn,.init=d->init,.proto=d->proto,.pit_bytes=d->pit_bytes,.pit_table=d->pit_table});
-    for (auto& t : tmp) ptrs.push_back(&t);
+    for (auto* d : devs) tmp.emplace_back(Target{.id=d->devnode,.link=&d->conn,.init=d->init,.proto=d->proto,.pit_bytes=d->pit_bytes,.pit_table=d->pit_table});
+    for (auto& t : tmp) ptrs.emplace_back(&t);
 
     flash(ptrs, sources, pit_to_upload, cfg, ui, mode);
 

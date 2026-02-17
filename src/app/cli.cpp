@@ -68,7 +68,7 @@ std::string usage_text() {
   brokkr --get-pit <out.pit>
   brokkr --set-pit <in.pit> (-a/-b/-c/-s/-u ...)
   brokkr --print-pit [<in.pit>]
-  brokkr --print-connected
+  brokkr --print-connected(-only)
   brokkr --reboot
   brokkr --redownload [--set-pit/--get-pit/-a/-b/-c/-s/-u ...]
   brokkr --no-reboot
@@ -76,7 +76,7 @@ std::string usage_text() {
 Options:
   --help
   --version
-  --print-connected
+  --print-connected(-only)     print connected devices and exit. If --print-connected-only is used, only print sysnames, one per line, with no other output.
   --print-pit [<in.pit>]       if no file is provided, downloads PIT from device (single device only)
   -w, --wireless               wireless (Galaxy Watch).
   --target <sysname>           e.g. 1-1.4
@@ -86,6 +86,7 @@ Options:
   --redownload                 after operation, try to reboot back into Download Mode (Might not work with all devices)
   --no-reboot                  do not reboot after flashing (incompatible with --redownload)
   --verbose, -v                enable verbose logging
+  --no-help                    does not print help message on invalid input, just an error. Useful for brokkr-gui to detect invalid input without showing the help message.
 
 Flash inputs:
   -a <AP file>
@@ -121,8 +122,20 @@ Options parse_cli(int argc, char **argv) {
     }
     if (a == "--print-connected") {
       o.print_connected = true;
+      // Disable logging to show last connection found messages (So it won't duplicate)
+	  spdlog::set_level(spdlog::level::off);
       continue;
     }
+	if (a == "--print-connected-only") {
+      o.print_connected_only = true;
+	  // Disable logging, since this is meant for machine parsing (e.g. by brokkr-gui) and we don't want to duplicate the sysname output with log messages.
+	  spdlog::set_level(spdlog::level::off);
+      continue;
+    }
+    if (a == "--no-help") {
+      o.no_help = true;
+      continue;
+	}
 
     if (a == "--print-pit" || is_opt(a, "--print-pit")) {
       o.print_pit = true;
@@ -161,7 +174,9 @@ Options parse_cli(int argc, char **argv) {
     }
 
     if (a == "--verbose" || a == "-v") {
-      spdlog::set_level(spdlog::level::debug);
+      // We must ignore -v if --print-connected family is specified. They have their own logic.
+      if (!o.print_connected && !o.print_connected_only)
+        spdlog::set_level(spdlog::level::debug);
       continue;
 	}
 
@@ -286,6 +301,9 @@ Options parse_cli(int argc, char **argv) {
     }
   }
 
+  if (argc == 1) {
+    o._no_args = true;
+  }
   return o;
 }
 

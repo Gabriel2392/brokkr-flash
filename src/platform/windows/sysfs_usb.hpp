@@ -27,13 +27,11 @@ namespace brokkr::windows {
 
 struct UsbDeviceSysfsInfo {
   std::string sysname;
-  int busnum = -1;
-  int devnum = -1;
   std::uint16_t vendor = 0;
   std::uint16_t product = 0;
-  int connected_duration_sec = 0;
 
   std::string devnode() const;
+  std::string describe() const;
 };
 
 struct EnumerateFilter {

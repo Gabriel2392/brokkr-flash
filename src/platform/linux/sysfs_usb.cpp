@@ -124,16 +124,12 @@ std::optional<UsbDeviceSysfsInfo> load_one(const fs::path &dir,
 } // namespace
 
 std::string UsbDeviceSysfsInfo::devnode() const {
-  std::ostringstream oss;
-  oss << "/dev/bus/usb/";
-  oss.width(3);
-  oss.fill('0');
-  oss << busnum;
-  oss << "/";
-  oss.width(3);
-  oss.fill('0');
-  oss << devnum;
-  return oss.str();
+	return fmt::format("/dev/bus/usb/{:03d}/{:03d}", busnum, devnum);
+}
+
+std::string UsbDeviceSysfsInfo::describe() const {
+    return fmt::format("{} (Interface {}:{}, VID: 0x{:04x}, PID: 0x{:04x}, connected for {} seconds)",
+		sysname, devnum, busnum, vendor, product, connected_duration_sec);
 }
 
 std::vector<UsbDeviceSysfsInfo>
@@ -161,15 +157,12 @@ enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
     if (!product_allowed(info->product, filter.products))
       continue;
 
-    spdlog::info("Matched USB device: {} (VID: 0x{:04x}, PID: 0x{:04x}, "
-                 "connected for {} seconds)",
-                 info->sysname, info->vendor, info->product,
-                 info->connected_duration_sec);
+    spdlog::info("Matched USB device: {}", info->describe());
 
-    out.push_back(std::move(*info));
+    out.emplace_back(std::move(*info));
   }
 
-  std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
+  std::ranges::sort(out, [](const auto &a, const auto &b) {
     return a.connected_duration_sec > b.connected_duration_sec;
   });
 

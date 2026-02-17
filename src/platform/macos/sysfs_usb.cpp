@@ -88,7 +88,7 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
     auto product = static_cast<std::uint16_t>(*pid_opt);
     auto locationID = *loc_opt;
 
-    spdlog::debug("Found USB device: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
+    spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
                   locationID, vendor, product);
 
     if (!product_allowed(product, filter.products)) {
@@ -103,9 +103,7 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
     info.busnum = static_cast<int>((locationID >> 24) & 0xFF);
     info.devnum = static_cast<int>(locationID & 0xFFFF);
 
-    spdlog::info(
-        "Matched USB device: {} (VID: 0x{:04x}, PID: 0x{:04x})",
-        info.sysname, info.vendor, info.product);
+    spdlog::info("Matched USB device: {}", info.describe());
 
     out.push_back(std::move(info));
     IOObjectRelease(service);
@@ -147,6 +145,11 @@ io_service_t find_device_by_location(std::uint32_t locationID) {
 
 std::string UsbDeviceSysfsInfo::devnode() const { return sysname; }
 
+std::string UsbDeviceSysfsInfo::describe() const {
+  return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor,
+                     product);
+}
+
 std::vector<UsbDeviceSysfsInfo>
 enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
   std::vector<UsbDeviceSysfsInfo> out;
@@ -156,11 +159,9 @@ enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
     enumerate_class("IOUSBDevice", filter, out);
   }
 
-  std::sort(out.begin(), out.end(), [](const auto &a, const auto &b) {
+  std::ranges::sort(out, [](const auto &a, const auto &b) {
     return a.connected_duration_sec > b.connected_duration_sec;
   });
-
-  spdlog::info("Total matching USB devices found: {}", out.size());
 
   return out;
 }

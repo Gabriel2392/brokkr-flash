@@ -34,6 +34,7 @@ struct UsbDeviceSysfsInfo {
   int connected_duration_sec = 0;
 
   std::string devnode() const;
+  std::string describe() const;
 };
 
 struct EnumerateFilter {

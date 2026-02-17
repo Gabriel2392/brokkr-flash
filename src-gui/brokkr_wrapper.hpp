@@ -19,6 +19,7 @@ private slots:
 private:
     void setupFileInput(class QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
     void executeBrokkr(const QStringList& args);
+    void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
     QLineEdit* editAP, * editBL, * editCP, * editCSC, * editUserData;
     QLineEdit* editTarget, * editGetPit, * editSetPit;
@@ -26,4 +27,7 @@ private:
     QPushButton* btnRun, * btnConnected;
     QTextEdit* consoleOutput;
     QProcess* process;
+    QList<QLineEdit*> comBoxes;
+    QProcess* pollProcess;
+	QTimer* deviceTimer;
 };

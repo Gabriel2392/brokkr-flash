@@ -30,6 +30,10 @@ int main(int argc, char **argv) {
   try {
     auto opt = brokkr::app::parse_cli(argc, argv);
 
+    if (opt._no_args) {
+		spdlog::error("No arguments provided. Use --help to see usage.");
+		return EXIT_FAILURE;
+    }
     if (opt.help) {
       spdlog::info(brokkr::app::usage_text());
       return EXIT_SUCCESS;
