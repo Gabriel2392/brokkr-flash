@@ -35,6 +35,9 @@
 
 namespace brokkr::macos {
 
+// sysfs_usb.cpp
+extern io_service_t find_device_by_location(std::uint32_t locationID);
+
 namespace {
 
 [[noreturn]] static void throw_iokit(const char *what, kern_return_t kr) {
@@ -44,27 +47,6 @@ namespace {
 
 static std::uint32_t parse_location_id(const std::string &s) {
   return static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
-}
-
-static io_service_t find_usb_device_by_location(std::uint32_t locationID) {
-  const char *classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
-  for (const char *cls : classNames) {
-    CFMutableDictionaryRef dict = IOServiceMatching(cls);
-    if (!dict)
-      continue;
-
-    SInt32 loc = static_cast<SInt32>(locationID);
-    CFNumberRef locRef =
-        CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &loc);
-    CFDictionarySetValue(dict, CFSTR("locationID"), locRef);
-    CFRelease(locRef);
-
-    io_service_t service =
-        IOServiceGetMatchingService(kIOMainPortDefault, dict);
-    if (service)
-      return service;
-  }
-  return 0;
 }
 
 } // namespace
@@ -102,7 +84,7 @@ void UsbFsDevice::open_and_init() {
   close();
 
   const std::uint32_t locationID = parse_location_id(devnode_);
-  io_service_t service = find_usb_device_by_location(locationID);
+  io_service_t service = find_device_by_location(locationID);
   if (!service) {
     throw std::runtime_error("USB device not found at location: " + devnode_);
   }
