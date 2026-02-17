@@ -5,10 +5,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
-
 # Include spdlog as a dependency using FetchContent
 include(FetchContent)
 FetchContent_Declare(
@@ -64,8 +60,6 @@ if (NOT HAS_BYTESWAP)
     message(FATAL_ERROR "Compiler does not support __cpp_lib_byteswap, which is required")
 endif()
 
-find_package(Qt6 6.3 COMPONENTS Core Gui Widgets REQUIRED)
-
 # Platform-specific source files and definitions
 if (LINUX)
     add_compile_definitions(
@@ -103,10 +97,11 @@ elseif (APPLE)
     target_sources(brokkr-platform INTERFACE
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
-        src/platform/posix-common/tcp_transport.cpp
+        src/platform/posix-common/tcp_transport.cpp      
         src/platform/macos/sysfs_usb.cpp
         src/platform/macos/usbfs_device.cpp
         src/platform/macos/usbfs_conn.cpp
+        
     )
     target_link_libraries(brokkr-platform INTERFACE
         "-framework IOKit"
@@ -135,122 +130,128 @@ target_sources(brokkr-lib INTERFACE
     src/protocol/odin/flash.cpp
     src/protocol/odin/group_flasher.cpp
     src/protocol/odin/pit_transfer.cpp
-
+    
+    # Moved from executable to lib as per new file
     src/app/md5_verify.cpp
 )
 
-if (WIN32)
-    add_executable(brokkr WIN32
-        src-gui/main_gui.cpp
-        src-gui/brokkr_wrapper.cpp
-        assets/icon.rc
-    )
-else()
-    add_executable(brokkr
-        src-gui/main_gui.cpp
-        src-gui/brokkr_wrapper.cpp
-    )
-endif()
+# Qt6 Detection (Old style: Optional, prevents configuration error if missing)
+find_package(Qt6 6.3 COMPONENTS Core Gui Widgets)
 
-find_package(Threads REQUIRED)
-target_include_directories(brokkr PRIVATE src src-gui src/lz4)
-target_link_libraries(brokkr PRIVATE
-    Threads::Threads
-    spdlog::spdlog_header_only
-    fmt::fmt-header-only
-    brokkr-platform
-    brokkr-lib
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-)
-
-if (MSVC)
-    target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
-endif()
-
-# If not Windows, and using GCC or Clang, and building in Release or RelWithDebInfo mode, enable some optimizations and large file support
-if (
-    NOT WIN32
-    AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
-    AND CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo"
-)
-    target_compile_definitions(brokkr PRIVATE
-        _FILE_OFFSET_BITS=64
-        _LARGEFILE_SOURCE
-    )
-
-    if (NOT CMAKE_CROSSCOMPILING)
-      target_compile_options(brokkr PRIVATE -march=native -mtune=native)
-    endif()
-
-    target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
-endif()
-
-# Enable LTO if supported by the compiler and in Release or RelWithDebInfo mode
-if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT LTO_SUPPORTED)
-    if (LTO_SUPPORTED)
-        message(STATUS "Enabling LTO (Link time optimization)")
-        set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-        set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-        set_target_properties(brokkr-lib PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endif()
-endif()
-
-# Versioning
-set(BROKKR_BUILD_TYPE)
-set(BROKKR_BUILD_TYPE_dbg "dbg")
-set(BROKKR_BUILD_TYPE_rel "rel")
-
-if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_dbg})
-else()
-  set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_rel})
-endif()
-
-execute_process(
-  COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  OUTPUT_VARIABLE BROKKR_COMMIT_COUNT
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_QUIET
-)
-if(NOT BROKKR_COMMIT_COUNT)
-  set(BROKKR_COMMIT_COUNT "0")
-endif()
-
-message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${BROKKR_BUILD_TYPE}")
-target_compile_definitions(brokkr PRIVATE
-  BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
-  BROKKR_BUILD_TYPE=\"${BROKKR_BUILD_TYPE}\"
-  BROKKR_VERSION=\"${PROJECT_VERSION}\"
-)
-
-if(WIN32)
-    get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
-    get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
-    find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
-
-    if(WINDEPLOYQT_EXEC)
-        add_custom_command(TARGET brokkr POST_BUILD
-            COMMAND "${WINDEPLOYQT_EXEC}"
-            ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr>"
-            COMMENT "Running windeployqt to deploy Qt libraries..."
+if (Qt6_FOUND)
+    message(STATUS "Qt6 found, enabling GUI target 'brokkr'")
+    
+    # New Target Files: GUI Sources defined as 'brokkr'
+    if (WIN32)
+        add_executable(brokkr WIN32 
+            src-gui/main_gui.cpp 
+            src-gui/brokkr_wrapper.cpp
+            assets/icon.rc
         )
     else()
-        message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
+        add_executable(brokkr 
+            src-gui/main_gui.cpp 
+            src-gui/brokkr_wrapper.cpp
+        )
     endif()
+
+    find_package(Threads REQUIRED)
+    target_include_directories(brokkr PRIVATE src src-gui src/lz4)
+    target_link_libraries(brokkr PRIVATE 
+        Threads::Threads 
+        spdlog::spdlog_header_only 
+        fmt::fmt-header-only 
+        brokkr-platform 
+        brokkr-lib
+        Qt6::Core 
+        Qt6::Gui 
+        Qt6::Widgets
+    )
+
+    if (MSVC)
+        target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
+    endif()
+
+    if(WIN32)
+        get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
+        get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
+        find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
+
+        if(WINDEPLOYQT_EXEC)
+            add_custom_command(TARGET brokkr POST_BUILD
+                COMMAND "${WINDEPLOYQT_EXEC}"
+                ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr>"
+                COMMENT "Running windeployqt to deploy Qt libraries..."
+            )
+        else()
+            message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
+        endif()
+    endif()
+
+    # Optimization block from Old file, applied to brokkr
+    if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
+        target_compile_definitions(brokkr PRIVATE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+        if (NOT CMAKE_CROSSCOMPILING)
+             target_compile_options(brokkr PRIVATE -march=native -mtune=native)
+        endif()
+        target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
+    endif()
+
+    # LTO block
+    if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT LTO_SUPPORTED)
+        if (LTO_SUPPORTED)
+            message(STATUS "Enabling LTO (Link time optimization)")
+            set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_target_properties(brokkr-lib PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        endif()
+    endif()
+
+    # Versioning
+    set(BROKKR_BUILD_TYPE)
+    set(BROKKR_BUILD_TYPE_dbg "dbg")
+    set(BROKKR_BUILD_TYPE_rel "rel")
+
+    if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+      set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_dbg})
+    else()
+      set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_rel})
+    endif()
+
+    execute_process(
+      COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      OUTPUT_VARIABLE BROKKR_COMMIT_COUNT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(NOT BROKKR_COMMIT_COUNT)
+      set(BROKKR_COMMIT_COUNT "0")
+    endif()
+
+    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${BROKKR_BUILD_TYPE}")
+    target_compile_definitions(brokkr PRIVATE
+      BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
+      BROKKR_BUILD_TYPE=\"${BROKKR_BUILD_TYPE}\"
+      BROKKR_VERSION=\"${PROJECT_VERSION}\"
+    )
+
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTOUIC ON)
+    set(CMAKE_AUTORCC ON)
+
+    # Install rules
+    install(TARGETS brokkr RUNTIME DESTINATION bin)
+
+else()
+    message(WARNING "Qt6 NOT FOUND. The 'brokkr' target (now GUI-based) cannot be built.")
+    message(NOTICE "To fix this, ensure Qt6 is installed and CMAKE_PREFIX_PATH is set correctly.")
 endif()
 
-# Install rules
-install(TARGETS brokkr
-    RUNTIME DESTINATION bin
-)
 
-# Packaging with CPack
-
+# Packaging with CPack (Old Config)
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open-Source Implementation of Samsung Odin3")
@@ -263,6 +264,7 @@ set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/assets/INSTALLER_README.txt)
 set(CPACK_RESOURCE_FILE_WELCOME ${CMAKE_SOURCE_DIR}/assets/INSTALLER_WELCOME.txt)
 
 if(WIN32)
+  # NSIS
   list(APPEND CPACK_GENERATOR NSIS)
   set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
   set(CPACK_NSIS_MUI_ICON ${CMAKE_SOURCE_DIR}/assets/brokkr.ico)
@@ -274,6 +276,7 @@ if(WIN32)
 endif()
 
 if (LINUX)
+  # DEB
   list(APPEND CPACK_GENERATOR DEB)
   set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soo Hwan Na <roynatech@gmail.com>")
   set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
@@ -281,8 +284,9 @@ if (LINUX)
   set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME
+set(CPACK_PACKAGE_FILE_NAME 
     "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
 )
 
+# Include CPack
 include(CPack)

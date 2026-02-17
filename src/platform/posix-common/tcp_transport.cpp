@@ -220,7 +220,7 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
     return brokkr::core::Status::Failf("listen: {}", std::strerror(e));
   }
 
-  spdlog::info("TcpListener: listening on {}:{}", bind_ip_, port_);
+  spdlog::debug("TcpListener: listening on {}:{}", bind_ip_, port_);
   return brokkr::core::Status::Ok();
 }
 
@@ -263,7 +263,7 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
       }
 
       const std::uint16_t p = ntohs(peer.sin_port);
-      spdlog::info("TcpListener: accepted {}:{}", ip, p);
+      spdlog::debug("TcpListener: accepted {}:{}", ip, p);
       return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
     }
 

@@ -18,7 +18,6 @@
 #include "protocol/odin/group_flasher.hpp"
 
 #include "core/prefetcher.hpp"
-#include "core/thread_pool.hpp"
 #include "io/lz4_frame.hpp"
 #include "protocol/odin/pit_transfer.hpp"
 
@@ -43,24 +42,27 @@ namespace {
 
 using u64 = std::uint64_t;
 
-struct StopFirstError {
+struct FirstError {
   std::mutex m;
   bool has = false;
   brokkr::core::Status st{};
-  std::atomic_bool stop{false};
 
   void set(brokkr::core::Status s) noexcept {
     if (s.ok) return;
-    stop.store(true, std::memory_order_relaxed);
     std::lock_guard lk(m);
     if (has) return;
     has = true;
     st = std::move(s);
   }
 
-  brokkr::core::Status status() noexcept {
+  brokkr::core::Status status_or_ok() noexcept {
     std::lock_guard lk(m);
     return has ? st : brokkr::core::Status::Ok();
+  }
+
+  bool has_error() noexcept {
+    std::lock_guard lk(m);
+    return has;
   }
 };
 
@@ -175,7 +177,8 @@ static brokkr::core::Status send_prefetched(PF& pf,
                                             u64& overall_done,
                                             u64& item_done,
                                             const Ui& ui,
-                                            StopFirstError& err,
+                                            std::atomic_uint32_t& failed_count,
+                                            const std::size_t ndevs,
                                             MakeContrib make_contrib) noexcept
 {
   const u64 pkt64 = static_cast<u64>(pkt);
@@ -187,7 +190,7 @@ static brokkr::core::Status send_prefetched(PF& pf,
   };
 
   for (;;) {
-    if (err.stop.load(std::memory_order_relaxed)) break;
+    if (failed_count.load(std::memory_order_relaxed) >= ndevs) break;
 
     auto lease = pf.next();
     if (!lease) break;
@@ -200,7 +203,7 @@ static brokkr::core::Status send_prefetched(PF& pf,
     auto contrib = make_contrib(w, packets);
 
     for (u64 p = 0; p < packets; ++p) {
-      if (err.stop.load(std::memory_order_relaxed)) break;
+      if (failed_count.load(std::memory_order_relaxed) >= ndevs) break;
 
       emit(st_data(comp, w.data(), p * pkt64, pkt));
       const u64 add = contrib(p);
@@ -211,12 +214,32 @@ static brokkr::core::Status send_prefetched(PF& pf,
     }
 
     emit(st_end(comp, w.end, part_id, dev_type, w.last));
-    if (w.last || err.stop.load(std::memory_order_relaxed)) break;
+    if (w.last || (failed_count.load(std::memory_order_relaxed) >= ndevs)) break;
   }
 
   auto pst = pf.status();
   if (!pst.ok) return pst;
   return brokkr::core::Status::Ok();
+}
+
+static void log_summary(std::size_t total, std::size_t failed) {
+  const std::size_t ok = (failed <= total) ? (total - failed) : 0;
+  const std::size_t bad = (failed <= total) ? failed : total;
+  spdlog::info("{} threads succeeded, {} failed.", ok, bad);
+}
+
+static void log_shutdown_action(OdinCommands::ShutdownMode m) {
+  if (m == OdinCommands::ShutdownMode::ReDownload) { spdlog::info("Re-download"); return; }
+  if (m == OdinCommands::ShutdownMode::Reboot) { spdlog::info("Reset"); return; }
+  spdlog::info("No Reboot");
+}
+
+static void log_speed(bool enhanced) {
+  spdlog::info("Speed: {}", enhanced ? "Enhanced" : "Normal");
+}
+
+static void emit_devfail(const Ui& ui, std::size_t orig_idx, const std::string& msg) {
+  if (ui.on_error) ui.on_error("DEVFAIL idx=" + std::to_string(orig_idx) + " " + msg);
 }
 
 } // namespace
@@ -231,24 +254,65 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
   if (devs.empty()) return brokkr::core::Status::Fail("flash: no devices");
   for (auto* d : devs) if (!d || !d->link || !d->link->connected()) return brokkr::core::Status::Fail("flash: transport not connected");
 
-  brokkr::core::ThreadPool pool(devs.size());
+  const std::size_t total_devices = devs.size();
+  std::size_t failed_total = 0;
+
+  FirstError first_err;
+  const auto sm_final = shutdown_mode(cfg);
 
   auto stage = [&](std::string_view s) { if (ui.on_stage) ui.on_stage(std::string(s)); };
 
-  auto fanout = [&](auto&& fn) -> brokkr::core::Status {
-    for (auto* d : devs) {
-      auto st = pool.submit([&, d]() -> brokkr::core::Status {
-        if (pool.cancelled()) return brokkr::core::Status::Ok();
-        return fn(*d);
-      });
-      if (!st.ok) return st;
+  std::vector<Target*> active = devs;
+  std::vector<std::size_t> active_idx;
+  active_idx.reserve(devs.size());
+  for (std::size_t i = 0; i < devs.size(); ++i) active_idx.push_back(i);
+
+  auto fanout_keep = [&](auto&& fn) -> brokkr::core::Status {
+    if (active.empty()) return brokkr::core::Status::Fail("No active devices");
+
+    std::vector<brokkr::core::Status> sts(active.size(), brokkr::core::Status::Ok());
+    std::vector<std::jthread> ts;
+    ts.reserve(active.size());
+
+    for (std::size_t i = 0; i < active.size(); ++i) {
+      ts.emplace_back([&, i] { sts[i] = fn(*active[i]); });
     }
-    return pool.wait();
+    for (auto& t : ts) if (t.joinable()) t.join();
+
+    std::vector<Target*> next;
+    std::vector<std::size_t> next_idx;
+    next.reserve(active.size());
+    next_idx.reserve(active.size());
+
+    for (std::size_t i = 0; i < active.size(); ++i) {
+      if (sts[i].ok) {
+        next.push_back(active[i]);
+        next_idx.push_back(active_idx[i]);
+        continue;
+      }
+
+      ++failed_total;
+      first_err.set(sts[i]);
+      emit_devfail(ui, active_idx[i], sts[i].msg);
+    }
+
+    active.swap(next);
+    active_idx.swap(next_idx);
+
+    if (active.empty()) {
+      auto st = first_err.status_or_ok();
+      if (st.ok) st = brokkr::core::Status::Fail("All devices failed");
+      return st;
+    }
+
+    return brokkr::core::Status::Ok();
   };
 
   auto handshake_all = [&] -> brokkr::core::Status {
+    spdlog::info("HANDSHAKE");
     stage(kHandshakeStr);
-    return fanout([&](Target& d) -> brokkr::core::Status {
+
+    return fanout_keep([&](Target& d) -> brokkr::core::Status {
       auto& c = link(d);
       c.set_timeout_ms(cfg.preflash_timeout_ms);
       OdinCommands odin(c);
@@ -265,15 +329,17 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
     });
   };
 
-  auto set_flash_timeout_all = [&] {
-    for (auto* d : devs) link(*d).set_timeout_ms(cfg.flash_timeout_ms);
+  auto set_flash_timeout_active = [&] {
+    for (auto* d : active) link(*d).set_timeout_ms(cfg.flash_timeout_ms);
   };
 
   auto setup_pkt = [&]() -> brokkr::core::Result<std::size_t> {
-    const std::size_t pkt = choose_pkt(devs, cfg);
+    if (active.empty()) return brokkr::core::Result<std::size_t>::Fail("No active devices");
+
+    const std::size_t pkt = choose_pkt(active, cfg);
     stage(kPktFlashStr);
 
-    auto st = fanout([&](Target& d) -> brokkr::core::Status {
+    auto st = fanout_keep([&](Target& d) -> brokkr::core::Status {
       if (d.proto < ProtocolVersion::PROTOCOL_VER2) return brokkr::core::Status::Ok();
       auto& c = link(d);
       c.set_timeout_ms(cfg.preflash_timeout_ms);
@@ -281,22 +347,26 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
     });
     if (!st.ok) return brokkr::core::Result<std::size_t>::Fail(std::move(st.msg));
 
-    set_flash_timeout_all();
+    set_flash_timeout_active();
     return brokkr::core::Result<std::size_t>::Ok(pkt);
   };
 
   auto pit_upload_all = [&]() -> brokkr::core::Status {
     if (!pit_to_upload || pit_to_upload->empty()) return brokkr::core::Status::Ok();
+    spdlog::info("Uploading PIT");
     stage(kPitUpStr);
-    return fanout([&](Target& d) -> brokkr::core::Status {
+
+    return fanout_keep([&](Target& d) -> brokkr::core::Status {
       return OdinCommands(link(d)).set_pit({pit_to_upload->data(), pit_to_upload->size()}, cfg.preflash_retries);
     });
   };
 
   auto pit_download_all = [&]() -> brokkr::core::Status {
+    spdlog::info("Get PIT for mapping");
     stage(kPitDlStr);
-    set_flash_timeout_all();
-    return fanout([&](Target& d) -> brokkr::core::Status {
+    set_flash_timeout_active();
+
+    return fanout_keep([&](Target& d) -> brokkr::core::Status {
       OdinCommands odin(link(d));
       auto br = download_pit_bytes(odin);
       if (!br) return brokkr::core::Status::Fail(std::move(br.st.msg));
@@ -312,36 +382,40 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
   };
 
   auto cpu_bl_id_check = [&]() -> brokkr::core::Status {
-    if (devs.empty()) return brokkr::core::Status::Ok();
-    if (devs.size() > 1) {
+    if (active.empty()) return brokkr::core::Status::Fail("No active devices");
+
+    if (active.size() > 1) {
       stage(kCpuCheck);
-      const std::string ref = devs.front()->pit_table.cpu_bl_id;
+      const std::string ref = active.front()->pit_table.cpu_bl_id;
       if (ref.empty()) return brokkr::core::Status::Fail("PIT cpu_bl_id missing");
-      for (auto* d : devs) if (d->pit_table.cpu_bl_id != ref) return brokkr::core::Status::Fail("cpu_bl_id mismatch across devices");
+      for (auto* d : active) if (d->pit_table.cpu_bl_id != ref) return brokkr::core::Status::Fail("cpu_bl_id mismatch across devices");
       if (ui.on_model) ui.on_model(ref);
     } else {
-      if (ui.on_model) ui.on_model(devs.front()->pit_table.cpu_bl_id);
+      if (ui.on_model) ui.on_model(active.front()->pit_table.cpu_bl_id);
     }
     return brokkr::core::Status::Ok();
   };
 
-  auto shutdown_all = [&]() -> brokkr::core::Status {
-    const auto sm = shutdown_mode(cfg);
-    stage(final_stage(sm));
-    return fanout([&](Target& d) -> brokkr::core::Status {
-      return OdinCommands(link(d)).shutdown(sm);
+  auto shutdown_active = [&]() -> brokkr::core::Status {
+    log_shutdown_action(sm_final);
+    stage(final_stage(sm_final));
+
+    return fanout_keep([&](Target& d) -> brokkr::core::Status {
+      return OdinCommands(link(d)).shutdown(sm_final);
     });
   };
 
   if (mode == Mode::PitSetOnly) {
     if (!pit_to_upload || pit_to_upload->empty()) return brokkr::core::Status::Fail("PitSetOnly requires non-empty pit_to_upload");
 
-    BRK_TRY(handshake_all());
+    auto st = handshake_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+
     auto pktr = setup_pkt();
-    if (!pktr) return brokkr::core::Status::Fail(std::move(pktr.st.msg));
+    if (!pktr) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail(std::move(pktr.st.msg)); }
 
     auto pr = pit::parse({pit_to_upload->data(), pit_to_upload->size()});
-    if (!pr) return brokkr::core::Status::Fail(std::move(pr.st.msg));
+    if (!pr) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail(std::move(pr.st.msg)); }
     if (ui.on_model) ui.on_model(pr.value.cpu_bl_id);
 
     if (ui.on_plan) {
@@ -354,7 +428,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
       ui.on_progress(0, n, 0, n);
     }
 
-    BRK_TRY(pit_upload_all());
+    st = pit_upload_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
 
     if (ui.on_progress) {
       const auto n = static_cast<u64>(pit_to_upload->size());
@@ -362,50 +437,80 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
     }
     if (ui.on_item_done) ui.on_item_done(0);
 
-    BRK_TRY(shutdown_all());
+    st = shutdown_active();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+
     if (ui.on_done) ui.on_done();
-    return brokkr::core::Status::Ok();
+    log_summary(total_devices, failed_total);
+    return (failed_total > 0) ? first_err.status_or_ok() : brokkr::core::Status::Ok();
   }
 
   if (mode == Mode::RebootOnly) {
-    BRK_TRY(handshake_all());
-    BRK_TRY(pit_download_all());
+    auto st = handshake_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+
+    st = pit_download_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
 
     stage(kRebooting);
-    BRK_TRY(fanout([&](Target& d) -> brokkr::core::Status {
-      return OdinCommands(link(d)).shutdown(cfg.reboot_after ? OdinCommands::ShutdownMode::Reboot
-                                                            : OdinCommands::ShutdownMode::NoReboot);
-    }));
+
+    OdinCommands::ShutdownMode m = cfg.reboot_after ? OdinCommands::ShutdownMode::Reboot
+                                                    : OdinCommands::ShutdownMode::NoReboot;
+    log_shutdown_action(m);
+
+    st = fanout_keep([&](Target& d) -> brokkr::core::Status {
+      return OdinCommands(link(d)).shutdown(m);
+    });
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
 
     if (ui.on_done) ui.on_done();
-    return brokkr::core::Status::Ok();
+    log_summary(total_devices, failed_total);
+    return (failed_total > 0) ? first_err.status_or_ok() : brokkr::core::Status::Ok();
   }
 
   if (sources.empty()) return brokkr::core::Status::Fail("flash: no sources");
 
-  BRK_TRY(handshake_all());
+  {
+    auto st = handshake_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+  }
+
   auto pktr = setup_pkt();
-  if (!pktr) return brokkr::core::Status::Fail(std::move(pktr.st.msg));
+  if (!pktr) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail(std::move(pktr.st.msg)); }
   const std::size_t pkt = pktr.value;
 
   const bool has_pit = pit_to_upload && !pit_to_upload->empty();
-  if (has_pit) BRK_TRY(pit_upload_all());
-  BRK_TRY(pit_download_all());
-  BRK_TRY(cpu_bl_id_check());
 
+  if (has_pit) {
+    auto st = pit_upload_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+  }
+
+  {
+    auto st = pit_download_all();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+  }
+
+  {
+    auto st = cpu_bl_id_check();
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+  }
+
+  spdlog::info("Verifying PIT mapping");
   stage(kMapCheck);
-  auto effr = sources_common_mapping_or_empty(devs, sources);
-  if (!effr) return brokkr::core::Status::Fail(std::move(effr.st.msg));
+
+  auto effr = sources_common_mapping_or_empty(active, sources);
+  if (!effr) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail(std::move(effr.st.msg)); }
   const auto effective_sources = std::move(effr.value);
 
-  auto itemsr = map_to_pit(devs.front()->pit_table, effective_sources);
-  if (!itemsr) return brokkr::core::Status::Fail(std::move(itemsr.st.msg));
+  auto itemsr = map_to_pit(active.front()->pit_table, effective_sources);
+  if (!itemsr) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail(std::move(itemsr.st.msg)); }
   const auto& items = itemsr.value;
 
   u64 total = 0;
   for (const auto& it : items) {
     auto st = detail::checked_add_u64(total, it.spec.size, "TOTALSIZE");
-    if (!st.ok) return st;
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
   }
 
   std::vector<PlanItem> plan;
@@ -427,18 +532,30 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
   if (ui.on_plan) ui.on_plan(plan, total);
 
   stage(kTotalSend);
-  BRK_TRY(fanout([&](Target& d) -> brokkr::core::Status {
-    return OdinCommands(link(d)).send_total_size(total, d.proto, cfg.preflash_retries);
-  }));
+  {
+    auto st = fanout_keep([&](Target& d) -> brokkr::core::Status {
+      return OdinCommands(link(d)).send_total_size(total, d.proto, cfg.preflash_retries);
+    });
+    if (!st.ok) { log_summary(total_devices, total_devices); return st; }
+  }
+
+  spdlog::info("Flashing has begun!");
 
   const bool use_lz4 = any_lz4(effective_sources) &&
-    std::all_of(devs.begin(), devs.end(), [](Target* d){ return d->init.supports_compressed_download(); });
+    std::all_of(active.begin(), active.end(), [](Target* d){ return d->init.supports_compressed_download(); });
 
+  log_speed(use_lz4);
   stage(use_lz4 ? kFlashFast : kFlashNorm);
 
+  const std::size_t ndevs = active.size();
+  if (ndevs == 0) { log_summary(total_devices, total_devices); return brokkr::core::Status::Fail("No active devices"); }
+
   Step cur{};
-  std::barrier sync(static_cast<std::ptrdiff_t>(devs.size() + 1));
-  StopFirstError berr;
+  std::barrier sync(static_cast<std::ptrdiff_t>(ndevs + 1));
+  FirstError berr;
+  std::atomic_uint32_t failed_count{0};
+
+  std::vector<std::uint8_t> dead(ndevs, 0);
 
   auto exec = [&](OdinCommands& odin, const Step& s) -> brokkr::core::Status {
     if (s.op == Step::Op::Begin) {
@@ -460,21 +577,30 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
   };
 
   std::vector<std::jthread> workers;
-  workers.reserve(devs.size());
+  workers.reserve(ndevs);
 
-  for (auto* d : devs) {
-    workers.emplace_back([&, d](std::stop_token st) {
+  for (std::size_t i = 0; i < ndevs; ++i) {
+    auto* d = active[i];
+    const std::size_t orig = active_idx[i];
+
+    workers.emplace_back([&, d, i, orig](std::stop_token st) {
       OdinCommands odin(link(*d));
-      bool dead = false;
+      bool dead_local = false;
 
       for (;;) {
         sync.arrive_and_wait();
         const Step s = cur;
 
         const bool quit = (s.op == Step::Op::Quit) || st.stop_requested();
-        if (!quit && !dead) {
+        if (!quit && !dead_local) {
           auto rst = exec(odin, s);
-          if (!rst.ok) { berr.set(std::move(rst)); dead = true; }
+          if (!rst.ok) {
+            dead[i] = 1;
+            failed_count.fetch_add(1, std::memory_order_relaxed);
+            berr.set(rst);
+            emit_devfail(ui, orig, rst.msg);
+            dead_local = true;
+          }
         }
 
         sync.arrive_and_wait();
@@ -500,10 +626,15 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
     }
 
     for (std::size_t idx = 0; idx < items.size(); ++idx) {
-      if (berr.stop.load(std::memory_order_relaxed)) break;
+      if (failed_count.load(std::memory_order_relaxed) >= ndevs) break;
 
       const auto& item = items[idx];
       const std::size_t plan_idx = plan_off + idx;
+
+      if (plan_idx < plan.size()) {
+        const auto& pi = plan[plan_idx];
+        if (pi.kind == PlanItem::Kind::Part) spdlog::info("{} -> {}", pi.pit_file_name, pi.part_name);
+      }
 
       if (ui.on_item_active) ui.on_item_active(plan_idx);
 
@@ -573,7 +704,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
 
         auto st = send_prefetched(
           pf, sync, cur, pkt, true, item.part.id, item.part.dev_type, total, item_total,
-          overall_done, item_done, ui, berr,
+          overall_done, item_done, ui, failed_count, ndevs,
           [&](const Slot& w, u64 packets) {
             return [end=w.end, packets](u64 p) {
               const auto c1 = ((p + 1) * end) / packets;
@@ -651,7 +782,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
 
         auto st = send_prefetched(
           pf, sync, cur, pkt, false, item.part.id, item.part.dev_type, total, item_total,
-          overall_done, item_done, ui, berr,
+          overall_done, item_done, ui, failed_count, ndevs,
           [&](const Slot& w, u64 /*packets*/) {
             u64 rem2 = w.end;
             const u64 pkt64 = static_cast<u64>(pkt);
@@ -672,15 +803,44 @@ brokkr::core::Status flash(std::vector<Target*>& devs,
   };
 
   auto cst = coordinator();
-  if (!cst.ok) berr.set(std::move(cst));
+  if (!cst.ok) berr.set(cst);
 
   emit({.op=Step::Op::Quit});
   for (auto& t : workers) if (t.joinable()) t.join();
 
-  auto fst = berr.status();
-  if (!fst.ok) return fst;
+  const std::size_t bad_in_flash = static_cast<std::size_t>(failed_count.load(std::memory_order_relaxed));
+  failed_total += bad_in_flash;
+  if (bad_in_flash) first_err.set(berr.status_or_ok());
 
-  BRK_TRY(shutdown_all());
+  {
+    std::vector<Target*> survivors;
+    std::vector<std::size_t> survivors_idx;
+    survivors.reserve(active.size());
+    survivors_idx.reserve(active.size());
+
+    for (std::size_t i = 0; i < active.size(); ++i) {
+      if (!dead[i]) {
+        survivors.push_back(active[i]);
+        survivors_idx.push_back(active_idx[i]);
+      }
+    }
+
+    active.swap(survivors);
+    active_idx.swap(survivors_idx);
+  }
+
+  if (!active.empty()) {
+    auto st = shutdown_active();
+    if (!st.ok) {
+      first_err.set(st);
+      for (auto idx : active_idx) emit_devfail(ui, idx, st.msg);
+      failed_total += active.size();
+    }
+  }
+
+  log_summary(total_devices, failed_total);
+
+  if (failed_total > 0 || first_err.has_error()) return first_err.status_or_ok();
   if (ui.on_done) ui.on_done();
   return brokkr::core::Status::Ok();
 }

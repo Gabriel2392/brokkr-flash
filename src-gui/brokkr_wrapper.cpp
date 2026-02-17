@@ -1,5 +1,6 @@
 #include "brokkr_wrapper.hpp"
 
+#include <QSet>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -21,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -54,11 +56,6 @@
 #include <windows.h>
 #include <dbt.h>
 #endif
-
-QColor kColBlue  = QColor(0, 122, 255);
-QColor kColGreen = QColor(0, 190, 90);
-QColor kColCyan  = QColor(0, 210, 220);
-QColor kColRed   = QColor(220, 40, 40);
 
 class DeviceSquare final : public QWidget {
 public:
@@ -126,6 +123,7 @@ public:
         }
         update();
     }
+
     void setText(const QString& s) { text_ = s; update(); }
 
 protected:
@@ -160,6 +158,7 @@ protected:
                 if (fm.height() <= (r.height() - 2)) break;
             }
             if (pt < 6) f.setPointSize(6);
+
             p.setFont(f);
             p.setPen(textCol_);
 
@@ -197,6 +196,15 @@ static QString htmlEsc(const QString& s) {
     return s.toHtmlEscaped();
 }
 
+static QString human_bytes(std::uint64_t b) {
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    double v = static_cast<double>(b);
+    int u = 0;
+    while (v >= 1024.0 && u < 4) { v /= 1024.0; ++u; }
+    const int prec = (u == 0) ? 0 : 1;
+    return QString("%1 %2").arg(v, 0, 'f', prec).arg(units[u]);
+}
+
 template <class Mutex>
 class QtTextSink final : public spdlog::sinks::base_sink<Mutex> {
 public:
@@ -210,6 +218,9 @@ protected:
         QString line = QString::fromUtf8(formatted.data(), static_cast<int>(formatted.size()));
         while (!line.isEmpty() && (line.endsWith('\n') || line.endsWith('\r'))) line.chop(1);
         if (line.isEmpty()) return;
+
+        const int z = w_ ? w_->logDeviceCountForLog() : 0;
+        line = QString("<%1> %2").arg(z).arg(line);
 
         QMetaObject::invokeMethod(w_, "appendLogLineFromEngine",
                                   Qt::QueuedConnection,
@@ -562,8 +573,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     bottomLayout->addStretch();
     bottomLayout->addWidget(btnPrintPit);
     bottomLayout->addSpacing(10);
-    bottomLayout->addWidget(btnRun, 0, Qt::AlignBottom);
-    bottomLayout->addSpacing(10);
 
     auto* resetColWidget = new QWidget(this);
     auto* resetColLayout = new QVBoxLayout(resetColWidget);
@@ -572,6 +581,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     resetColLayout->addWidget(btnManyDevices_);
     resetColLayout->addWidget(btnReset_);
     bottomLayout->addWidget(resetColWidget, 0, Qt::AlignBottom);
+
+    bottomLayout->addSpacing(10);
+    bottomLayout->addWidget(btnRun, 0, Qt::AlignBottom);
 
     mainLayout->addLayout(bottomLayout);
 
@@ -593,6 +605,8 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         editPit->clear();
         chkUsePit->setChecked(false);
         cmbRebootAction->setCurrentIndex(0);
+
+        slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 
         setSquaresText_("");
         setSquaresProgress_(0.0, false);
@@ -685,26 +699,66 @@ void BrokkrWrapper::requestUsbRefresh_() noexcept {
 }
 
 void BrokkrWrapper::refreshConnectedDevices_() {
-    QStringList out;
+    QStringList shown;
+    QStringList physicalUsb;
 
-    const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
-    if (!tgt.isEmpty()) {
-        auto info = brokkr::platform::find_by_sysname(tgt.toStdString());
-        if (info) out << QString::fromStdString(info->sysname);
-    } else {
-        for (const auto& d : enumerate_targets()) out << QString::fromStdString(d.sysname);
-    }
+    for (const auto& d : enumerate_targets()) physicalUsb << QString::fromStdString(d.sysname);
 
+    bool physicalWireless = false;
+    QString physicalWirelessId;
     {
         std::lock_guard lk(wireless_mtx_);
         const bool wantWireless = (chkWireless && chkWireless->isChecked());
         if (wantWireless) {
-            if (wireless_conn_ && wireless_conn_->connected() && !wireless_sysname_.isEmpty()) out.prepend(wireless_sysname_);
-            else { wireless_conn_.reset(); wireless_sysname_.clear(); }
+            if (wireless_conn_ && wireless_conn_->connected() && !wireless_sysname_.isEmpty()) {
+                physicalWireless = true;
+                physicalWirelessId = wireless_sysname_;
+            } else {
+                wireless_conn_.reset();
+                wireless_sysname_.clear();
+            }
         }
     }
 
-    connectedDevices_ = out;
+    const int physicalCount = physicalUsb.size() + (physicalWireless ? 1 : 0);
+    logDevCount_.store(physicalCount, std::memory_order_relaxed);
+
+    {
+        const QSet<QString> prev = QSet<QString>(physicalUsbPrev_.begin(), physicalUsbPrev_.end());
+        const QSet<QString> now  = QSet<QString>(physicalUsb.begin(), physicalUsb.end());
+
+        for (const auto& s : now) {
+            if (!prev.contains(s)) spdlog::info("Connected: {}", s.toStdString());
+        }
+        for (const auto& s : prev) {
+            if (!now.contains(s)) spdlog::info("Disconnected: {}", s.toStdString());
+        }
+
+        if (physicalWirelessPrev_ && (!physicalWireless || physicalWirelessIdPrev_ != physicalWirelessId)) {
+            if (!physicalWirelessIdPrev_.isEmpty()) spdlog::info("Disconnected: {}", physicalWirelessIdPrev_.toStdString());
+        }
+        if (physicalWireless && (!physicalWirelessPrev_ || physicalWirelessIdPrev_ != physicalWirelessId)) {
+            if (!physicalWirelessId.isEmpty()) spdlog::info("Connected: {}", physicalWirelessId.toStdString());
+        }
+
+        physicalUsbPrev_ = physicalUsb;
+        physicalWirelessPrev_ = physicalWireless;
+        physicalWirelessIdPrev_ = physicalWirelessId;
+    }
+
+    const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
+    if (!tgt.isEmpty()) {
+        auto info = brokkr::platform::find_by_sysname(tgt.toStdString());
+        if (info) shown << QString::fromStdString(info->sysname);
+    } else {
+        shown = physicalUsb;
+    }
+
+    if (physicalWireless) shown.prepend(physicalWirelessId);
+
+    if (busy_) return;
+
+    connectedDevices_ = shown;
     refreshDeviceBoxes_();
     updateActionButtons_();
 }
@@ -756,12 +810,12 @@ void BrokkrWrapper::startWirelessListener_() {
                 wireless_sysname_ = sys;
             }
 
-            QMetaObject::invokeMethod(this, [this]() { requestUsbRefresh_(); }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(this, [this]() { refreshConnectedDevices_(); }, Qt::QueuedConnection);
             return;
         }
     });
 
-    requestUsbRefresh_();
+    refreshConnectedDevices_();
 }
 
 void BrokkrWrapper::stopWirelessListener_() {
@@ -796,7 +850,7 @@ void BrokkrWrapper::appendLogLine_(const QString& html) {
 void BrokkrWrapper::setControlsEnabled_(bool enabled) {
     if (tabWidget_) {
         tabWidget_->setEnabled(true);
-        if (tabWidget_->count() > 0) tabWidget_->setTabEnabled(0, true); // Log tab
+        if (tabWidget_->count() > 0) tabWidget_->setTabEnabled(0, true);
         for (int i = 1; i < tabWidget_->count(); ++i) tabWidget_->setTabEnabled(i, enabled);
         if (!enabled) tabWidget_->setCurrentIndex(0);
     }
@@ -831,36 +885,63 @@ void BrokkrWrapper::setBusy_(bool busy) {
 }
 
 void BrokkrWrapper::setSquaresProgress_(double frac, bool animate) {
-    for (auto* sq : devSquares_) {
+    const int n = devSquares_.size();
+    for (int i = 0; i < n; ++i) {
+        auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         if (animate) sq->setFillAnimated(frac, 120);
         else sq->setFill(frac);
     }
 }
 
 void BrokkrWrapper::setSquaresText_(const QString& s) {
-    for (auto* sq : devSquares_) {
+    const int n = devSquares_.size();
+    for (int i = 0; i < n; ++i) {
+        auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         sq->setText(s);
     }
 }
 
 void BrokkrWrapper::setSquaresActiveColor_(bool enhanced) {
     enhanced_speed_ = enhanced;
-    for (auto* sq : devSquares_) {
+    const int n = devSquares_.size();
+    for (int i = 0; i < n; ++i) {
+        auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         sq->setVariant(enhanced ? DeviceSquare::Variant::Blue : DeviceSquare::Variant::Green);
     }
 }
 
 void BrokkrWrapper::setSquaresFinal_(bool ok) {
-    const auto v = ok
-        ? (enhanced_speed_ ? DeviceSquare::Variant::Green : DeviceSquare::Variant::Blue)
-        : DeviceSquare::Variant::Red;
-    for (auto* sq : devSquares_) {
+    if (!ok) {
+        for (auto* sq : devSquares_) {
+            if (!sq) continue;
+            sq->setVariant(DeviceSquare::Variant::Red);
+            sq->setText("FAIL!");
+            sq->setFillAnimated(1.0, 250);
+        }
+        return;
+    }
+
+    const auto passV = (enhanced_speed_ ? DeviceSquare::Variant::Green : DeviceSquare::Variant::Blue);
+    const int n = devSquares_.size();
+    for (int i = 0; i < n; ++i) {
+        auto* sq = devSquares_[i];
         if (!sq) continue;
-        sq->setVariant(v);
-        sq->setFillAnimated(1.0, 350);
+        const bool failed = (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]);
+        if (failed) {
+            sq->setVariant(DeviceSquare::Variant::Red);
+            sq->setText("FAIL!");
+            sq->setFillAnimated(1.0, 200);
+        } else {
+            sq->setVariant(passV);
+            sq->setText("PASS");
+            sq->setFillAnimated(1.0, 350);
+        }
     }
 }
 
@@ -947,6 +1028,8 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
             for (int col = 1; col < boxCount; ++col) make_cell(0, col);
             for (int col = 0; col < boxCount; ++col) idComLayout_->setColumnStretch(col, 1);
         }
+
+        slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
         return;
     }
 
@@ -957,6 +1040,8 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
         const int col = i % kBoxesColsMany;
         make_cell(row, col);
     }
+
+    slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 }
 
 void BrokkrWrapper::refreshDeviceBoxes_() {
@@ -965,14 +1050,14 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     for (auto* box : comBoxes) {
         box->clear();
         box->setToolTip(QString());
-         box->setStyleSheet(
+        box->setStyleSheet(
             "background: transparent;"
-             "border: 1px solid gray;"
-             "font-size: 9px;"
-             "color: black;"
-             "selection-background-color: transparent;"
-             "selection-color: black;"
-         );
+            "border: 1px solid gray;"
+            "font-size: 9px;"
+            "color: black;"
+            "selection-background-color: transparent;"
+            "selection-color: black;"
+        );
     }
 
     auto elideFor = [&](QLineEdit* box, const QString& s) {
@@ -1148,16 +1233,24 @@ void BrokkrWrapper::onRunClicked() {
 
 void BrokkrWrapper::startWorkStart_() {
     if (busy_) return;
+
+    const QStringList uiDevicesSnapshot = connectedDevices_;
+
     setBusy_(true);
 
     plan_names_.clear();
+    plan_from_names_.clear();
     enhanced_speed_ = false;
+
+    slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 
     setSquaresProgress_(0.0, false);
     setSquaresText_("");
     setSquaresActiveColor_(false);
 
-    worker_ = std::jthread([this](std::stop_token) {
+    worker_ = std::jthread([this, uiDevicesSnapshot](std::stop_token) {
+        const int actionIndex = cmbRebootAction->currentIndex();
+
         auto done_ui = [&] {
             QMetaObject::invokeMethod(this, [this]() {
                 setSquaresText_("PASS");
@@ -1168,8 +1261,10 @@ void BrokkrWrapper::startWorkStart_() {
 
         auto fail_ui = [&](const QString& msg) {
             QMetaObject::invokeMethod(this, [this, msg]() {
-                appendLogLine_(QString("<font color=\"#ff5555\">%1</font>").arg(htmlEsc(msg)));
-                setSquaresText_("FAIL");
+                const int z = logDevCount_.load(std::memory_order_relaxed);
+                appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>")
+                                   .arg(z)
+                                   .arg(htmlEsc(msg)));
                 setSquaresFinal_(false);
                 setBusy_(false);
             }, Qt::QueuedConnection);
@@ -1182,22 +1277,27 @@ void BrokkrWrapper::startWorkStart_() {
         QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
 
         brokkr::odin::Cfg cfg;
-        const int actionIndex = cmbRebootAction->currentIndex();
         cfg.redownload_after = (actionIndex == 1);
         cfg.reboot_after = (actionIndex != 2);
 
         brokkr::odin::Ui ui;
 
         ui.on_plan = [&](const std::vector<brokkr::odin::PlanItem>& p, std::uint64_t) {
-            std::vector<QString> names;
-            names.reserve(p.size());
+            std::vector<QString> parts;
+            std::vector<QString> froms;
+            parts.reserve(p.size());
+            froms.reserve(p.size());
             for (const auto& it : p) {
-                std::string n = it.part_name;
-                if (n.empty() && it.kind == brokkr::odin::PlanItem::Kind::Pit) n = "PIT";
-                names.push_back(QString::fromStdString(n));
+                std::string part = it.part_name;
+                if (part.empty() && it.kind == brokkr::odin::PlanItem::Kind::Pit) part = "PIT";
+                std::string from = it.pit_file_name;
+                if (from.empty()) from = part;
+                parts.push_back(QString::fromStdString(part));
+                froms.push_back(QString::fromStdString(from));
             }
-            QMetaObject::invokeMethod(this, [this, names=std::move(names)]() mutable {
-                plan_names_ = std::move(names);
+            QMetaObject::invokeMethod(this, [this, parts=std::move(parts), froms=std::move(froms)]() mutable {
+                plan_names_ = std::move(parts);
+                plan_from_names_ = std::move(froms);
             }, Qt::QueuedConnection);
         };
 
@@ -1216,7 +1316,8 @@ void BrokkrWrapper::startWorkStart_() {
                 if (qs.contains("handshake", Qt::CaseInsensitive)) setSquaresText_("HANDSHAKE");
                 if (qs.contains("shutdown", Qt::CaseInsensitive) ||
                     qs.contains("reboot", Qt::CaseInsensitive) ||
-                    qs.contains("reset", Qt::CaseInsensitive)) setSquaresText_("RESET");
+                    qs.contains("reset", Qt::CaseInsensitive) ||
+                    qs.contains("finalizing", Qt::CaseInsensitive)) setSquaresText_("RESET");
             }, Qt::QueuedConnection);
         };
 
@@ -1227,7 +1328,48 @@ void BrokkrWrapper::startWorkStart_() {
 
         ui.on_error = [&](const std::string& s) {
             QMetaObject::invokeMethod(this, [this, qs=QString::fromStdString(s)]() {
-                appendLogLine_(QString("<font color=\"#ff5555\">%1</font>").arg(htmlEsc(qs)));
+                const int z = logDevCount_.load(std::memory_order_relaxed);
+
+                QString shown = qs;
+                int idx = -1;
+
+                const QString pref = "DEVFAIL idx=";
+                if (qs.startsWith(pref)) {
+                    int p = pref.size();
+                    int sp = qs.indexOf(' ', p);
+                    if (sp < 0) sp = qs.size();
+                    bool okNum = false;
+                    idx = qs.mid(p, sp - p).toInt(&okNum);
+                    QString reason;
+                    if (sp < qs.size()) reason = qs.mid(sp + 1).trimmed();
+
+                    if (okNum && idx >= 0) {
+                        if (static_cast<std::size_t>(idx) >= slotFailed_.size()) slotFailed_.resize(static_cast<std::size_t>(idx) + 1, 0);
+                        slotFailed_[static_cast<std::size_t>(idx)] = 1;
+
+                        if (idx < devSquares_.size() && devSquares_[idx]) {
+                            devSquares_[idx]->setVariant(DeviceSquare::Variant::Red);
+                            devSquares_[idx]->setText("FAIL!");
+                            devSquares_[idx]->setFill(1.0);
+                        }
+                        if (idx < comBoxes.size() && comBoxes[idx]) {
+                            comBoxes[idx]->setStyleSheet(
+                                "background: transparent;"
+                                "color: black;"
+                                "font-weight: bold;"
+                                "border: 2px solid #b00000;"
+                                "font-size: 9px;"
+                                "selection-background-color: transparent;"
+                                "selection-color: black;"
+                            );
+                        }
+
+                        if (reason.isEmpty()) shown = "FAIL!";
+                        else shown = QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
+                    }
+                }
+
+                appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; %2</font>").arg(z).arg(htmlEsc(shown)));
             }, Qt::QueuedConnection);
         };
 
@@ -1268,7 +1410,7 @@ void BrokkrWrapper::startWorkStart_() {
                 std::vector<brokkr::odin::Target*> devs{&t};
 
                 auto st = brokkr::odin::flash(devs, {}, {}, cfg, ui, brokkr::odin::Mode::RebootOnly);
-                if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+                if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
                 done_ui();
                 requestUsbRefresh_();
                 return;
@@ -1280,7 +1422,11 @@ void BrokkrWrapper::startWorkStart_() {
                 if (!one) { fail_ui("Target sysname not found or not supported."); return; }
                 targets.push_back(*one);
             } else {
-                targets = enumerate_targets();
+                for (const auto& sys : uiDevicesSnapshot) {
+                    auto one = select_target(sys);
+                    if (one) targets.push_back(*one);
+                }
+                if (targets.empty()) targets = enumerate_targets();
             }
 
             if (targets.empty()) { fail_ui("No supported devices found."); return; }
@@ -1297,7 +1443,7 @@ void BrokkrWrapper::startWorkStart_() {
             }
 
             auto st = brokkr::odin::flash(devs, {}, {}, cfg, ui, brokkr::odin::Mode::RebootOnly);
-            if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
 
             done_ui();
             requestUsbRefresh_();
@@ -1317,7 +1463,7 @@ void BrokkrWrapper::startWorkStart_() {
                 std::vector<brokkr::odin::Target*> devs{&t};
 
                 auto st = brokkr::odin::flash(devs, {}, pit_to_upload, cfg, ui, brokkr::odin::Mode::PitSetOnly);
-                if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+                if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
 
                 done_ui();
                 requestUsbRefresh_();
@@ -1330,7 +1476,11 @@ void BrokkrWrapper::startWorkStart_() {
                 if (!one) { fail_ui("Target sysname not found or not supported."); return; }
                 targets.push_back(*one);
             } else {
-                targets = enumerate_targets();
+                for (const auto& sys : uiDevicesSnapshot) {
+                    auto one = select_target(sys);
+                    if (one) targets.push_back(*one);
+                }
+                if (targets.empty()) targets = enumerate_targets();
             }
 
             if (targets.empty()) { fail_ui("No supported devices found."); return; }
@@ -1347,7 +1497,7 @@ void BrokkrWrapper::startWorkStart_() {
             }
 
             auto st = brokkr::odin::flash(devs, {}, pit_to_upload, cfg, ui, brokkr::odin::Mode::PitSetOnly);
-            if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
 
             done_ui();
             requestUsbRefresh_();
@@ -1356,6 +1506,20 @@ void BrokkrWrapper::startWorkStart_() {
 
         auto jobsr = brokkr::app::md5_jobs(inputs);
         if (!jobsr) { fail_ui(QString::fromStdString(jobsr.st.msg)); return; }
+
+        std::uint64_t totalBytes = 0;
+        for (const auto& p : inputs) {
+            std::error_code ec;
+            const auto sz = std::filesystem::file_size(p, ec);
+            if (!ec) totalBytes += static_cast<std::uint64_t>(sz);
+        }
+
+        spdlog::info("MD5 check ({}), Please wait.", human_bytes(totalBytes).toStdString());
+        QMetaObject::invokeMethod(this, [this]() {
+            setSquaresActiveColor_(false);
+            setSquaresText_("MD5");
+            setSquaresProgress_(0.0, false);
+        }, Qt::QueuedConnection);
 
         auto vst = brokkr::app::md5_verify(jobsr.value, ui);
         if (!vst.ok) { fail_ui(QString::fromStdString(vst.msg)); return; }
@@ -1374,6 +1538,8 @@ void BrokkrWrapper::startWorkStart_() {
         for (auto& s : specs.value) if (!is_pit_name(s.basename)) srcs.push_back(std::move(s));
         if (srcs.empty() && !pit_to_upload) { fail_ui("No valid flashable files."); return; }
 
+        QMetaObject::invokeMethod(this, [this]() { setSquaresProgress_(0.0, false); }, Qt::QueuedConnection);
+
         if (wireless) {
             brokkr::platform::TcpConnection* connp = nullptr;
             {
@@ -1386,7 +1552,7 @@ void BrokkrWrapper::startWorkStart_() {
             std::vector<brokkr::odin::Target*> devs{&t};
 
             brokkr::core::Status st = brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, ui, brokkr::odin::Mode::Flash);
-            if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
 
             done_ui();
             requestUsbRefresh_();
@@ -1399,7 +1565,11 @@ void BrokkrWrapper::startWorkStart_() {
             if (!one) { fail_ui("Target sysname not found or not supported."); return; }
             targets.push_back(*one);
         } else {
-            targets = enumerate_targets();
+            for (const auto& sys : uiDevicesSnapshot) {
+                auto one = select_target(sys);
+                if (one) targets.push_back(*one);
+            }
+            if (targets.empty()) targets = enumerate_targets();
         }
 
         if (targets.empty()) { fail_ui("No supported devices found."); return; }
@@ -1416,7 +1586,7 @@ void BrokkrWrapper::startWorkStart_() {
         }
 
         brokkr::core::Status st = brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, ui, brokkr::odin::Mode::Flash);
-        if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
+        if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
 
         done_ui();
         requestUsbRefresh_();
@@ -1426,6 +1596,8 @@ void BrokkrWrapper::startWorkStart_() {
 void BrokkrWrapper::startWorkPrintPit_() {
     if (busy_) return;
     setBusy_(true);
+
+    slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 
     setSquaresProgress_(0.0, false);
     setSquaresText_("PIT");
@@ -1447,7 +1619,6 @@ void BrokkrWrapper::startWorkPrintPit_() {
         auto fail_ui = [&](const QString& msg) {
             QMetaObject::invokeMethod(this, [this, msg]() {
                 appendLogLine_(QString("<font color=\"#ff5555\">%1</font>").arg(htmlEsc(msg)));
-                setSquaresText_("FAIL");
                 setSquaresFinal_(false);
                 setBusy_(false);
             }, Qt::QueuedConnection);

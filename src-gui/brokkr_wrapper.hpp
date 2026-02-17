@@ -16,6 +16,7 @@
 #include <QSlider>
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -25,6 +26,7 @@
 
 class QGridLayout;
 class QGroupBox;
+class QTextEdit;
 class QCloseEvent;
 class QTabWidget;
 
@@ -40,6 +42,8 @@ class BrokkrWrapper : public QWidget {
 public:
     explicit BrokkrWrapper(QWidget* parent = nullptr);
     ~BrokkrWrapper() override;
+
+    int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
 
 public slots:
     void appendLogLineFromEngine(const QString& html);
@@ -102,6 +106,8 @@ private:
     QList<DeviceSquare*> devSquares_;
     QList<QLineEdit*> comBoxes;
 
+    std::vector<std::uint8_t> slotFailed_;
+
     QTabWidget* tabWidget_ = nullptr;
     QTextEdit* consoleOutput = nullptr;
 
@@ -152,6 +158,13 @@ private:
     std::optional<brokkr::platform::TcpConnection> wireless_conn_;
     QString wireless_sysname_;
 
+    std::atomic_int logDevCount_{0};
+
+    QStringList physicalUsbPrev_;
+    bool physicalWirelessPrev_ = false;
+    QString physicalWirelessIdPrev_;
+
     std::vector<QString> plan_names_;
+    std::vector<QString> plan_from_names_;
     bool enhanced_speed_ = false;
 };
