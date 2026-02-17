@@ -191,7 +191,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 set(BROKKR_GUI OFF)
-find_package(Qt6 COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.3 COMPONENTS Core Gui Widgets)
 if (Qt6_FOUND)
     message(STATUS "Qt6 found, enabling GUI target")
     set(BROKKR_GUI ON)
@@ -220,6 +220,7 @@ if (BROKKR_GUI)
 install(TARGETS brokkr-gui
     RUNTIME DESTINATION bin
 )
+# Generate deploy script for Qt applications
 qt_generate_deploy_app_script(
     TARGET brokkr-gui
     OUTPUT_SCRIPT deploy_script
