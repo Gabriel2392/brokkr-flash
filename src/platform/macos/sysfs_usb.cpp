@@ -56,25 +56,31 @@ std::optional<std::uint32_t> get_u32_property(io_service_t service,
 }
 
 io_service_t find_device_by_location(std::uint32_t locationID) {
-  const char *classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
-  for (const char *cls : classNames) {
-    CFMutableDictionaryRef dict = IOServiceMatching(cls);
-    if (!dict)
-      continue;
+    const char* classNames[] = { "IOUSBHostDevice", "IOUSBDevice" };
 
-    SInt32 loc = static_cast<SInt32>(locationID);
-    CFNumberRef locRef =
-        CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &loc);
-    CFDictionarySetValue(dict, CFSTR("locationID"), locRef);
-    CFRelease(locRef);
+    for (const char* cls : classNames) {
+        CFMutableDictionaryRef dict = IOServiceMatching(cls);
+        if (!dict) continue;
 
-    // IOServiceGetMatchingService consumes the dictionary
-    io_service_t service =
-        IOServiceGetMatchingService(kIOMainPortDefault, dict);
-    if (service)
-      return service;
-  }
-  return 0;
+        io_iterator_t iter = 0;
+        if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) != KERN_SUCCESS) {
+            continue;
+        }
+
+        io_service_t service;
+        while ((service = IOIteratorNext(iter)) != 0) {
+            auto loc_opt = get_u32_property(service, CFSTR("locationID"));
+
+            if (loc_opt && *loc_opt == locationID) {
+                IOObjectRelease(iter);
+                return service;
+            }
+            IOObjectRelease(service);
+        }
+        IOObjectRelease(iter);
+    }
+
+    return 0;
 }
 
 bool product_allowed(std::uint16_t product,
@@ -89,14 +95,6 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
   CFMutableDictionaryRef dict = IOServiceMatching(className);
   if (!dict)
     return;
-
-  if (filter.vendor != 0) {
-    SInt32 vid = filter.vendor;
-    CFNumberRef vidRef =
-        CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &vid);
-    CFDictionarySetValue(dict, CFSTR("idVendor"), vidRef);
-    CFRelease(vidRef);
-  }
 
   io_iterator_t iter = 0;
   // IOServiceGetMatchingServices consumes the dictionary
