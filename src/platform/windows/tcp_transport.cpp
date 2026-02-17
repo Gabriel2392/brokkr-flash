@@ -48,10 +48,14 @@ void usleep(unsigned int usec) {
   ft.QuadPart = -(10 * (__int64)usec);
 
   timer = CreateWaitableTimer(NULL, TRUE, NULL);
-  if (!timer)
-    return;
+  if (!timer) {
+      spdlog::error("CreateWaitableTimer failed with error code {}", GetLastError());
+	  return;
+  }
+  spdlog::debug("Sleeping for {} microseconds", usec);
   SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
   WaitForSingleObject(timer, INFINITE);
+  spdlog::debug("Woke up after sleeping for {} microseconds", usec);
   CloseHandle(timer);
 }
 } // namespace
@@ -91,7 +95,7 @@ TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
     return *this;
   close_();
   fd_ = o.fd_;
-  o.fd_ = -1;
+  o.fd_ = INVALID_SOCKET;
   timeout_ms_ = o.timeout_ms_;
   peer_ip_ = std::move(o.peer_ip_);
   peer_port_ = o.peer_port_;
@@ -100,17 +104,19 @@ TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
 }
 
 void TcpConnection::close_() noexcept {
-  if (fd_ >= 0) {
+  if (fd_ == INVALID_SOCKET) {
     ::closesocket(fd_);
-    fd_ = -1;
+    fd_ = INVALID_SOCKET;
   }
 }
 
-bool TcpConnection::connected() const noexcept { return fd_ >= 0; }
+bool TcpConnection::connected() const noexcept { return fd_ != INVALID_SOCKET; }
 
 void TcpConnection::set_sock_timeouts_() noexcept {
-  if (fd_ < 0)
-    return;
+  if (!connected()) {
+ 	spdlog::error("TcpConnection::set_sock_timeouts_: not connected");
+	return;
+  }
 
   timeval tv{};
   tv.tv_sec = timeout_ms_ / 1000;
@@ -132,7 +138,7 @@ std::string TcpConnection::peer_label() const {
 }
 
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
-  if (fd_ == INVALID_SOCKET) {
+  if (!connected()) {
     spdlog::error("TcpConnection::send: not connected");
     return -1;
   }
@@ -145,6 +151,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
     if (n > 0) {
       p += static_cast<std::size_t>(n);
       left -= static_cast<std::size_t>(n);
+	  spdlog::debug("TcpConnection::send: sent {} bytes, {} bytes left", n, left);
       continue;
     }
 
@@ -154,7 +161,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
     }
 
     int err = WSAGetLastError();
-    if (errno == WSAEWOULDBLOCK) {
+    if (err == WSAEWOULDBLOCK) {
       if (retries-- > 0) {
         spdlog::warn("TcpConnection::send: send would block, retrying... ({} "
                      "retries left)",
@@ -174,7 +181,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
 }
 
 int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
-  if (fd_ == INVALID_SOCKET) {
+  if (!connected()) {
     spdlog::error("TcpConnection::recv: not connected");
     return -1;
   }
@@ -185,8 +192,10 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   for (;;) {
     const ssize_t n =
         ::recv(fd_, reinterpret_cast<char *>(data.data()), data.size(), 0);
-    if (n > 0)
-      return static_cast<int>(n);
+    if (n > 0) {
+		spdlog::debug("TcpConnection::recv: received {} bytes", n);
+		return static_cast<int>(n);
+    }
     if (n == 0) {
       spdlog::warn("TcpConnection::recv: connection closed by peer");
       return 0;
@@ -229,14 +238,14 @@ bool TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
                                   int backlog) {
   if (fd_ != INVALID_SOCKET) {
     ::closesocket(fd_);
-    fd_ = -1;
+    fd_ = INVALID_SOCKET;
   }
 
   bind_ip_ = std::move(bind_ip);
   port_ = port;
 
   fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd_ < 0) {
+  if (fd_ == INVALID_SOCKET) {
     spdlog::error("socket() failed with error code {}", WSAGetLastError());
     return false;
   }
@@ -250,15 +259,15 @@ bool TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
   addr.sin_port = htons(port_);
   if (::InetPton(AF_INET, bind_ip_.c_str(), &addr.sin_addr) != 1) {
     spdlog::error("Invalid bind IP address '{}'", bind_ip_);
-    throw std::runtime_error("Invalid bind IP: " + bind_ip_);
+	return false;
   }
 
-  if (::bind(fd_, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) !=
-      0) {
+  if (::bind(fd_, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
     spdlog::error("bind() failed with error code {}", WSAGetLastError());
     return false;
   }
-  if (::listen(fd_, backlog) != 0) {
+
+  if (::listen(fd_, backlog) == SOCKET_ERROR) {
     spdlog::error("listen() failed with error code {}", WSAGetLastError());
     return false;
   }
@@ -266,14 +275,16 @@ bool TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
 }
 
 std::optional<TcpConnection> TcpListener::accept_one() {
-  if (fd_ == INVALID_SOCKET)
-    throw std::runtime_error("TcpListener: not listening");
+  if (fd_ == INVALID_SOCKET) {
+    spdlog::error("TcpListener::accept_one: not listening");
+	return std::nullopt;
+  }
 
   sockaddr_in peer{};
   socklen_t peer_len = sizeof(peer);
 
   const int cfd = ::accept(fd_, reinterpret_cast<sockaddr *>(&peer), &peer_len);
-  if (cfd < 0) {
+  if (cfd == INVALID_SOCKET) {
     spdlog::error("accept() failed with error code {}", WSAGetLastError());
     return std::nullopt;
   }
@@ -284,8 +295,10 @@ std::optional<TcpConnection> TcpListener::accept_one() {
     spdlog::error("inet_ntop() failed with error code {}", WSAGetLastError());
     return std::nullopt;
   }
-
   const std::uint16_t p = ntohs(peer.sin_port);
+
+  spdlog::info("Accepted connection from {}:{}", ip, p);
+
   return TcpConnection(cfd, std::string(ip), p);
 }
 

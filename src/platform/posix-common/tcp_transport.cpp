@@ -106,6 +106,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
     if (n > 0) {
       p += static_cast<std::size_t>(n);
       left -= static_cast<std::size_t>(n);
+	  spdlog::debug("TcpConnection::send: sent {} bytes, {} bytes left", n, left);
       continue;
     }
 
@@ -146,8 +147,10 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
   for (;;) {
     const ssize_t n = do_recv(fd_, data.data(), data.size(), 0);
-    if (n > 0)
-      return static_cast<int>(n);
+    if (n > 0) {
+		spdlog::debug("TcpConnection::recv: received {} bytes", n);
+        return static_cast<int>(n);
+    }
     if (n == 0) {
       spdlog::warn("TcpConnection::recv: peer closed connection");
       return 0;
@@ -255,6 +258,9 @@ std::optional<TcpConnection> TcpListener::accept_one() {
   }
 
   const std::uint16_t p = ntohs(peer.sin_port);
+
+  spdlog::info("TcpListener: accepted connection from {}:{}", ip, p);
+
   return TcpConnection(cfd, std::string(ip), p);
 }
 
