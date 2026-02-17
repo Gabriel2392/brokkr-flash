@@ -75,7 +75,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
         err == ERROR_NO_SUCH_DEVICE ||
         err == ERROR_FILE_NOT_FOUND) {
         spdlog::info("Device disconnected (likely rebooting).");
-        break;
+		return 0; // Treat as clean disconnection with no more data to write.
     }
     spdlog::warn("WriteFile attempt {} failed with error code {}", i + 1, err);
   }
@@ -109,7 +109,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
         err == ERROR_NO_SUCH_DEVICE ||
         err == ERROR_FILE_NOT_FOUND) {
         spdlog::info("Device disconnected (likely rebooting).");
-        break;
+		return 0; // Treat as clean disconnection with no more data to read.
     }
     spdlog::warn("ReadFile attempt {} failed with error code {}", i + 1, err);
   }
