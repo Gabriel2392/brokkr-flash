@@ -23,7 +23,7 @@
 #include <utility>
 
 // clang-format off
-#include <winsock.h>
+#include <winsock2.h>
 #include <afunix.h>
 #include <ws2tcpip.h>
 // clang-format on
@@ -96,6 +96,8 @@ TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
   close_();
   fd_ = o.fd_;
   o.fd_ = INVALID_SOCKET;
+  ws_ = o.ws_;
+  std::memset(&o.ws_, 0, sizeof(o.ws_));
   timeout_ms_ = o.timeout_ms_;
   peer_ip_ = std::move(o.peer_ip_);
   peer_port_ = o.peer_port_;
@@ -185,6 +187,7 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   }
   if (data.empty()) {
     spdlog::warn("TcpConnection::recv: empty buffer provided");
+    return 0;
   }
 
   for (;;) {

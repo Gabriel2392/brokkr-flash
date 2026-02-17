@@ -76,6 +76,7 @@ static void print_connected(bool only) {
 static std::optional<UsbDeviceSysfsInfo> select_target(const Options &opt) {
   if (!opt.target_sysname) {
     spdlog::error("No target sysname specified");
+    return {};
   }
   auto info = brokkr::platform::find_by_sysname(*opt.target_sysname);
   if (!info) {
@@ -91,6 +92,7 @@ static std::optional<UsbDeviceSysfsInfo> select_target(const Options &opt) {
   if (std::ranges::find(pids, info->product) == pids.end()) {
     spdlog::error("Device {} has wrong PID: expected one of {}, got 0x{:04x}",
                   info->sysname, fmt::join(pids, " "), info->product);
+    return {};
   }
   return *info;
 }

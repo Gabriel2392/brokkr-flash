@@ -135,7 +135,7 @@ bool UsbFsDevice::open_and_init() {
 
 void UsbFsDevice::close() noexcept {
   if (!fd_.valid()) {
-    spdlog::warn("UsbFsDevice::close: device not open");
+    return;
   }
 
   if (claimed_) {

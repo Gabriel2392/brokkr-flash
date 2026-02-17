@@ -65,8 +65,6 @@ void SignalShield::stop_and_restore_() noexcept {
   if (active_) {
     watcher_.request_stop();
 
-    TerminateProcess(GetCurrentProcess(), 0);
-
     if (watcher_.joinable())
       watcher_.join();
     active_ = false;
