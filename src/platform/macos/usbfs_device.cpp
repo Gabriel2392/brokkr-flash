@@ -133,15 +133,17 @@ void UsbFsDevice::open_and_init() {
   ids_.vendor = vid;
   ids_.product = pid;
 
-  // Set configuration
-  IOUSBConfigurationDescriptorPtr configDesc = nullptr;
-  kr = (*devIntf)->GetConfigurationDescriptorPtr(devIntf, 0, &configDesc);
-  if (kr == kIOReturnSuccess && configDesc) {
-    (void)(*devIntf)->SetConfiguration(devIntf,
-                                       configDesc->bConfigurationValue);
+  UInt8 curCfg = 0;
+  if ((*devIntf)->GetConfiguration(devIntf, &curCfg) == kIOReturnSuccess &&
+      curCfg == 0) {
+    IOUSBConfigurationDescriptorPtr configDesc = nullptr;
+    kr = (*devIntf)->GetConfigurationDescriptorPtr(devIntf, 0, &configDesc);
+    if (kr == kIOReturnSuccess && configDesc) {
+      (void)(*devIntf)->SetConfiguration(devIntf,
+                                         configDesc->bConfigurationValue);
+    }
   }
 
-  // Find interface with bulk endpoints
   IOUSBFindInterfaceRequest ifcRequest;
   ifcRequest.bInterfaceClass = kIOUSBFindInterfaceDontCare;
   ifcRequest.bInterfaceSubClass = kIOUSBFindInterfaceDontCare;
@@ -181,6 +183,18 @@ void UsbFsDevice::open_and_init() {
 
     kr = (*ifcIntf)->USBInterfaceOpen(ifcIntf);
     if (kr != kIOReturnSuccess) {
+      (*ifcIntf)->Release(ifcIntf);
+      continue;
+    }
+
+    UInt8 alt = 0;
+    if ((*ifcIntf)->GetAlternateSetting(ifcIntf, &alt) == kIOReturnSuccess &&
+        alt != 0) {
+      (void)(*ifcIntf)->SetAlternateInterface(ifcIntf, 0);
+      (void)(*ifcIntf)->GetAlternateSetting(ifcIntf, &alt);
+    }
+    if (alt != 0) {
+      (*ifcIntf)->USBInterfaceClose(ifcIntf);
       (*ifcIntf)->Release(ifcIntf);
       continue;
     }

@@ -54,6 +54,13 @@ std::optional<std::uint32_t> get_u32_property(io_service_t service,
   return ok ? std::optional<std::uint32_t>{value} : std::nullopt;
 }
 
+std::optional<std::uint64_t> get_registry_entry_id(io_service_t service) {
+  std::uint64_t id = 0;
+  const kern_return_t kr = IORegistryEntryGetRegistryEntryID(service, &id);
+  if (kr != KERN_SUCCESS) return std::nullopt;
+  return id;
+}
+
 bool product_allowed(std::uint16_t product,
                      const std::vector<std::uint16_t> &allowed) {
   if (allowed.empty())
@@ -61,8 +68,13 @@ bool product_allowed(std::uint16_t product,
   return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
 }
 
+struct Match {
+  UsbDeviceSysfsInfo info;
+  std::uint64_t registry_id = 0; // used only for ordering preference
+};
+
 void enumerate_class(const char *className, const EnumerateFilter &filter,
-                     std::vector<UsbDeviceSysfsInfo> &out) {
+                     std::vector<Match> &out) {
   CFMutableDictionaryRef dict = IOServiceMatching(className);
   if (!dict)
     return;
@@ -78,19 +90,25 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
     auto vid_opt = get_u32_property(service, CFSTR("idVendor"));
     auto pid_opt = get_u32_property(service, CFSTR("idProduct"));
     auto loc_opt = get_u32_property(service, CFSTR("locationID"));
+    auto rid_opt = get_registry_entry_id(service);
 
     if (!vid_opt || !pid_opt || !loc_opt) {
       IOObjectRelease(service);
       continue;
     }
 
-    auto vendor = static_cast<std::uint16_t>(*vid_opt);
-    auto product = static_cast<std::uint16_t>(*pid_opt);
-    auto locationID = *loc_opt;
+    const auto vendor = static_cast<std::uint16_t>(*vid_opt);
+    const auto product = static_cast<std::uint16_t>(*pid_opt);
+    const auto locationID = *loc_opt;
 
-    spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
-                  locationID, vendor, product);
+    spdlog::debug(
+        "Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
+        locationID, vendor, product);
 
+    if (vendor != filter.vendor) {
+      IOObjectRelease(service);
+      continue;
+    }
     if (!product_allowed(product, filter.products)) {
       IOObjectRelease(service);
       continue;
@@ -103,7 +121,11 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
 
     spdlog::info("Matched USB device: {}", info.describe());
 
-    out.push_back(std::move(info));
+    Match m;
+    m.info = std::move(info);
+    m.registry_id = rid_opt.value_or(0);
+    out.push_back(std::move(m));
+
     IOObjectRelease(service);
   }
 
@@ -112,33 +134,35 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
 
 } // namespace
 
-// Not under annoymous namespace intentionally, used on usb_device.cpp as well.
+// Not under anonymous namespace intentionally, used on usb_device.cpp as well.
 io_service_t find_device_by_location(std::uint32_t locationID) {
-    const char* classNames[] = { "IOUSBHostDevice", "IOUSBDevice" };
+  const char *classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
 
-    for (const char* cls : classNames) {
-        CFMutableDictionaryRef dict = IOServiceMatching(cls);
-        if (!dict) continue;
+  for (const char *cls : classNames) {
+    CFMutableDictionaryRef dict = IOServiceMatching(cls);
+    if (!dict)
+      continue;
 
-        io_iterator_t iter = 0;
-        if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) != KERN_SUCCESS) {
-            continue;
-        }
-
-        io_service_t service;
-        while ((service = IOIteratorNext(iter)) != 0) {
-            auto loc_opt = get_u32_property(service, CFSTR("locationID"));
-
-            if (loc_opt && *loc_opt == locationID) {
-                IOObjectRelease(iter);
-                return service;
-            }
-            IOObjectRelease(service);
-        }
-        IOObjectRelease(iter);
+    io_iterator_t iter = 0;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) !=
+        KERN_SUCCESS) {
+      continue;
     }
 
-    return 0;
+    io_service_t service;
+    while ((service = IOIteratorNext(iter)) != 0) {
+      auto loc_opt = get_u32_property(service, CFSTR("locationID"));
+
+      if (loc_opt && *loc_opt == locationID) {
+        IOObjectRelease(iter);
+        return service;
+      }
+      IOObjectRelease(service);
+    }
+    IOObjectRelease(iter);
+  }
+
+  return 0;
 }
 
 std::string UsbDeviceSysfsInfo::devnode() const { return sysname; }
@@ -150,13 +174,22 @@ std::string UsbDeviceSysfsInfo::describe() const {
 
 std::vector<UsbDeviceSysfsInfo>
 enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
-  std::vector<UsbDeviceSysfsInfo> out;
+  std::vector<Match> matches;
 
-  enumerate_class("IOUSBHostDevice", filter, out);
-  if (out.empty()) {
-    enumerate_class("IOUSBDevice", filter, out);
+  enumerate_class("IOUSBHostDevice", filter, matches);
+  if (matches.empty()) {
+    enumerate_class("IOUSBDevice", filter, matches);
   }
 
+  std::ranges::sort(matches, [](const Match &a, const Match &b) {
+    return a.registry_id > b.registry_id;
+  });
+
+  std::vector<UsbDeviceSysfsInfo> out;
+  out.reserve(matches.size());
+  for (auto &m : matches) {
+    out.emplace_back(std::move(m.info));
+  }
   return out;
 }
 
@@ -166,14 +199,14 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
     std::string s(sysname);
     locationID = static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
   } catch (...) {
-	spdlog::error("Invalid sysname format: '{}'", sysname);
+    spdlog::error("Invalid sysname format: '{}'", sysname);
     return std::nullopt;
   }
 
   io_service_t service = find_device_by_location(locationID);
   if (!service) {
-	  spdlog::error("No device found with locationID: 0x{:08x}", locationID);
-	  return std::nullopt;
+    spdlog::error("No device found with locationID: 0x{:08x}", locationID);
+    return std::nullopt;
   }
 
   auto vid_opt = get_u32_property(service, CFSTR("idVendor"));
@@ -181,8 +214,9 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   IOObjectRelease(service);
 
   if (!vid_opt || !pid_opt) {
-	  spdlog::error("Failed to read properties for device with locationID: 0x{:08x}", locationID);
-	  return std::nullopt;
+    spdlog::error("Failed to read properties for device with locationID: 0x{:08x}",
+                  locationID);
+    return std::nullopt;
   }
 
   UsbDeviceSysfsInfo info;
