@@ -228,6 +228,22 @@ if (Qt6_FOUND)
         # Need it to define __cplusplus correctly for Qt headers, otherwise we get errors about missing C++17 features
         target_compile_options(brokkr-gui PRIVATE /Zc:__cplusplus)
     endif()
+    if(WIN32)
+        # Find the windeployqt tool inside your Qt installation
+        get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
+        get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
+        find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
+
+        if(WINDEPLOYQT_EXEC)
+            add_custom_command(TARGET brokkr-gui POST_BUILD
+                COMMAND "${WINDEPLOYQT_EXEC}"
+                ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr-gui>"
+                COMMENT "Running windeployqt to deploy Qt libraries..."
+            )
+        else()
+            message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
+        endif()
+    endif()
 else()
     message(WARNING "Qt6 not found, GUI target will not be built")
 endif()
