@@ -96,6 +96,7 @@ std::string TcpConnection::peer_label() const {
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
   if (!connected()) {
     spdlog::error("TcpConnection::send: not connected");
+    return -1;
   }
 
   const std::uint8_t *p = data.data();

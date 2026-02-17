@@ -104,7 +104,7 @@ TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
 }
 
 void TcpConnection::close_() noexcept {
-  if (fd_ == INVALID_SOCKET) {
+  if (fd_ != INVALID_SOCKET) {
     ::closesocket(fd_);
     fd_ = INVALID_SOCKET;
   }
@@ -118,9 +118,7 @@ void TcpConnection::set_sock_timeouts_() noexcept {
 	return;
   }
 
-  timeval tv{};
-  tv.tv_sec = timeout_ms_ / 1000;
-  tv.tv_usec = (timeout_ms_ % 1000) * 1000;
+  DWORD tv = static_cast<DWORD>(timeout_ms_);
 
   spdlog::info("Timeout is {}ms", timeout_ms_);
 
