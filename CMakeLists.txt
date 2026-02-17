@@ -137,6 +137,7 @@ add_executable(brokkr
     src/protocol/odin/pit_transfer.cpp)
 
 target_include_directories(brokkr PRIVATE src src/lz4)
+target_link_libraries(brokkr PRIVATE brokkr-platform)
 
 # If not Windows, and using GCC or Clang, and building in Release or RelWithDebInfo mode, enable some optimizations and large file support
 if (
@@ -144,31 +145,30 @@ if (
     AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" 
     AND CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo"
 )
+    # Enable large file support on 32-bit systems
+    target_compile_definitions(brokkr PRIVATE
+        _FILE_OFFSET_BITS=64
+        _LARGEFILE_SOURCE
+    )
 
-target_compile_definitions(brokkr PRIVATE
-    _FILE_OFFSET_BITS=64
-    _LARGEFILE_SOURCE
-)
+    # Enable architecture-specific optimizations if not cross-compiling
+    if (NOT CMAKE_CROSSCOMPILING)
+      target_compile_options(brokkr PRIVATE -march=native -mtune-native)
+    endif()
 
-# Enable architecture-specific optimizations if not cross-compiling
-if (NOT CMAKE_CROSSCOMPILING)
-  target_compile_options(brokkr PRIVATE -march=native -mtune-native)
+    # General optimizations for release builds
+    target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
 endif()
 
-# General optimizations for release builds
-target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
-endif()
-
-target_link_libraries(brokkr PRIVATE brokkr-platform)
-
-if (CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Enable LTO if supported by the compiler and in Release or RelWithDebInfo mode
+if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
     # Check LTO support and enable it if available
     include(CheckIPOSupported)
     check_ipo_supported(RESULT LTO_SUPPORTED)
     if (LTO_SUPPORTED)
-      message(STATUS "Enabling LTO (Link time optimization)")
-      set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-      set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        message(STATUS "Enabling LTO (Link time optimization)")
+        set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 endif()
 
