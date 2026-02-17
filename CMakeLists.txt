@@ -160,12 +160,15 @@ endif()
 
 target_link_libraries(brokkr PRIVATE brokkr-platform)
 
-# Check LTO support and enable it if available
-include(CheckIPOSupported)
-check_ipo_supported(RESULT LTO_SUPPORTED)
-if (LTO_SUPPORTED)
-  message(STATUS "Enabling LTO (Link time optimization)")
-  set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+if (CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Check LTO support and enable it if available
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT LTO_SUPPORTED)
+    if (LTO_SUPPORTED)
+      message(STATUS "Enabling LTO (Link time optimization)")
+      set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+      set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
 endif()
 
 execute_process(
