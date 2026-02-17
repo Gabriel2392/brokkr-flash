@@ -19,6 +19,7 @@
 
 #include "core/byte_transport.hpp"
 #include "usbfs_device.hpp"
+
 #include <cstdint>
 #include <span>
 
@@ -34,8 +35,8 @@ public:
   void close() noexcept;
   bool connected() const noexcept override { return connected_; }
 
-  int send(std::span<const std::uint8_t> data, unsigned retries = 0) override;
-  int recv(std::span<std::uint8_t> data, unsigned retries = 0) override;
+  int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
+  int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
   int recv_zlp(unsigned retries = 0) override;
 
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
@@ -46,8 +47,6 @@ private:
   bool connected_ = false;
   int timeout_ms_ = 1000;
 
-  // WinUSB handles large transfers better, but we keep the logic
-  // for API parity with the Linux version.
   std::size_t max_pack_size_ = 128 * 1024;
 };
 

@@ -19,10 +19,8 @@
 
 #include <algorithm>
 #include <cstdint>
-
-#include <iostream>
 #include <span>
-#include <vector>
+
 #include <windows.h>
 #include <winusb.h>
 
@@ -31,6 +29,19 @@
 #pragma comment(lib, "winusb.lib")
 
 namespace brokkr::windows {
+
+namespace {
+
+inline bool is_disconnect_error(DWORD err) noexcept {
+  return err == ERROR_GEN_FAILURE ||
+         err == ERROR_OPERATION_ABORTED ||
+         err == ERROR_NO_SUCH_DEVICE ||
+         err == ERROR_FILE_NOT_FOUND;
+}
+
+inline void backoff_10ms() noexcept { ::Sleep(10); }
+
+} // namespace
 
 UsbFsConnection::UsbFsConnection(UsbFsDevice &dev) : dev_(dev) {}
 
@@ -56,70 +67,120 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
   if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE)
     return -1;
 
-  // Apply the configured timeout to this write operation
-  COMMTIMEOUTS timeouts = {0};
-  timeouts.WriteTotalTimeoutConstant = timeout_ms_;
-  SetCommTimeouts(dev_.handle(), &timeouts);
+  COMMTIMEOUTS timeouts{};
+  timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(timeout_ms_);
+  (void)::SetCommTimeouts(dev_.handle(), &timeouts);
 
-  DWORD bytes_written = 0;
-  for (unsigned i = 0; i <= retries; ++i) {
-    if (WriteFile(dev_.handle(), data.data(), static_cast<DWORD>(data.size()),
-                  &bytes_written, nullptr)) {
-      return static_cast<int>(bytes_written);
-    }
-	int err = GetLastError();
-	// Certain errors indicate the device is no longer present (e.g. due to rebooting).
-	// Do not print out error. Instead, treat it as a disconnection and break out of the loop.
-    if (err == ERROR_GEN_FAILURE || 
-        err == ERROR_OPERATION_ABORTED ||
-        err == ERROR_NO_SUCH_DEVICE ||
-        err == ERROR_FILE_NOT_FOUND) {
+  const std::uint8_t* p = data.data();
+  std::size_t left = data.size();
+  std::size_t total = 0;
+
+  while (left) {
+    const DWORD want = static_cast<DWORD>(
+        std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
+
+    DWORD bytes_written = 0;
+
+    unsigned attempt = 0;
+    for (;;) {
+      if (::WriteFile(dev_.handle(), p, want, &bytes_written, nullptr)) {
+        if (bytes_written == 0) {
+          if (attempt++ >= retries) return -1;
+          backoff_10ms();
+          continue;
+        }
+        break;
+      }
+
+      const DWORD err = ::GetLastError();
+      if (is_disconnect_error(err)) {
         spdlog::info("Device disconnected (likely rebooting).");
-		return 0; // Treat as clean disconnection with no more data to write.
+        return 0;
+      }
+
+      if (err == ERROR_TIMEOUT) {
+        if (attempt++ >= retries) return -1;
+        backoff_10ms();
+        continue;
+      }
+
+      if (attempt++ >= retries) return -1;
+      backoff_10ms();
     }
-    spdlog::warn("WriteFile attempt {} failed with error code {}", i + 1, err);
+
+    p += bytes_written;
+    left -= bytes_written;
+    total += bytes_written;
   }
-  return -1;
+
+  return static_cast<int>(total);
 }
 
 int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE)
     return -1;
 
-  // Set aggressive read timeouts.
-  // This setup tells Windows to return immediately if any bytes are present,
-  // or wait up to timeout_ms_ if the buffer is entirely empty.
-  COMMTIMEOUTS timeouts = {0};
-  timeouts.ReadIntervalTimeout = MAXDWORD;
-  timeouts.ReadTotalTimeoutConstant = timeout_ms_;
-  timeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
-  SetCommTimeouts(dev_.handle(), &timeouts);
+  if (data.empty())
+    return recv_zlp();
 
-  DWORD bytes_read = 0;
-  for (unsigned i = 0; i <= retries; ++i) {
-    if (ReadFile(dev_.handle(), data.data(), static_cast<DWORD>(data.size()),
-                 &bytes_read, nullptr)) {
-      return static_cast<int>(bytes_read);
-    }
-	int err = GetLastError();
-    // Certain errors indicate the device is no longer present (e.g. due to rebooting).
-    // Do not print out error. Instead, treat it as a disconnection and break out of the loop.
-    if (err == ERROR_GEN_FAILURE ||
-        err == ERROR_OPERATION_ABORTED ||
-        err == ERROR_NO_SUCH_DEVICE ||
-        err == ERROR_FILE_NOT_FOUND) {
+  COMMTIMEOUTS timeouts{};
+  timeouts.ReadIntervalTimeout = MAXDWORD;
+  timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(timeout_ms_);
+  timeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
+  (void)::SetCommTimeouts(dev_.handle(), &timeouts);
+
+  std::uint8_t* p = data.data();
+  std::size_t left = data.size();
+  std::size_t total = 0;
+
+  while (left) {
+    const DWORD want = static_cast<DWORD>(
+        std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
+
+    DWORD bytes_read = 0;
+
+    unsigned attempt = 0;
+    for (;;) {
+      if (::ReadFile(dev_.handle(), p, want, &bytes_read, nullptr)) {
+        // ReadFile can succeed with 0 bytes due to COMMTIMEOUTS.
+        if (bytes_read == 0) {
+          if (total > 0) return static_cast<int>(total);
+          if (attempt++ >= retries) return -1;
+          backoff_10ms();
+          continue;
+        }
+        break;
+      }
+
+      const DWORD err = ::GetLastError();
+      if (is_disconnect_error(err)) {
         spdlog::info("Device disconnected (likely rebooting).");
-		return 0; // Treat as clean disconnection with no more data to read.
+        return 0;
+      }
+
+      if (err == ERROR_TIMEOUT) {
+        if (total > 0) return static_cast<int>(total);
+        if (attempt++ >= retries) return -1;
+        backoff_10ms();
+        continue;
+      }
+
+      if (attempt++ >= retries) return -1;
+      backoff_10ms();
     }
-    spdlog::warn("ReadFile attempt {} failed with error code {}", i + 1, err);
+
+    p += bytes_read;
+    left -= bytes_read;
+    total += bytes_read;
+
+    if (bytes_read < want)
+      break;
   }
-  return -1;
+
+  return static_cast<int>(total);
 }
 
-int UsbFsConnection::recv_zlp(unsigned retries) {
-  // Zero-Length Packets (ZLPs) are a USB bulk/interrupt concept.
-  // Serial ports operate on a continuous byte stream, so we simulate
-  // a successful "empty read" to keep API parity with the Linux endpoints.
+int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
   return 0;
 }
 
