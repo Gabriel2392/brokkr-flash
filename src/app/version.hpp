@@ -19,7 +19,7 @@
 
 #include <string>
 
-#define BROKKR_VERSION_BASE "0.3.0"
+#define BROKKR_VERSION_BASE "1.0.0"
 #define BROKKR_VERSION_STAGE "release"
 
 #ifndef BROKKR_COMMIT_COUNT
