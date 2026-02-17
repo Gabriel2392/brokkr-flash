@@ -786,6 +786,27 @@ void BrokkrWrapper::startWirelessListener_() {
         for (;;) {
             if (st.stop_requested()) return;
 
+            // If connected, keep thread alive so it can accept again after a disconnect.
+            {
+                bool connected = false;
+                {
+                    std::lock_guard lk(wireless_mtx_);
+                    if (wireless_conn_) {
+                        if (wireless_conn_->connected()) {
+                            connected = true;
+                        } else {
+                            wireless_conn_.reset();
+                            wireless_sysname_.clear();
+                            QMetaObject::invokeMethod(this, [this]() { requestUsbRefresh_(); }, Qt::QueuedConnection);
+                        }
+                    }
+                }
+                if (connected) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    continue;
+                }
+            }
+
             brokkr::platform::TcpListener* lst = nullptr;
             {
                 std::lock_guard lk(wireless_mtx_);
@@ -811,7 +832,7 @@ void BrokkrWrapper::startWirelessListener_() {
             }
 
             QMetaObject::invokeMethod(this, [this]() { refreshConnectedDevices_(); }, Qt::QueuedConnection);
-            return;
+            continue;
         }
     });
 
