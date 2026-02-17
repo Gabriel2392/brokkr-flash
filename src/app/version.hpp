@@ -25,14 +25,10 @@ namespace brokkr::app {
 
 inline const std::string &version_string() {
   static const std::string v = [] {
-    const std::string base = BROKKR_VERSION;
-    const std::string stage = BROKKR_BUILD_TYPE;
-    const std::string cnt = BROKKR_COMMIT_COUNT;
-
 #ifdef NDEBUG
-    return fmt::format("{}-{}", base, stage);
+    return fmt::format("{}-{}", BROKKR_VERSION, BROKKR_BUILD_TYPE);
 #else
-    return fmt::format("{}-{}+{}", base, stage, cnt);
+    return fmt::format("{}-{}+{}", BROKKR_VERSION, BROKKR_BUILD_TYPE, BROKKR_COMMIT_COUNT);
 #endif
   }();
   return v;
