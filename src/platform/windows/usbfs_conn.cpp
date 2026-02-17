@@ -101,7 +101,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 int UsbFsConnection::recv_zlp(unsigned retries) {
   // Zero-Length Packets (ZLPs) are a USB bulk/interrupt concept.
   // Serial ports operate on a continuous byte stream, so we simulate
-  // a successful "empty read" to keep API parity with your Linux endpoints.
+  // a successful "empty read" to keep API parity with the Linux endpoints.
   return 0;
 }
 

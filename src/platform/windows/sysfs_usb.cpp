@@ -100,7 +100,7 @@ enumerate_usb_devices_windows(uint16_t target_vid,
                                           (PBYTE)hwId, sizeof(hwId), nullptr)) {
       std::string hwIdStr(hwId);
 
-      // 2. Extract VID/PID using your helper
+      // 2. Extract VID/PID
       uint16_t vid = extract_hex(hwIdStr, "vid_");
       uint16_t pid = extract_hex(hwIdStr, "pid_");
 
