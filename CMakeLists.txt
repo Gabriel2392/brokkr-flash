@@ -138,24 +138,25 @@ add_executable(brokkr
 
 target_include_directories(brokkr PRIVATE src src/lz4)
 
+# If not Windows, and using GCC or Clang, and building in Release or RelWithDebInfo mode, enable some optimizations and large file support
+if (
+    NOT WIN32
+    AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" 
+    AND CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo"
+)
+
 target_compile_definitions(brokkr PRIVATE
     _FILE_OFFSET_BITS=64
     _LARGEFILE_SOURCE
 )
 
-if (NOT MSVC)
-target_compile_options(brokkr PRIVATE
-    $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:RelWithDebInfo>:-O3>
+# Enable architecture-specific optimizations if not cross-compiling
+if (NOT CMAKE_CROSSCOMPILING)
+  target_compile_options(brokkr PRIVATE -march=native -mtune-native)
+endif()
 
-    $<$<AND:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>,$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>>:-march=native>
-    $<$<AND:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>,$<OR:$<C_COMPILER_ID:GNU>,$<C_COMPILER_ID:Clang>>>:-mtune=native>
-    $<$<AND:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:-march=native>
-    $<$<AND:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:-mtune=native>
-
-    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffunction-sections>
-    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-fdata-sections>
-)
+# General optimizations for release builds
+target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
 endif()
 
 target_link_libraries(brokkr PRIVATE brokkr-platform)
