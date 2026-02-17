@@ -157,7 +157,7 @@ if (
 
     # Enable architecture-specific optimizations if not cross-compiling
     if (NOT CMAKE_CROSSCOMPILING)
-      target_compile_options(brokkr PRIVATE -march=native -mtune-native)
+      target_compile_options(brokkr PRIVATE -march=native -mtune=native)
     endif()
 
     # General optimizations for release builds
