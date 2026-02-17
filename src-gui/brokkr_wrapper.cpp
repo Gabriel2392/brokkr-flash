@@ -8,6 +8,8 @@
 #include <QTabWidget>
 #include <QGroupBox>
 #include <QTimer>
+#include <QRadioButton>
+#include <QComboBox> // Added for the scroll box
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     setWindowTitle("Brokkr Flasher");
@@ -28,7 +30,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     idComLayout->setSpacing(2);
     idComLayout->setContentsMargins(5, 5, 5, 5);
 
-    // Create the Odin-style grid of ports and store them for the background poller
     for (int row = 0; row < 2; ++row) {
         for (int col = 0; col < 8; ++col) {
             auto* box = new QLineEdit(this);
@@ -55,24 +56,29 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     consoleOutput->setStyleSheet("font-family: Consolas, monospace;");
     tabWidget->addTab(consoleOutput, "Log");
 
-    // Options Tab (Retaining all Brokkr logic)
+    // Options Tab (Updated with QComboBox)
     auto* optTab = new QWidget();
     auto* optLayout = new QVBoxLayout(optTab);
     optLayout->setAlignment(Qt::AlignTop);
+
     chkWireless = new QCheckBox("Wireless (-w)", this);
-    chkReboot = new QCheckBox("Reboot Only", this);
-    chkRedownload = new QCheckBox("Redownload", this);
-    chkNoReboot = new QCheckBox("No Reboot", this);
     chkPrintPit = new QCheckBox("Print PIT", this);
 
     optLayout->addWidget(chkWireless);
-    optLayout->addWidget(chkReboot);
-    optLayout->addWidget(chkRedownload);
-    optLayout->addWidget(chkNoReboot);
     optLayout->addWidget(chkPrintPit);
+
+    // Mutually exclusive reboot options in a popping scroll box
+    optLayout->addSpacing(10);
+    optLayout->addWidget(new QLabel("Post-Flash Action:", this));
+    cmbRebootAction = new QComboBox(this);
+    cmbRebootAction->addItem("Default (Reboot Normally)");
+    cmbRebootAction->addItem("Redownload");
+    cmbRebootAction->addItem("No Reboot");
+    optLayout->addWidget(cmbRebootAction);
+
     tabWidget->addTab(optTab, "Options");
 
-    // Pit Tab
+    // Pit Tab (Unified)
     auto* pitTab = new QWidget();
     auto* pitLayout = new QGridLayout(pitTab);
     pitLayout->setAlignment(Qt::AlignTop);
@@ -80,16 +86,37 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     pitLayout->addWidget(new QLabel("Target Sysname:"), 0, 0);
     editTarget = new QLineEdit(this);
     editTarget->setPlaceholderText("e.g. COM12 or 1-1.4");
-    pitLayout->addWidget(editTarget, 0, 1);
+    pitLayout->addWidget(editTarget, 0, 1, 1, 2);
 
-    pitLayout->addWidget(new QLabel("Get PIT out:"), 1, 0);
-    editGetPit = new QLineEdit(this);
-    pitLayout->addWidget(editGetPit, 1, 1);
+    pitLayout->addWidget(new QLabel("PIT File:"), 1, 0);
+    editPit = new QLineEdit(this);
+    pitLayout->addWidget(editPit, 1, 1);
 
-    pitLayout->addWidget(new QLabel("Set PIT in:"), 2, 0);
-    editSetPit = new QLineEdit(this);
-    pitLayout->addWidget(editSetPit, 2, 1);
+    auto* btnPit = new QPushButton("Browse", this);
+    pitLayout->addWidget(btnPit, 1, 2);
+
+    radSetPit = new QRadioButton("Set PIT (Flash)", this);
+    radGetPit = new QRadioButton("Get PIT (Extract)", this);
+    radSetPit->setChecked(true);
+
+    auto* radioLayout = new QHBoxLayout();
+    radioLayout->addWidget(radSetPit);
+    radioLayout->addWidget(radGetPit);
+    radioLayout->addStretch();
+    pitLayout->addLayout(radioLayout, 2, 1, 1, 2);
+
     tabWidget->addTab(pitTab, "Pit");
+
+    connect(btnPit, &QPushButton::clicked, this, [this]() {
+        QString file;
+        if (radGetPit->isChecked()) {
+            file = QFileDialog::getSaveFileName(this, "Save PIT File As", "", "PIT Files (*.pit);;All Files (*)");
+        }
+        else {
+            file = QFileDialog::getOpenFileName(this, "Select PIT File", "", "PIT Files (*.pit);;All Files (*)");
+        }
+        if (!file.isEmpty()) editPit->setText(file);
+        });
 
     middleLayout->addWidget(tabWidget);
 
@@ -128,6 +155,10 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     bottomLayout->addWidget(linkLabel);
     bottomLayout->addStretch();
 
+    // New standalone Reboot button
+    btnRebootDevice = new QPushButton("Reboot Device", this);
+    btnRebootDevice->setFixedSize(100, 30);
+
     btnRun = new QPushButton("Start", this);
     btnRun->setFixedSize(100, 30);
 
@@ -137,6 +168,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     QPushButton* btnExit = new QPushButton("Exit", this);
     btnExit->setFixedSize(100, 30);
 
+    bottomLayout->addWidget(btnRebootDevice);
     bottomLayout->addWidget(btnRun);
     bottomLayout->addWidget(btnReset);
     bottomLayout->addWidget(btnExit);
@@ -154,6 +186,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         });
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode) {
         btnRun->setEnabled(true);
+        btnRebootDevice->setEnabled(true);
         consoleOutput->append(QString("\n<i>Brokkr finished with exit code %1</i>").arg(exitCode));
         });
 
@@ -167,13 +200,11 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         QString output = QString::fromLocal8Bit(pollProcess->readAllStandardOutput()).trimmed();
         QStringList connectedDevices = output.split('\n', Qt::SkipEmptyParts);
 
-        // Reset all boxes back to empty/default styling first
         for (auto* box : comBoxes) {
             box->clear();
             box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
         }
 
-        // Light up a box for each connected device found
         for (int i = 0; i < connectedDevices.size() && i < comBoxes.size(); ++i) {
             QString portName = connectedDevices[i].trimmed();
             comBoxes[i]->setText(QString("%1:[%2]").arg(i).arg(portName));
@@ -182,25 +213,40 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         });
 
     connect(deviceTimer, &QTimer::timeout, this, [this]() {
-        // Only poll if the main flashing process ISN'T currently running
         if (process->state() == QProcess::NotRunning && pollProcess->state() == QProcess::NotRunning) {
             QString program = "brokkr";
 #ifdef Q_OS_WIN
             program += ".exe";
 #endif
-            pollProcess->start(program, { "--print-connected-only" });
+            // Added --gui-mode to the background polling process as well
+            pollProcess->start(program, { "--gui-mode", "--print-connected-only" });
         }
         });
 
-    deviceTimer->start(2000); // Check for new devices every 2 seconds
+    deviceTimer->start(2000);
 
     // --- Button Connections ---
+
+    // Reboot Device Button Logic
+    connect(btnRebootDevice, &QPushButton::clicked, this, [this]() {
+        QStringList args;
+        if (!editTarget->text().isEmpty()) {
+            args << "--target" << editTarget->text();
+        }
+        args << "--reboot";
+        executeBrokkr(args);
+        });
+
     connect(btnRun, &QPushButton::clicked, this, &BrokkrWrapper::onRunClicked);
     connect(btnExit, &QPushButton::clicked, this, &QWidget::close);
+
     connect(btnReset, &QPushButton::clicked, this, [this, fileLayout]() {
         editAP->clear(); editBL->clear(); editCP->clear();
-        editCSC->clear(); editUserData->clear(); consoleOutput->clear();
-        editTarget->clear();
+        editCSC->clear(); editUserData->clear();
+        consoleOutput->clear(); editTarget->clear();
+        editPit->clear();
+        radSetPit->setChecked(true);
+        cmbRebootAction->setCurrentIndex(0); // Reset the combobox
 
         for (int i = 0; i < fileLayout->count(); ++i) {
             if (auto* chk = qobject_cast<QCheckBox*>(fileLayout->itemAt(i)->widget())) {
@@ -223,14 +269,12 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
     layout->addWidget(lineEdit, row, 2);
 
     connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
-        // Added the filter for .tar and .tar.md5 files
         QString file = QFileDialog::getOpenFileName(
             this,
             "Select Firmware File",
             "",
             "Firmware Archives (*.tar *.tar.md5);;All Files (*)"
         );
-
         if (!file.isEmpty()) {
             lineEdit->setText(file);
             chk->setChecked(true);
@@ -244,33 +288,45 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
 
 void BrokkrWrapper::executeBrokkr(const QStringList& args) {
     btnRun->setEnabled(false);
+    btnRebootDevice->setEnabled(false); // Disable during run
 
     QString program = "brokkr";
 #ifdef Q_OS_WIN
     program += ".exe";
 #endif
 
-    consoleOutput->append("<b>> " + program + " " + args.join(" ") + "</b>\n");
-    process->start(program, args);
+    // Universally inject --gui-mode at the start of any command
+    QStringList finalArgs;
+    finalArgs << "--gui-mode" << args;
+
+    consoleOutput->append("<b>> " + program + " " + finalArgs.join(" ") + "</b>\n");
+    process->start(program, finalArgs);
 }
 
 void BrokkrWrapper::onRunClicked() {
     QStringList args;
 
-    if (chkReboot->isChecked()) {
-        args << "--reboot";
-        executeBrokkr(args);
-        return;
-    }
-
     if (chkPrintPit->isChecked()) args << "--print-pit";
     if (chkWireless->isChecked()) args << "-w";
-    if (chkRedownload->isChecked()) args << "--redownload";
-    if (chkNoReboot->isChecked()) args << "--no-reboot";
+
+    // Handle mutually exclusive scroll box options
+    if (cmbRebootAction->currentText() == "Redownload") {
+        args << "--redownload";
+    }
+    else if (cmbRebootAction->currentText() == "No Reboot") {
+        args << "--no-reboot";
+    }
 
     if (!editTarget->text().isEmpty()) { args << "--target" << editTarget->text(); }
-    if (!editGetPit->text().isEmpty()) { args << "--get-pit" << editGetPit->text(); }
-    if (!editSetPit->text().isEmpty()) { args << "--set-pit" << editSetPit->text(); }
+
+    if (!editPit->text().isEmpty()) {
+        if (radSetPit->isChecked()) {
+            args << "--set-pit" << editPit->text();
+        }
+        else {
+            args << "--get-pit" << editPit->text();
+        }
+    }
 
     if (editAP->isEnabled() && !editAP->text().isEmpty()) { args << "-a" << editAP->text(); }
     if (editBL->isEnabled() && !editBL->text().isEmpty()) { args << "-b" << editBL->text(); }

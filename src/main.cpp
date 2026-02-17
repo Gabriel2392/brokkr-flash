@@ -30,8 +30,16 @@ int main(int argc, char **argv) {
   try {
     auto opt = brokkr::app::parse_cli(argc, argv);
 
+    if (opt.gui_mode) {
+        // Change log pattern to exclude datetime
+		spdlog::set_pattern("[%^%l%$] %v");
+    }
     if (opt._no_args) {
-		spdlog::error("No arguments provided. Use --help to see usage.");
+        if (opt.gui_mode) {
+			spdlog::error("Please tick some buttons to perform actions.");
+        } else {
+		    spdlog::error("No arguments provided. Use --help to see usage.");
+        }
 		return EXIT_FAILURE;
     }
     if (opt.help) {

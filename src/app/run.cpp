@@ -284,7 +284,7 @@ static bool run_wireless(const Options &opt) {
     return false;
   }
 
-  FlashInterface ui;
+  FlashInterface ui(!opt.gui_mode);
   ui.stage("Waiting for wireless device");
 
   brokkr::platform::TcpListener lst;
@@ -564,7 +564,7 @@ int run(const Options &opt) {
     storage.push_back(std::move(ctx));
   }
 
-  FlashInterface ui;
+  FlashInterface ui(!opt.gui_mode);
 
   auto shield =
       brokkr::core::SignalShield::enable([&](const char *sig_desc, int count) {

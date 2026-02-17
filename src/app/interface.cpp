@@ -181,10 +181,16 @@ bool FlashInterface::utf8_enabled_() {
 #endif
 }
 
-FlashInterface::FlashInterface() {
-  tty_ = is_tty_();
-  color_ = colors_enabled_();
-  utf8_ = utf8_enabled_();
+FlashInterface::FlashInterface(bool is_tty_enabled) {
+  if (is_tty_enabled) {
+      tty_ = is_tty_();
+      color_ = colors_enabled_();
+      utf8_ = utf8_enabled_();
+  } else {
+      tty_ = false;
+      color_ = false;
+	  utf8_ = false;
+  }
   start_ = last_rate_ts_ = last_redraw_ = std::chrono::steady_clock::now();
 
 #ifdef __linux__

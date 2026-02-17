@@ -67,8 +67,17 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
                   &bytes_written, nullptr)) {
       return static_cast<int>(bytes_written);
     }
-    spdlog::warn("WriteFile attempt {} failed with error code {}", i + 1,
-                 GetLastError());
+	int err = GetLastError();
+	// Certain errors indicate the device is no longer present (e.g. due to rebooting).
+	// Do not print out error. Instead, treat it as a disconnection and break out of the loop.
+    if (err == ERROR_GEN_FAILURE || 
+        err == ERROR_OPERATION_ABORTED ||
+        err == ERROR_NO_SUCH_DEVICE ||
+        err == ERROR_FILE_NOT_FOUND) {
+        spdlog::info("Device disconnected (likely rebooting).");
+        break;
+    }
+    spdlog::warn("WriteFile attempt {} failed with error code {}", i + 1, err);
   }
   return -1;
 }
@@ -92,8 +101,17 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
                  &bytes_read, nullptr)) {
       return static_cast<int>(bytes_read);
     }
-    spdlog::warn("ReadFile attempt {} failed with error code {}", i + 1,
-                 GetLastError());
+	int err = GetLastError();
+    // Certain errors indicate the device is no longer present (e.g. due to rebooting).
+    // Do not print out error. Instead, treat it as a disconnection and break out of the loop.
+    if (err == ERROR_GEN_FAILURE ||
+        err == ERROR_OPERATION_ABORTED ||
+        err == ERROR_NO_SUCH_DEVICE ||
+        err == ERROR_FILE_NOT_FOUND) {
+        spdlog::info("Device disconnected (likely rebooting).");
+        break;
+    }
+    spdlog::warn("ReadFile attempt {} failed with error code {}", i + 1, err);
   }
   return -1;
 }

@@ -6,6 +6,7 @@
 #include <QPushButton>
 #include <QTextEdit>
 #include <QProcess>
+#include <QRadioButton>
 
 class BrokkrWrapper : public QWidget {
     Q_OBJECT // MOC will find this perfectly now!
@@ -22,12 +23,17 @@ private:
     void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
     QLineEdit* editAP, * editBL, * editCP, * editCSC, * editUserData;
-    QLineEdit* editTarget, * editGetPit, * editSetPit;
-    QCheckBox* chkWireless, * chkReboot, * chkRedownload, * chkNoReboot, * chkPrintPit;
+    QLineEdit* editTarget;
+    QCheckBox* chkWireless, * chkNoReboot, * chkPrintPit;
     QPushButton* btnRun, * btnConnected;
     QTextEdit* consoleOutput;
     QProcess* process;
     QList<QLineEdit*> comBoxes;
     QProcess* pollProcess;
 	QTimer* deviceTimer;
+    QLineEdit* editPit;
+    QRadioButton* radSetPit;
+    QRadioButton* radGetPit;
+    QComboBox* cmbRebootAction;
+    QPushButton* btnRebootDevice;
 };

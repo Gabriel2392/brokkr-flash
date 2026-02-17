@@ -30,7 +30,7 @@ struct Options {
   bool print_connected = false;
   bool print_connected_only = false;
   bool print_pit = false;
-  bool no_help = false;
+  bool gui_mode = false;
   std::optional<std::filesystem::path> pit_print_in;
 
   bool _no_args = false; // Internal use only. Set to true if no arguments were provided. Used to show help text in that case.

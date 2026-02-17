@@ -32,7 +32,7 @@ namespace brokkr::app {
 
 class FlashInterface {
 public:
-  FlashInterface();
+  FlashInterface(bool is_tty_enabled);
   ~FlashInterface();
 
   FlashInterface(const FlashInterface &) = delete;

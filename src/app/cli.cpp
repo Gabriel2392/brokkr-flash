@@ -86,7 +86,8 @@ Options:
   --redownload                 after operation, try to reboot back into Download Mode (Might not work with all devices)
   --no-reboot                  do not reboot after flashing (incompatible with --redownload)
   --verbose, -v                enable verbose logging
-  --no-help                    does not print help message on invalid input, just an error. Useful for brokkr-gui to detect invalid input without showing the help message.
+  --gui-mode                   enable GUI mode. This is mostly for brokkr-gui, and it changes some output formats to be more machine-friendly. It does not enable the GUI by itself.
+  
 
 Flash inputs:
   -a <AP file>
@@ -132,8 +133,8 @@ Options parse_cli(int argc, char **argv) {
 	  spdlog::set_level(spdlog::level::off);
       continue;
     }
-    if (a == "--no-help") {
-      o.no_help = true;
+    if (a == "--gui-mode") {
+      o.gui_mode = true;
       continue;
 	}
 
@@ -301,7 +302,7 @@ Options parse_cli(int argc, char **argv) {
     }
   }
 
-  if (argc == 1) {
+  if (argc == 1 || (argc == 2 && o.gui_mode)) {
     o._no_args = true;
   }
   return o;
