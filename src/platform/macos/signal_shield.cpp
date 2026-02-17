@@ -29,13 +29,13 @@ namespace {
 
 sigset_t make_set() {
   sigset_t set{};
-  ::sigemptyset(&set);
+  sigemptyset(&set);
 
-  ::sigaddset(&set, SIGINT);
-  ::sigaddset(&set, SIGTERM);
-  ::sigaddset(&set, SIGHUP);
-  ::sigaddset(&set, SIGQUIT);
-  ::sigaddset(&set, SIGTSTP);
+  sigaddset(&set, SIGINT);
+  sigaddset(&set, SIGTERM);
+  sigaddset(&set, SIGHUP);
+  sigaddset(&set, SIGQUIT);
+  sigaddset(&set, SIGTSTP);
 
   return set;
 }
