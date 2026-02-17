@@ -21,7 +21,10 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include <charconv>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -37,18 +40,14 @@
 namespace brokkr::macos {
 namespace {
 
-std::optional<std::uint32_t> get_u32_property(io_service_t service,
-                                              CFStringRef key) {
-  CFTypeRef prop =
-      IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
-  if (!prop)
-    return std::nullopt;
+std::optional<std::uint32_t> get_u32_property(io_service_t service, CFStringRef key) {
+  CFTypeRef prop = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
+  if (!prop) return std::nullopt;
 
   std::uint32_t value = 0;
   bool ok = false;
   if (CFGetTypeID(prop) == CFNumberGetTypeID()) {
-    ok = CFNumberGetValue(static_cast<CFNumberRef>(prop), kCFNumberSInt32Type,
-                          &value);
+    ok = CFNumberGetValue(static_cast<CFNumberRef>(prop), kCFNumberSInt32Type, &value);
   }
   CFRelease(prop);
   return ok ? std::optional<std::uint32_t>{value} : std::nullopt;
@@ -61,29 +60,22 @@ std::optional<std::uint64_t> get_registry_entry_id(io_service_t service) {
   return id;
 }
 
-bool product_allowed(std::uint16_t product,
-                     const std::vector<std::uint16_t> &allowed) {
-  if (allowed.empty())
-    return true;
+bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t> &allowed) {
+  if (allowed.empty()) return true;
   return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
 }
 
 struct Match {
   UsbDeviceSysfsInfo info;
-  std::uint64_t registry_id = 0; // used only for ordering preference
+  std::uint64_t registry_id = 0;
 };
 
-void enumerate_class(const char *className, const EnumerateFilter &filter,
-                     std::vector<Match> &out) {
+void enumerate_class(const char *className, const EnumerateFilter &filter, std::vector<Match> &out) {
   CFMutableDictionaryRef dict = IOServiceMatching(className);
-  if (!dict)
-    return;
+  if (!dict) return;
 
   io_iterator_t iter = 0;
-  // IOServiceGetMatchingServices consumes the dictionary
-  if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) !=
-      KERN_SUCCESS)
-    return;
+  if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) != KERN_SUCCESS) return;
 
   io_service_t service;
   while ((service = IOIteratorNext(iter)) != 0) {
@@ -101,15 +93,10 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
     const auto product = static_cast<std::uint16_t>(*pid_opt);
     const auto locationID = *loc_opt;
 
-    spdlog::debug(
-        "Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
-        locationID, vendor, product);
+    spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
+                  locationID, vendor, product);
 
-    if (vendor != filter.vendor) {
-      IOObjectRelease(service);
-      continue;
-    }
-    if (!product_allowed(product, filter.products)) {
+    if (vendor != filter.vendor || !product_allowed(product, filter.products)) {
       IOObjectRelease(service);
       continue;
     }
@@ -132,27 +119,37 @@ void enumerate_class(const char *className, const EnumerateFilter &filter,
   IOObjectRelease(iter);
 }
 
+static std::optional<std::uint32_t> parse_u32_sysname(std::string_view sysname) {
+  while (!sysname.empty() && (sysname.front() == ' ' || sysname.front() == '\t')) sysname.remove_prefix(1);
+  while (!sysname.empty() && (sysname.back() == ' ' || sysname.back() == '\t' || sysname.back() == '\r' || sysname.back() == '\n')) sysname.remove_suffix(1);
+
+  int base = 10;
+  if (sysname.size() >= 2 && sysname[0] == '0' && (sysname[1] == 'x' || sysname[1] == 'X')) {
+    base = 16;
+    sysname.remove_prefix(2);
+  }
+
+  std::uint32_t v = 0;
+  auto [ptr, ec] = std::from_chars(sysname.data(), sysname.data() + sysname.size(), v, base);
+  if (ec != std::errc{} || ptr != sysname.data() + sysname.size()) return std::nullopt;
+  return v;
+}
+
 } // namespace
 
-// Not under anonymous namespace intentionally, used on usb_device.cpp as well.
 io_service_t find_device_by_location(std::uint32_t locationID) {
   const char *classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
 
   for (const char *cls : classNames) {
     CFMutableDictionaryRef dict = IOServiceMatching(cls);
-    if (!dict)
-      continue;
+    if (!dict) continue;
 
     io_iterator_t iter = 0;
-    if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) !=
-        KERN_SUCCESS) {
-      continue;
-    }
+    if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) != KERN_SUCCESS) continue;
 
     io_service_t service;
     while ((service = IOIteratorNext(iter)) != 0) {
       auto loc_opt = get_u32_property(service, CFSTR("locationID"));
-
       if (loc_opt && *loc_opt == locationID) {
         IOObjectRelease(iter);
         return service;
@@ -168,18 +165,14 @@ io_service_t find_device_by_location(std::uint32_t locationID) {
 std::string UsbDeviceSysfsInfo::devnode() const { return sysname; }
 
 std::string UsbDeviceSysfsInfo::describe() const {
-  return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor,
-                     product);
+  return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor, product);
 }
 
-std::vector<UsbDeviceSysfsInfo>
-enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
+std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
   std::vector<Match> matches;
 
   enumerate_class("IOUSBHostDevice", filter, matches);
-  if (matches.empty()) {
-    enumerate_class("IOUSBDevice", filter, matches);
-  }
+  if (matches.empty()) enumerate_class("IOUSBDevice", filter, matches);
 
   std::ranges::sort(matches, [](const Match &a, const Match &b) {
     return a.registry_id > b.registry_id;
@@ -187,25 +180,20 @@ enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
 
   std::vector<UsbDeviceSysfsInfo> out;
   out.reserve(matches.size());
-  for (auto &m : matches) {
-    out.emplace_back(std::move(m.info));
-  }
+  for (auto &m : matches) out.emplace_back(std::move(m.info));
   return out;
 }
 
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
-  std::uint32_t locationID = 0;
-  try {
-    std::string s(sysname);
-    locationID = static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
-  } catch (...) {
+  const auto loc = parse_u32_sysname(sysname);
+  if (!loc) {
     spdlog::error("Invalid sysname format: '{}'", sysname);
     return std::nullopt;
   }
 
-  io_service_t service = find_device_by_location(locationID);
+  io_service_t service = find_device_by_location(*loc);
   if (!service) {
-    spdlog::error("No device found with locationID: 0x{:08x}", locationID);
+    spdlog::error("No device found with locationID: 0x{:08x}", *loc);
     return std::nullopt;
   }
 
@@ -214,8 +202,7 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   IOObjectRelease(service);
 
   if (!vid_opt || !pid_opt) {
-    spdlog::error("Failed to read properties for device with locationID: 0x{:08x}",
-                  locationID);
+    spdlog::error("Failed to read properties for device with locationID: 0x{:08x}", *loc);
     return std::nullopt;
   }
 
@@ -223,7 +210,6 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   info.sysname = std::string(sysname);
   info.vendor = static_cast<std::uint16_t>(*vid_opt);
   info.product = static_cast<std::uint16_t>(*pid_opt);
-
   return info;
 }
 

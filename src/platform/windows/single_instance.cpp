@@ -17,67 +17,46 @@
 
 #include "single_instance.hpp"
 
-#include <cerrno>
-#include <cstring>
 #include <utility>
 
 namespace brokkr::windows {
 
 SingleInstanceLock::~SingleInstanceLock() {
-  if (handle_ != INVALID_HANDLE_VALUE) {
-    // Releasing the mutex is not strictly necessary before closing
-    // if we are the owner, but it's good practice.
-    ReleaseMutex(handle_);
+  if (handle_) {
+    // CloseHandle is sufficient for our single-instance lock semantics.
+    // (ReleaseMutex is thread-affine and can fail if destroyed on a different thread.)
     CloseHandle(handle_);
-    handle_ = INVALID_HANDLE_VALUE;
+    handle_ = nullptr;
   }
 }
 
-SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
-  *this = std::move(o);
-}
+SingleInstanceLock::SingleInstanceLock(SingleInstanceLock&& o) noexcept { *this = std::move(o); }
 
-SingleInstanceLock &
-SingleInstanceLock::operator=(SingleInstanceLock &&o) noexcept {
-  if (this == &o)
-    return *this;
+SingleInstanceLock& SingleInstanceLock::operator=(SingleInstanceLock&& o) noexcept {
+  if (this == &o) return *this;
 
-  if (handle_ != INVALID_HANDLE_VALUE) {
-    CloseHandle(handle_);
-  }
+  if (handle_) CloseHandle(handle_);
 
   handle_ = o.handle_;
   name_ = std::move(o.name_);
-
-  o.handle_ = INVALID_HANDLE_VALUE;
+  o.handle_ = nullptr;
   return *this;
 }
 
-std::optional<SingleInstanceLock>
-SingleInstanceLock::try_acquire(std::string name) {
-  if (name.empty())
-    return std::nullopt;
+std::optional<SingleInstanceLock> SingleInstanceLock::try_acquire(std::string name) {
+  if (name.empty()) return std::nullopt;
 
-  // Use "Local\" prefix to scope this lock to the current user session.
-  // Use "Global\" if the lock must be system-wide (requires admin).
-  std::string kernel_name = "Local\\" + name;
+  const std::string kernel_name = "Local\\" + name;
 
-  // CreateMutexA returns a handle even if the mutex already exists.
-  HANDLE hMutex = CreateMutexA(nullptr, TRUE, kernel_name.c_str());
+  HANDLE h = CreateMutexA(nullptr, TRUE, kernel_name.c_str());
+  if (!h) return std::nullopt;
 
-  if (hMutex == INVALID_HANDLE_VALUE || hMutex == nullptr) {
-    return std::nullopt;
-  }
-
-  // If the mutex already existed, GetLastError will return
-  // ERROR_ALREADY_EXISTS. In that case, another instance has the lock.
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    CloseHandle(hMutex);
+    CloseHandle(h);
     return std::nullopt;
   }
 
-  // We successfully created and acquired the mutex.
-  return SingleInstanceLock{hMutex, std::move(name)};
+  return SingleInstanceLock{h, std::move(name)};
 }
 
 } // namespace brokkr::windows

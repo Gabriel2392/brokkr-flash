@@ -17,13 +17,13 @@
 
 #pragma once
 
+#include "core/status.hpp"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
-#include <exception>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <queue>
 #include <thread>
 #include <vector>
@@ -32,29 +32,31 @@ namespace brokkr::core {
 
 class ThreadPool {
 public:
-  using Task = std::function<void()>;
+  using Task = std::function<Status()>;
 
   explicit ThreadPool(std::size_t thread_count);
   ~ThreadPool();
 
-  ThreadPool(const ThreadPool &) = delete;
-  ThreadPool &operator=(const ThreadPool &) = delete;
+  ThreadPool(const ThreadPool&) = delete;
+  ThreadPool& operator=(const ThreadPool&) = delete;
 
-  void submit(Task t);
-  void stop();
-  void wait();
+  Status submit(Task t) noexcept;
+  void request_cancel() noexcept { cancel_.store(true, std::memory_order_relaxed); }
 
-  std::size_t active() const noexcept {
-    return active_.load(std::memory_order_relaxed);
-  }
-  std::vector<std::exception_ptr> take_exceptions();
+  Status wait() noexcept;
+  void stop() noexcept;
+
+  bool cancelled() const noexcept { return cancel_.load(std::memory_order_relaxed); }
+  std::size_t active() const noexcept { return active_.load(std::memory_order_relaxed); }
 
 private:
-  void worker_loop_();
+  void worker_loop_() noexcept;
+  void set_error_(Status st) noexcept;
 
+private:
   std::vector<std::thread> workers_;
 
-  mutable std::mutex mtx_;
+  std::mutex mtx_;
   std::condition_variable cv_;
   std::condition_variable cv_done_;
 
@@ -62,9 +64,11 @@ private:
   bool stopping_ = false;
 
   std::atomic<std::size_t> active_{0};
+  std::atomic_bool cancel_{false};
 
-  std::mutex ex_mtx_;
-  std::vector<std::exception_ptr> exceptions_;
+  std::mutex err_mtx_;
+  bool has_error_ = false;
+  Status first_error_{};
 };
 
 } // namespace brokkr::core

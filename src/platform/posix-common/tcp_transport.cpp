@@ -15,8 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "tcp_transport.hpp"
-#include "filehandle.hpp"
+#include "platform/posix-common/tcp_transport.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -31,32 +30,29 @@
 
 #include <spdlog/spdlog.h>
 
-// Apple doesn't have SOCK_CLOEXEC, but accept4 is not
-// available either, so this is fine.
 #ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC 0
 #endif
 
 namespace brokkr::posix_common {
 
-TcpConnection::TcpConnection(int fd, std::string peer_ip,
-                             std::uint16_t peer_port)
-    : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port) {
+TcpConnection::TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port)
+  : fd_(fd)
+  , peer_ip_(std::move(peer_ip))
+  , peer_port_(peer_port)
+{
   set_sock_timeouts_();
 
   int one = 1;
-  do_setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+  (void)do_setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 }
 
 TcpConnection::~TcpConnection() { close_(); }
 
-TcpConnection::TcpConnection(TcpConnection &&o) noexcept {
-  *this = std::move(o);
-}
+TcpConnection::TcpConnection(TcpConnection&& o) noexcept { *this = std::move(o); }
 
-TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
-  if (this == &o)
-    return *this;
+TcpConnection& TcpConnection::operator=(TcpConnection&& o) noexcept {
+  if (this == &o) return *this;
   close_();
   fd_ = std::move(o.fd_);
   timeout_ms_ = o.timeout_ms_;
@@ -68,7 +64,7 @@ TcpConnection &TcpConnection::operator=(TcpConnection &&o) noexcept {
 
 void TcpConnection::close_() noexcept {
   if (fd_.valid()) {
-    spdlog::info("TcpConnection: closing connection to {}", peer_label());
+    spdlog::debug("TcpConnection: close {}", peer_label());
     fd_.close();
   }
 }
@@ -76,12 +72,14 @@ void TcpConnection::close_() noexcept {
 bool TcpConnection::connected() const noexcept { return fd_.valid(); }
 
 void TcpConnection::set_sock_timeouts_() noexcept {
+  if (!fd_.valid()) return;
+
   timeval tv{};
-  tv.tv_sec = timeout_ms_ / 1000;
+  tv.tv_sec  = timeout_ms_ / 1000;
   tv.tv_usec = (timeout_ms_ % 1000) * 1000;
 
-  do_setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  do_setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  (void)do_setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  (void)do_setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
 void TcpConnection::set_timeout_ms(int ms) noexcept {
@@ -94,12 +92,9 @@ std::string TcpConnection::peer_label() const {
 }
 
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
-  if (!connected()) {
-    spdlog::error("TcpConnection::send: not connected");
-    return -1;
-  }
+  if (!connected()) return -1;
 
-  const std::uint8_t *p = data.data();
+  const std::uint8_t* p = data.data();
   std::size_t left = data.size();
 
   while (left) {
@@ -107,29 +102,30 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
     if (n > 0) {
       p += static_cast<std::size_t>(n);
       left -= static_cast<std::size_t>(n);
-	  spdlog::debug("TcpConnection::send: sent {} bytes, {} bytes left", n, left);
+      if (spdlog::should_log(spdlog::level::debug)) {
+        spdlog::debug("TcpConnection::send {} bytes ({} left)", n, left);
+      }
       continue;
     }
 
     if (n == 0) {
-      spdlog::warn("TcpConnection::send: peer closed connection");
-      return 0;
-    }
-
-    if (errno == EINTR)
-      continue;
-
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      if (retries-- > 0) {
-        spdlog::warn("TcpConnection::send: Timeout");
-        ::usleep(10'000);
-        continue;
-      }
-      spdlog::warn("TcpConnection::send: Timeout, giving up");
+      spdlog::warn("TcpConnection::send: peer closed");
       return -1;
     }
 
-    spdlog::error("TcpConnection::send: send error: {}", std::strerror(errno));
+    const int e = errno;
+    if (e == EINTR) continue;
+
+    if (e == EAGAIN || e == EWOULDBLOCK) {
+      if (retries-- > 0) {
+        ::usleep(10'000);
+        continue;
+      }
+      spdlog::warn("TcpConnection::send: timeout (giving up)");
+      return -1;
+    }
+
+    spdlog::error("TcpConnection::send: {}", std::strerror(e));
     return -1;
   }
 
@@ -137,132 +133,107 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
 }
 
 int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
-  if (!connected()) {
-    spdlog::error("TcpConnection::recv: not connected");
-    return -1;
-  }
-  if (data.empty()) {
-    spdlog::warn("TcpConnection::recv: empty buffer");
-    return 0;
-  }
+  if (!connected()) return -1;
+  if (data.empty()) return 0;
 
   for (;;) {
     const ssize_t n = do_recv(fd_, data.data(), data.size(), 0);
     if (n > 0) {
-		spdlog::debug("TcpConnection::recv: received {} bytes", n);
-        return static_cast<int>(n);
+      if (spdlog::should_log(spdlog::level::debug)) {
+        spdlog::debug("TcpConnection::recv {} bytes", n);
+      }
+      return static_cast<int>(n);
     }
     if (n == 0) {
-      spdlog::warn("TcpConnection::recv: peer closed connection");
-      return 0;
+      spdlog::warn("TcpConnection::recv: peer closed");
+      return -1;
     }
 
-    if (errno == EINTR)
-      continue;
+    const int e = errno;
+    if (e == EINTR) continue;
 
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (e == EAGAIN || e == EWOULDBLOCK) {
       if (retries-- > 0) {
-        spdlog::warn("TcpConnection::recv: Timeout");
         ::usleep(10'000);
         continue;
       }
-      spdlog::warn("TcpConnection::recv: Timeout, giving up");
+      spdlog::warn("TcpConnection::recv: timeout (giving up)");
       return -1;
     }
-    spdlog::error("TcpConnection::recv: recv error: {}", std::strerror(errno));
+
+    spdlog::error("TcpConnection::recv: {}", std::strerror(e));
     return -1;
   }
 }
 
 TcpListener::~TcpListener() {
   if (fd_.valid()) {
-    spdlog::info("TcpListener: closing listener on {}:{}", bind_ip_, port_);
+    spdlog::debug("TcpListener: close {}:{}", bind_ip_, port_);
     fd_.close();
   }
 }
 
-bool TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
-                                  int backlog) {
-  if (fd_.valid()) {
-    spdlog::warn(
-        "TcpListener: already listening on {}:{}, closing old listener",
-        bind_ip_, port_);
-  }
+brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog) noexcept {
+  if (fd_.valid()) fd_.close();
 
   bind_ip_ = std::move(bind_ip);
   port_ = port;
 
   fd_.take(do_socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (!fd_.valid()) {
-    spdlog::error("TcpListener::bind_and_listen: socket error: {}",
-                  std::strerror(errno));
-    return false;
+    const int e = errno;
+    return brokkr::core::Status::Failf("socket: {}", std::strerror(e));
   }
 
   int one = 1;
-  do_setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+  (void)do_setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port_);
   if (::inet_pton(AF_INET, bind_ip_.c_str(), &addr.sin_addr) != 1) {
-    spdlog::error("TcpListener::bind_and_listen: invalid bind IP: {}",
-                  bind_ip_);
     fd_.close();
-    return false;
+    return brokkr::core::Status::Failf("Invalid bind ip: {}", bind_ip_);
   }
 
-  if (do_bind(fd_, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) !=
-      0) {
-    spdlog::error("TcpListener::bind_and_listen: bind error: {}",
-                  std::strerror(errno));
+  if (do_bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
+    const int e = errno;
     fd_.close();
-    return false;
+    return brokkr::core::Status::Failf("bind: {}", std::strerror(e));
   }
   if (do_listen(fd_, backlog) != 0) {
-    spdlog::error("TcpListener::bind_and_listen: listen error: {}",
-                  std::strerror(errno));
+    const int e = errno;
     fd_.close();
-    return false;
+    return brokkr::core::Status::Failf("listen: {}", std::strerror(e));
   }
+
   spdlog::info("TcpListener: listening on {}:{}", bind_ip_, port_);
-  return true;
+  return brokkr::core::Status::Ok();
 }
 
-std::optional<TcpConnection> TcpListener::accept_one() {
-  if (!fd_.valid()) {
-    spdlog::error("TcpListener::accept_one: not listening");
-    return std::nullopt;
-  }
+brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
+  if (!fd_.valid()) return brokkr::core::Result<TcpConnection>::Fail("TcpListener: not listening");
 
   sockaddr_in peer{};
   socklen_t peer_len = sizeof(peer);
 
-  const int cfd = do_accept(fd_, reinterpret_cast<sockaddr *>(&peer), &peer_len,
-                            SOCK_CLOEXEC);
+  const int cfd = do_accept(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len, SOCK_CLOEXEC);
   if (cfd < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return std::nullopt;
-    }
-    spdlog::error("TcpListener::accept_one: accept error: {}",
-                  std::strerror(errno));
-    return std::nullopt;
+    const int e = errno;
+    return brokkr::core::Result<TcpConnection>::Failf("accept: {}", std::strerror(e));
   }
 
   char ipbuf[INET_ADDRSTRLEN]{};
-  const char *ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
+  const char* ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
   if (!ip) {
-      spdlog::error("TcpListener::accept_one: inet_ntop error: {}",
-                  std::strerror(errno));
+    const int e = errno;
     ::close(cfd);
-	return std::nullopt;
+    return brokkr::core::Result<TcpConnection>::Failf("inet_ntop: {}", std::strerror(e));
   }
 
   const std::uint16_t p = ntohs(peer.sin_port);
-
-  spdlog::info("TcpListener: accepted connection from {}:{}", ip, p);
-
-  return TcpConnection(cfd, std::string(ip), p);
+  spdlog::info("TcpListener: accepted {}:{}", ip, p);
+  return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
 }
 
 } // namespace brokkr::posix_common

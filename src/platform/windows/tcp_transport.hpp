@@ -18,11 +18,12 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "core/status.hpp"
 
 #include <cstdint>
-#include <string>
-#include <span>
 #include <optional>
+#include <span>
+#include <string>
 
 #include <WinSock2.h>
 #include <windows.h>
@@ -34,13 +35,13 @@ public:
   Kind kind() const noexcept override { return Kind::TcpStream; }
 
   TcpConnection() = default;
-  explicit TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port);
+  explicit TcpConnection(SOCKET fd, std::string peer_ip, std::uint16_t peer_port);
 
-  TcpConnection(const TcpConnection &) = delete;
-  TcpConnection &operator=(const TcpConnection &) = delete;
+  TcpConnection(const TcpConnection&) = delete;
+  TcpConnection& operator=(const TcpConnection&) = delete;
 
-  TcpConnection(TcpConnection &&) noexcept;
-  TcpConnection &operator=(TcpConnection &&) noexcept;
+  TcpConnection(TcpConnection&&) noexcept;
+  TcpConnection& operator=(TcpConnection&&) noexcept;
 
   ~TcpConnection();
 
@@ -52,9 +53,7 @@ public:
   int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
   int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
 
-  int recv_zlp(unsigned /*retries*/ = 0) override {
-    return 0;
-  } // not used on tcp
+  int recv_zlp(unsigned /*retries*/ = 0) override { return 0; }
 
   std::string peer_label() const;
 
@@ -64,7 +63,6 @@ private:
 
 private:
   SOCKET fd_ = INVALID_SOCKET;
-  WSADATA ws_;
   int timeout_ms_ = 1000;
 
   std::string peer_ip_;
@@ -73,22 +71,21 @@ private:
 
 class TcpListener {
 public:
-  TcpListener();
+  TcpListener() = default;
   ~TcpListener();
 
-  TcpListener(const TcpListener &) = delete;
-  TcpListener &operator=(const TcpListener &) = delete;
+  TcpListener(const TcpListener&) = delete;
+  TcpListener& operator=(const TcpListener&) = delete;
 
-  bool bind_and_listen(std::string bind_ip, std::uint16_t port,
-                       int backlog = 4);
-
-  std::optional<TcpConnection> accept_one();
+  brokkr::core::Status bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog = 4) noexcept;
+  brokkr::core::Result<TcpConnection> accept_one() noexcept;
 
 private:
   SOCKET fd_ = INVALID_SOCKET;
   std::string bind_ip_;
   std::uint16_t port_ = 0;
-  WSADATA ws_;
+  WSADATA ws_{};
+  bool wsa_init_ = false;
 };
 
 } // namespace brokkr::windows

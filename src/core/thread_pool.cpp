@@ -17,41 +17,36 @@
 
 #include "core/thread_pool.hpp"
 
-#include <stdexcept>
+#include <exception>
 #include <utility>
+
+#include <spdlog/spdlog.h>
 
 namespace brokkr::core {
 
 ThreadPool::ThreadPool(std::size_t thread_count) {
-  if (thread_count == 0)
-    thread_count = 1;
+  if (thread_count == 0) thread_count = 1;
   workers_.reserve(thread_count);
-  for (std::size_t i = 0; i < thread_count; ++i) {
-    workers_.emplace_back([this] { worker_loop_(); });
-  }
+  for (std::size_t i = 0; i < thread_count; ++i) workers_.emplace_back([this] { worker_loop_(); });
 }
 
 ThreadPool::~ThreadPool() {
   stop();
-  for (auto &t : workers_) {
-    if (t.joinable())
-      t.join();
-  }
+  for (auto& t : workers_) if (t.joinable()) t.join();
 }
 
-void ThreadPool::submit(Task t) {
-  if (!t)
-    return;
+Status ThreadPool::submit(Task t) noexcept {
+  if (!t) return Status::Ok();
   {
     std::lock_guard lk(mtx_);
-    if (stopping_)
-      throw std::runtime_error("ThreadPool: submit on stopping pool");
+    if (stopping_) return Status::Fail("ThreadPool: submit on stopping pool");
     q_.push(std::move(t));
   }
   cv_.notify_one();
+  return Status::Ok();
 }
 
-void ThreadPool::stop() {
+void ThreadPool::stop() noexcept {
   {
     std::lock_guard lk(mtx_);
     stopping_ = true;
@@ -59,21 +54,30 @@ void ThreadPool::stop() {
   cv_.notify_all();
 }
 
-void ThreadPool::wait() {
-  std::unique_lock lk(mtx_);
-  cv_done_.wait(lk, [&] {
-    return q_.empty() && active_.load(std::memory_order_relaxed) == 0;
-  });
+Status ThreadPool::wait() noexcept {
+  {
+    std::unique_lock lk(mtx_);
+    cv_done_.wait(lk, [&] {
+      return q_.empty() && active_.load(std::memory_order_relaxed) == 0;
+    });
+  }
+
+  std::lock_guard elk(err_mtx_);
+  return has_error_ ? first_error_ : Status::Ok();
 }
 
-std::vector<std::exception_ptr> ThreadPool::take_exceptions() {
-  std::lock_guard lk(ex_mtx_);
-  auto out = std::move(exceptions_);
-  exceptions_.clear();
-  return out;
+void ThreadPool::set_error_(Status st) noexcept {
+  if (st.ok) return;
+
+  cancel_.store(true, std::memory_order_relaxed);
+
+  std::lock_guard lk(err_mtx_);
+  if (has_error_) return;
+  has_error_ = true;
+  first_error_ = std::move(st);
 }
 
-void ThreadPool::worker_loop_() {
+void ThreadPool::worker_loop_() noexcept {
   for (;;) {
     Task task;
 
@@ -82,8 +86,7 @@ void ThreadPool::worker_loop_() {
       cv_.wait(lk, [&] { return stopping_ || !q_.empty(); });
 
       if (q_.empty()) {
-        if (stopping_)
-          return;
+        if (stopping_) return;
         continue;
       }
 
@@ -92,19 +95,26 @@ void ThreadPool::worker_loop_() {
       active_.fetch_add(1, std::memory_order_relaxed);
     }
 
-    try {
-      task();
-    } catch (...) {
-      std::lock_guard elk(ex_mtx_);
-      exceptions_.push_back(std::current_exception());
+    if (!cancel_.load(std::memory_order_relaxed)) {
+      try {
+        Status st = task();
+        if (!st.ok) {
+          spdlog::debug("ThreadPool task failed: {}", st.msg);
+          set_error_(std::move(st));
+        }
+      } catch (const std::exception& e) {
+        spdlog::debug("ThreadPool task threw: {}", e.what());
+        set_error_(Status::Fail(e.what()));
+      } catch (...) {
+        spdlog::debug("ThreadPool task threw unknown exception");
+        set_error_(Status::Fail("Unknown exception in ThreadPool task"));
+      }
     }
 
     {
       std::lock_guard lk(mtx_);
       active_.fetch_sub(1, std::memory_order_relaxed);
-      if (q_.empty() && active_.load(std::memory_order_relaxed) == 0) {
-        cv_done_.notify_all();
-      }
+      if (q_.empty() && active_.load(std::memory_order_relaxed) == 0) cv_done_.notify_all();
     }
   }
 }

@@ -17,24 +17,35 @@
 
 #include "protocol/odin/pit_transfer.hpp"
 
-#include <stdexcept>
+#include <spdlog/spdlog.h>
 
 namespace brokkr::odin {
 
-std::vector<std::byte> download_pit_bytes(OdinCommands &odin,
-                                          unsigned retries) {
-  const auto pit_size = odin.get_pit_size(retries);
-  if (pit_size <= 0)
-    throw std::runtime_error("Device returned invalid PIT size");
+brokkr::core::Result<std::vector<std::byte>> download_pit_bytes(OdinCommands& odin, unsigned retries) noexcept {
+  auto szr = odin.get_pit_size(retries);
+  if (!szr) return brokkr::core::Result<std::vector<std::byte>>::Fail(std::move(szr.st.msg));
+
+  const auto pit_size = szr.value;
+  if (pit_size <= 0) {
+    return brokkr::core::Result<std::vector<std::byte>>::Fail("Device returned invalid PIT size");
+  }
 
   std::vector<std::byte> buf(static_cast<std::size_t>(pit_size));
-  odin.get_pit(std::span<std::byte>(buf.data(), buf.size()), retries);
-  return buf;
+  auto st = odin.get_pit(std::span<std::byte>(buf.data(), buf.size()), retries);
+  if (!st.ok) return brokkr::core::Result<std::vector<std::byte>>::Fail(std::move(st.msg));
+
+  spdlog::debug("Downloaded PIT bytes: {}", buf.size());
+  return brokkr::core::Result<std::vector<std::byte>>::Ok(std::move(buf));
 }
 
-pit::PitTable download_pit_table(OdinCommands &odin, unsigned retries) {
-  auto bytes = download_pit_bytes(odin, retries);
-  return pit::parse(std::span<const std::byte>(bytes.data(), bytes.size()));
+brokkr::core::Result<pit::PitTable> download_pit_table(OdinCommands& odin, unsigned retries) noexcept {
+  auto br = download_pit_bytes(odin, retries);
+  if (!br) return brokkr::core::Result<pit::PitTable>::Fail(std::move(br.st.msg));
+
+  auto pr = pit::parse(std::span<const std::byte>(br.value.data(), br.value.size()));
+  if (!pr) return brokkr::core::Result<pit::PitTable>::Fail(std::move(pr.st.msg));
+
+  return brokkr::core::Result<pit::PitTable>::Ok(std::move(pr.value));
 }
 
 } // namespace brokkr::odin

@@ -14,13 +14,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 #pragma once
 
+#include "core/status.hpp"
+
 #include <cstdint>
-#include <optional>
 #include <string>
+
 #include <windows.h>
-#include <winusb.h>
 
 namespace brokkr::windows {
 
@@ -41,27 +43,27 @@ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
-  UsbFsDevice(const UsbFsDevice &) = delete;
-  UsbFsDevice &operator=(const UsbFsDevice &) = delete;
+  UsbFsDevice(const UsbFsDevice&) = delete;
+  UsbFsDevice& operator=(const UsbFsDevice&) = delete;
 
-  UsbFsDevice(UsbFsDevice &&) noexcept;
-  UsbFsDevice &operator=(UsbFsDevice &&) noexcept;
+  UsbFsDevice(UsbFsDevice&&) noexcept;
+  UsbFsDevice& operator=(UsbFsDevice&&) noexcept;
 
-  bool open_and_init();
+  brokkr::core::Status open_and_init() noexcept;
   void close() noexcept;
 
   bool is_open() const noexcept { return handle_ != INVALID_HANDLE_VALUE; }
-
   HANDLE handle() const noexcept { return handle_; }
 
   UsbIds ids() const noexcept { return ids_; }
   UsbEndpoints endpoints() const noexcept { return eps_; }
   int interface_number() const noexcept { return ifc_num_; }
 
-  const std::string &devnode() const noexcept { return devnode_; }
+  const std::string& devnode() const noexcept { return devnode_; }
 
   bool has_packet_size_limit() const noexcept { return false; }
-  void reset_device();
+
+  void reset_device() noexcept;
 
 private:
   std::string devnode_;

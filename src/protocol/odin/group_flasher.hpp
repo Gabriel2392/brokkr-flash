@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "core/status.hpp"
 #include "platform/platform_all.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/odin_cmd.hpp"
@@ -33,85 +34,85 @@
 namespace brokkr::odin {
 
 struct UsbTarget {
-    std::string devnode;
-    brokkr::platform::UsbFsDevice dev;
-    brokkr::platform::UsbFsConnection conn;
+  std::string devnode;
+  brokkr::platform::UsbFsDevice dev;
+  brokkr::platform::UsbFsConnection conn;
 
-    InitTargetInfo init{};
-    ProtocolVersion proto = ProtocolVersion::PROTOCOL_NONE;
+  InitTargetInfo init{};
+  ProtocolVersion proto = ProtocolVersion::PROTOCOL_NONE;
 
-    std::vector<std::byte> pit_bytes{};
-    pit::PitTable pit_table{};
+  std::vector<std::byte> pit_bytes{};
+  pit::PitTable pit_table{};
 
-    explicit UsbTarget(std::string devnode_path)
-        : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
+  explicit UsbTarget(std::string devnode_path)
+    : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
 };
 
 struct Target {
-    std::string id;
-    brokkr::core::IByteTransport* link = nullptr;
+  std::string id;
+  brokkr::core::IByteTransport* link = nullptr;
 
-    InitTargetInfo init{};
-    ProtocolVersion proto = ProtocolVersion::PROTOCOL_NONE;
+  InitTargetInfo init{};
+  ProtocolVersion proto = ProtocolVersion::PROTOCOL_NONE;
 
-    std::vector<std::byte> pit_bytes{};
-    pit::PitTable pit_table{};
+  std::vector<std::byte> pit_bytes{};
+  pit::PitTable pit_table{};
 };
 
 struct PlanItem {
-    enum class Kind { Pit, Part };
-    Kind kind = Kind::Part;
+  enum class Kind { Pit, Part };
+  Kind kind = Kind::Part;
 
-    std::int32_t part_id = -1;
-    std::int32_t dev_type = 0;
+  std::int32_t part_id = -1;
+  std::int32_t dev_type = 0;
 
-    std::string part_name, pit_file_name, source_base;
-    std::uint64_t size = 0;
+  std::string part_name, pit_file_name, source_base;
+  std::uint64_t size = 0;
 };
 
 struct Cfg {
-    std::size_t buffer_bytes = 30ull * 1024 * 1024;
-    std::size_t pkt_all_v2plus = 1ull * 1024 * 1024;
-    std::size_t pkt_any_old    = 128ull * 1024;
+  std::size_t buffer_bytes = 30ull * 1024 * 1024;
+  std::size_t pkt_all_v2plus = 1ull * 1024 * 1024;
+  std::size_t pkt_any_old    = 128ull * 1024;
 
-    int preflash_timeout_ms = 1000;
-    unsigned preflash_retries = 2;
+  int preflash_timeout_ms = 1000;
+  unsigned preflash_retries = 2;
 
-    int flash_timeout_ms = 45'000;
+  int flash_timeout_ms = 45'000;
 
-    bool reboot_after = true;
-    bool redownload_after = false;
+  bool reboot_after = true;
+  bool redownload_after = false;
 };
 
 struct Ui {
-    std::function<void(std::size_t, const std::vector<std::string>&)> on_devices;
-    std::function<void(const std::string&)> on_model;
-    std::function<void(const std::string&)> on_stage;
+  std::function<void(std::size_t, const std::vector<std::string>&)> on_devices;
+  std::function<void(const std::string&)> on_model;
+  std::function<void(const std::string&)> on_stage;
 
-    std::function<void(const std::vector<PlanItem>&, std::uint64_t)> on_plan;
-    std::function<void(std::size_t)> on_item_active;
-    std::function<void(std::size_t)> on_item_done;
+  std::function<void(const std::vector<PlanItem>&, std::uint64_t)> on_plan;
+  std::function<void(std::size_t)> on_item_active;
+  std::function<void(std::size_t)> on_item_done;
 
-    std::function<void(std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t)> on_progress;
+  std::function<void(std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t)> on_progress;
 
-    std::function<void(const std::string&)> on_error;
-    std::function<void()> on_done;
+  std::function<void(const std::string&)> on_error;
+  std::function<void()> on_done;
 };
 
 enum class Mode { Flash, RebootOnly, PitSetOnly };
 
-void flash(std::vector<Target*>& devs,
-           const std::vector<ImageSpec>& sources,
-           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
-           const Cfg& cfg,
-           Ui ui,
-           Mode mode);
+brokkr::core::Status flash(std::vector<Target*>& devs,
+                           const std::vector<ImageSpec>& sources,
+                           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
+                           const Cfg& cfg,
+                           Ui ui,
+                           Mode mode) noexcept;
 
-void flash(std::vector<UsbTarget*>& devs,
-           const std::vector<ImageSpec>& sources,
-           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
-           const Cfg& cfg,
-           Ui ui,
-           Mode mode);
+brokkr::core::Status flash(std::vector<UsbTarget*>& devs,
+                           const std::vector<ImageSpec>& sources,
+                           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
+                           const Cfg& cfg,
+                           Ui ui,
+                           Mode mode) noexcept;
 
 } // namespace brokkr::odin

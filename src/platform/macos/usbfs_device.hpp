@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "core/status.hpp"
+
 #include <cstdint>
 #include <string>
 
@@ -40,13 +42,13 @@ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
-  UsbFsDevice(const UsbFsDevice &) = delete;
-  UsbFsDevice &operator=(const UsbFsDevice &) = delete;
+  UsbFsDevice(const UsbFsDevice&) = delete;
+  UsbFsDevice& operator=(const UsbFsDevice&) = delete;
 
-  UsbFsDevice(UsbFsDevice &&) noexcept;
-  UsbFsDevice &operator=(UsbFsDevice &&) noexcept;
+  UsbFsDevice(UsbFsDevice&&) noexcept;
+  UsbFsDevice& operator=(UsbFsDevice&&) noexcept;
 
-  void open_and_init();
+  brokkr::core::Status open_and_init() noexcept;
 
   void close() noexcept;
   bool is_open() const noexcept { return dev_intf_ != nullptr; }
@@ -57,20 +59,19 @@ public:
 
   bool has_packet_size_limit() const noexcept { return false; }
 
-  const std::string &devnode() const noexcept { return devnode_; }
+  const std::string& devnode() const noexcept { return devnode_; }
 
-  void reset_device();
+  void reset_device() noexcept;
 
-  // macOS IOKit accessors (used by UsbFsConnection)
-  void *usb_interface() const noexcept { return ifc_intf_; }
+  void* usb_interface() const noexcept { return ifc_intf_; }
   std::uint8_t pipe_in_ref() const noexcept { return pipe_in_; }
   std::uint8_t pipe_out_ref() const noexcept { return pipe_out_; }
 
 private:
   std::string devnode_;
 
-  void *dev_intf_ = nullptr;  // IOUSBDeviceInterface320**
-  void *ifc_intf_ = nullptr;  // IOUSBInterfaceInterface300**
+  void* dev_intf_ = nullptr; // IOUSBDeviceInterface320**
+  void* ifc_intf_ = nullptr; // IOUSBInterfaceInterface300**
 
   UsbIds ids_{};
   UsbEndpoints eps_{};

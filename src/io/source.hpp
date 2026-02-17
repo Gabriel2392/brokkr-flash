@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "core/status.hpp"
 #include "io/tar.hpp"
 
 #include <cstddef>
@@ -38,9 +39,9 @@ public:
   virtual std::size_t read(std::span<std::byte> out) = 0;
 };
 
-std::unique_ptr<ByteSource> open_raw_file(const std::filesystem::path &path);
-std::unique_ptr<ByteSource>
-open_tar_entry(const std::filesystem::path &tar_path, const TarEntry &entry);
+brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept;
+brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path, const TarEntry& entry) noexcept;
+
 inline std::string basename(std::string_view path_like) {
   std::filesystem::path p(path_like);
   return p.filename().string();

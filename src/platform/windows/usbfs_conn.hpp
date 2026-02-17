@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "core/status.hpp"
 #include "usbfs_device.hpp"
 
 #include <cstdint>
@@ -27,12 +28,13 @@ namespace brokkr::windows {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
 public:
-  explicit UsbFsConnection(UsbFsDevice &dev);
+  explicit UsbFsConnection(UsbFsDevice& dev);
 
-  Kind kind() const noexcept override { return Kind::UsbBulk; }
+  Kind kind() const noexcept override { return Kind::TcpStream; } // serial COM is closer to tcp than to usb. this is only used for handshake for now.
 
-  bool open();
+  brokkr::core::Status open() noexcept;
   void close() noexcept;
+
   bool connected() const noexcept override { return connected_; }
 
   int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
@@ -43,7 +45,7 @@ public:
   int timeout_ms() const noexcept override { return timeout_ms_; }
 
 private:
-  UsbFsDevice &dev_;
+  UsbFsDevice& dev_;
   bool connected_ = false;
   int timeout_ms_ = 1000;
 

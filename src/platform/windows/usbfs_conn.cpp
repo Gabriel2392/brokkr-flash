@@ -22,11 +22,6 @@
 #include <span>
 
 #include <windows.h>
-#include <winusb.h>
-
-#include <spdlog/spdlog.h>
-
-#pragma comment(lib, "winusb.lib")
 
 namespace brokkr::windows {
 
@@ -43,18 +38,19 @@ inline void backoff_10ms() noexcept { ::Sleep(10); }
 
 } // namespace
 
-UsbFsConnection::UsbFsConnection(UsbFsDevice &dev) : dev_(dev) {}
+UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
-bool UsbFsConnection::open() {
+brokkr::core::Status UsbFsConnection::open() noexcept {
+  if (connected_ && dev_.is_open()) return brokkr::core::Status::Ok();
+
   if (!dev_.is_open()) {
-    if (!dev_.open_and_init()) {
-      spdlog::error("Failed to open and initialize device at '{}'",
-                    dev_.devnode());
-      return false;
-    }
+    auto st = dev_.open_and_init();
+    if (!st.ok) return st;
   }
+
   connected_ = dev_.is_open();
-  return connected_;
+  return connected_ ? brokkr::core::Status::Ok()
+                    : brokkr::core::Status::Fail("UsbFsConnection: device not open after init");
 }
 
 void UsbFsConnection::close() noexcept {
@@ -62,10 +58,8 @@ void UsbFsConnection::close() noexcept {
   connected_ = false;
 }
 
-int UsbFsConnection::send(std::span<const std::uint8_t> data,
-                          unsigned retries) {
-  if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE)
-    return -1;
+int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
+  if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE) return -1;
 
   COMMTIMEOUTS timeouts{};
   timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(timeout_ms_);
@@ -77,7 +71,8 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
 
   while (left) {
     const DWORD want = static_cast<DWORD>(
-        std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
+      std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu))
+    );
 
     DWORD bytes_written = 0;
 
@@ -94,8 +89,8 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
-        spdlog::info("Device disconnected (likely rebooting).");
-        return 0;
+        connected_ = false;
+        return -1;
       }
 
       if (err == ERROR_TIMEOUT) {
@@ -117,11 +112,8 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
 }
 
 int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
-  if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE)
-    return -1;
-
-  if (data.empty())
-    return recv_zlp();
+  if (!connected_ || dev_.handle() == INVALID_HANDLE_VALUE) return -1;
+  if (data.empty()) return recv_zlp();
 
   COMMTIMEOUTS timeouts{};
   timeouts.ReadIntervalTimeout = MAXDWORD;
@@ -135,14 +127,14 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
   while (left) {
     const DWORD want = static_cast<DWORD>(
-        std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
+      std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu))
+    );
 
     DWORD bytes_read = 0;
 
     unsigned attempt = 0;
     for (;;) {
       if (::ReadFile(dev_.handle(), p, want, &bytes_read, nullptr)) {
-        // ReadFile can succeed with 0 bytes due to COMMTIMEOUTS.
         if (bytes_read == 0) {
           if (total > 0) return static_cast<int>(total);
           if (attempt++ >= retries) return -1;
@@ -154,8 +146,8 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
-        spdlog::info("Device disconnected (likely rebooting).");
-        return 0;
+        connected_ = false;
+        return -1;
       }
 
       if (err == ERROR_TIMEOUT) {
@@ -173,8 +165,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
     left -= bytes_read;
     total += bytes_read;
 
-    if (bytes_read < want)
-      break;
+    if (bytes_read < want) break;
   }
 
   return static_cast<int>(total);

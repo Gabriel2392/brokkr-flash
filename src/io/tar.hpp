@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "core/status.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -35,48 +37,39 @@ struct TarEntry {
 
 class TarArchive {
 public:
-  explicit TarArchive(std::string path, bool validate_header_checksums = true);
+  static brokkr::core::Result<TarArchive> open(std::string path, bool validate_header_checksums = true) noexcept;
 
-  const std::string &path() const noexcept { return path_; }
-  const std::vector<TarEntry> &entries() const noexcept { return entries_; }
+  const std::string& path() const noexcept { return path_; }
+  const std::vector<TarEntry>& entries() const noexcept { return entries_; }
 
   std::optional<TarEntry> find_by_basename(std::string_view base) const;
 
-  static bool is_tar_file(const std::string &path);
+  static bool is_tar_file(const std::string& path) noexcept;
 
-  std::optional<std::uint64_t> payload_size_bytes() const noexcept {
-    return payload_size_bytes_;
-  }
+  std::optional<std::uint64_t> payload_size_bytes() const noexcept { return payload_size_bytes_; }
 
 private:
-  static bool validate_header_checksum(std::span<const std::byte, 512> header);
-  static std::uint64_t parse_octal(std::string_view s);
-  static std::uint64_t parse_tar_number(const char *p, std::size_t n);
+  TarArchive() = default;
 
-  static std::string trim_cstr_field(const char *p, std::size_t n);
-  static bool header_all_zero(std::span<const std::byte, 512> header);
+  static bool validate_header_checksum(std::span<const std::byte, 512> header) noexcept;
+  static std::uint64_t parse_octal(std::string_view s) noexcept;
+  static brokkr::core::Result<std::uint64_t> parse_tar_number(const char* p, std::size_t n) noexcept;
 
-  static std::string join_ustar_name(std::string_view prefix,
-                                     std::string_view name);
+  static std::string trim_cstr_field(const char* p, std::size_t n);
+  static bool header_all_zero(std::span<const std::byte, 512> header) noexcept;
+
+  static std::string join_ustar_name(std::string_view prefix, std::string_view name);
 
   struct PaxKV {
     std::optional<std::string> path;
     std::optional<std::uint64_t> size;
-    void clear() {
-      path.reset();
-      size.reset();
-    }
-    void merge_from(const PaxKV &o) {
-      if (o.path)
-        path = *o.path;
-      if (o.size)
-        size = *o.size;
-    }
+    void clear() { path.reset(); size.reset(); }
+    void merge_from(const PaxKV& o) { if (o.path) path = *o.path; if (o.size) size = *o.size; }
   };
 
-  static PaxKV parse_pax_payload(std::string_view payload);
+  static brokkr::core::Result<PaxKV> parse_pax_payload(std::string_view payload) noexcept;
 
-  [[nodiscard]] bool scan_();
+  brokkr::core::Status scan_() noexcept;
 
 private:
   std::string path_;

@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "core/status.hpp"
 #include "platform/macos/usbfs_device.hpp"
 
 #include <cstddef>
@@ -30,16 +31,15 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
 public:
   Kind kind() const noexcept override { return Kind::UsbBulk; }
 
-  explicit UsbFsConnection(UsbFsDevice &dev);
+  explicit UsbFsConnection(UsbFsDevice& dev);
 
-  bool open();
+  brokkr::core::Status open() noexcept;
   void close() noexcept;
 
   bool connected() const noexcept override { return connected_; }
 
   int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
   int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
-
   int recv_zlp(unsigned retries = 0) override;
 
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
@@ -48,7 +48,7 @@ public:
   std::size_t max_packet_size() const noexcept { return max_pack_size_; }
 
 private:
-  UsbFsDevice &dev_;
+  UsbFsDevice& dev_;
   bool connected_ = false;
 
   int timeout_ms_ = 200;

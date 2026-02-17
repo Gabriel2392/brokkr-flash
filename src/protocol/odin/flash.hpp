@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "core/status.hpp"
 #include "io/source.hpp"
 #include "io/tar.hpp"
 #include "protocol/odin/pit.hpp"
@@ -28,7 +29,6 @@
 #include <limits>
 #include <memory>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,7 +57,7 @@ struct ImageSpec {
 
   std::string display;
 
-  std::unique_ptr<io::ByteSource> open() const;
+  brokkr::core::Result<std::unique_ptr<io::ByteSource>> open() const noexcept;
 };
 
 struct FlashItem {
@@ -65,35 +65,29 @@ struct FlashItem {
   ImageSpec spec;
 };
 
-std::vector<ImageSpec>
-expand_inputs_tar_or_raw(const std::vector<std::filesystem::path> &inputs);
-std::vector<FlashItem> map_to_pit(const pit::PitTable &pit_table,
-                                  const std::vector<ImageSpec> &sources);
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std::vector<std::filesystem::path>& inputs) noexcept;
+brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table, const std::vector<ImageSpec>& sources) noexcept;
 
 namespace detail {
 
-inline void checked_add_u64(std::uint64_t &acc, std::uint64_t v,
-                            std::string_view what) {
+inline brokkr::core::Status checked_add_u64(std::uint64_t& acc, std::uint64_t v, std::string_view what) noexcept {
   if (std::numeric_limits<std::uint64_t>::max() - acc < v) {
-    throw std::overflow_error("Overflow while computing " + std::string(what));
+    return brokkr::core::Status::Fail("Overflow while computing " + std::string(what));
   }
   acc += v;
+  return brokkr::core::Status::Ok();
 }
 
-constexpr std::uint64_t round_up64(std::uint64_t n,
-                                   std::uint64_t base) noexcept {
-  if (base == 0)
-    return n;
+constexpr std::uint64_t round_up64(std::uint64_t n, std::uint64_t base) noexcept {
+  if (base == 0) return n;
   const auto r = n % base;
   return r ? (n + (base - r)) : n;
 }
 
 inline constexpr std::uint64_t kOneMiB = 1024ull * 1024ull;
-
 inline constexpr std::size_t kMaxNonFinalLz4Blocks = 31;
 
-inline std::size_t
-lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
+inline std::size_t lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
   const auto want = static_cast<std::size_t>(buffer_bytes / kOneMiB);
   return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
 }
@@ -104,12 +98,6 @@ struct PreparedLz4Window {
   std::uint64_t decomp_size = 0;
   bool last = false;
 };
-
-PreparedLz4Window prepare_lz4_window(brokkr::io::Lz4BlockStreamReader &r,
-                                     std::uint64_t decomp_sent,
-                                     std::size_t max_blocks,
-                                     std::size_t packet_size,
-                                     std::vector<std::byte> &stream);
 
 } // namespace detail
 } // namespace brokkr::odin

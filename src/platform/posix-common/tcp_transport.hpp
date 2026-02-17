@@ -18,10 +18,10 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "core/status.hpp"
 #include "filehandle.hpp"
 
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string>
 
@@ -34,11 +34,11 @@ public:
   TcpConnection() = default;
   explicit TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port);
 
-  TcpConnection(const TcpConnection &) = delete;
-  TcpConnection &operator=(const TcpConnection &) = delete;
+  TcpConnection(const TcpConnection&) = delete;
+  TcpConnection& operator=(const TcpConnection&) = delete;
 
-  TcpConnection(TcpConnection &&) noexcept;
-  TcpConnection &operator=(TcpConnection &&) noexcept;
+  TcpConnection(TcpConnection&&) noexcept;
+  TcpConnection& operator=(TcpConnection&&) noexcept;
 
   ~TcpConnection();
 
@@ -59,7 +59,7 @@ private:
   void set_sock_timeouts_() noexcept;
 
 private:
-  FileHandle fd_;
+  brokkr::FileHandle fd_;
   int timeout_ms_ = 1000;
 
   std::string peer_ip_;
@@ -71,16 +71,14 @@ public:
   TcpListener() = default;
   ~TcpListener();
 
-  TcpListener(const TcpListener &) = delete;
-  TcpListener &operator=(const TcpListener &) = delete;
+  TcpListener(const TcpListener&) = delete;
+  TcpListener& operator=(const TcpListener&) = delete;
 
-  [[nodiscard]] bool bind_and_listen(std::string bind_ip, std::uint16_t port,
-                                     int backlog = 4);
-
-  std::optional<TcpConnection> accept_one();
+  brokkr::core::Status bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog = 4) noexcept;
+  brokkr::core::Result<TcpConnection> accept_one() noexcept;
 
 private:
-  FileHandle fd_;
+  brokkr::FileHandle fd_;
   std::string bind_ip_;
   std::uint16_t port_ = 0;
 };

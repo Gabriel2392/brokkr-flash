@@ -18,11 +18,11 @@
 #pragma once
 
 #include "app/interface.hpp"
+#include "core/status.hpp"
 
 #include <array>
 #include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <vector>
 
 namespace brokkr::app {
@@ -33,7 +33,7 @@ struct Md5Job {
   std::array<unsigned char, 16> expected{};
 };
 
-std::vector<Md5Job> md5_jobs(const std::vector<std::filesystem::path> &inputs);
-bool md5_verify(const std::vector<Md5Job> &jobs, FlashInterface &ui);
+brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept;
+brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, FlashInterface& ui) noexcept;
 
 } // namespace brokkr::app

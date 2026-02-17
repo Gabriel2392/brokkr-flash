@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "core/status.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -33,8 +35,8 @@ inline constexpr std::int32_t PIT_MAGIC = 0x12349876;
 struct PitHeaderWire {
   std::int32_t magic;
   std::int32_t count;
-  std::int8_t com_tar2[8];
-  std::int8_t cpu_bl_id[8];
+  std::int8_t  com_tar2[8];
+  std::int8_t  cpu_bl_id[8];
   std::uint16_t lu_count;
   std::uint16_t reserved;
 };
@@ -50,16 +52,13 @@ struct PartitionInfoWire {
   std::int32_t updateAttribute;
 
   std::int32_t blockSize;
-
   std::int32_t blockLength;
-
   std::int32_t offset;
-
   std::int32_t fileSize;
 
-  std::int8_t name[32];
-  std::int8_t fileName[32];
-  std::int8_t deltaName[32];
+  std::int8_t  name[32];
+  std::int8_t  fileName[32];
+  std::int8_t  deltaName[32];
 };
 #pragma pack(pop)
 static_assert(sizeof(PartitionInfoWire) == 4 * 9 + 32 * 3);
@@ -70,8 +69,8 @@ struct Partition {
 
   std::int32_t begin_block = 0;
   std::int32_t block_bytes = 0;
-  std::int32_t block_size = 0;
-  std::uint64_t file_size = 0;
+  std::int32_t block_size  = 0;
+  std::uint64_t file_size  = 0;
 
   std::string name;
   std::string file_name;
@@ -84,11 +83,10 @@ struct PitTable {
 
   std::vector<Partition> partitions;
 
-  const Partition *find_by_file_name(std::string_view basename) const noexcept;
-
+  const Partition* find_by_file_name(std::string_view basename) const noexcept;
   std::optional<std::int32_t> common_block_size() const noexcept;
 };
 
-PitTable parse(std::span<const std::byte> bytes);
+brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept;
 
 } // namespace brokkr::odin::pit

@@ -17,7 +17,9 @@
 
 #pragma once
 
+#include "core/status.hpp"
 #include "platform/posix-common/filehandle.hpp"
+
 #include <cstdint>
 #include <string>
 
@@ -29,10 +31,10 @@ struct UsbIds {
 };
 
 struct UsbEndpoints {
-  std::uint8_t bulk_in = 0;
-  std::uint8_t bulk_out = 0;
+  std::uint8_t  bulk_in  = 0;
+  std::uint8_t  bulk_out = 0;
 
-  std::uint16_t bulk_in_max_packet = 0;
+  std::uint16_t bulk_in_max_packet  = 0;
   std::uint16_t bulk_out_max_packet = 0;
 };
 
@@ -41,13 +43,13 @@ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
-  UsbFsDevice(const UsbFsDevice &) = delete;
-  UsbFsDevice &operator=(const UsbFsDevice &) = delete;
+  UsbFsDevice(const UsbFsDevice&) = delete;
+  UsbFsDevice& operator=(const UsbFsDevice&) = delete;
 
-  UsbFsDevice(UsbFsDevice &&) noexcept;
-  UsbFsDevice &operator=(UsbFsDevice &&) noexcept;
+  UsbFsDevice(UsbFsDevice&&) noexcept;
+  UsbFsDevice& operator=(UsbFsDevice&&) noexcept;
 
-  bool open_and_init();
+  brokkr::core::Status open_and_init() noexcept;
 
   void close() noexcept;
   bool is_open() const noexcept { return fd_.valid(); }
@@ -62,22 +64,23 @@ public:
   std::uint32_t caps() const noexcept { return caps_; }
   bool has_packet_size_limit() const noexcept;
 
-  const std::string &devnode() const noexcept { return devnode_; }
+  const std::string& devnode() const noexcept { return devnode_; }
 
-  void reset_device();
+  void reset_device() noexcept;
 
 private:
-  bool parse_descriptors_();
-  void query_caps_();
-  bool kernel_driver_active_() const;
-  bool detach_kernel_driver_();
-  bool attach_kernel_driver_();
-  bool claim_interface_();
-  bool release_interface_();
+  brokkr::core::Status parse_descriptors_() noexcept;
+  void query_caps_() noexcept;
+
+  bool kernel_driver_active_() const noexcept;
+  brokkr::core::Status detach_kernel_driver_() noexcept;
+  void attach_kernel_driver_() noexcept;
+  brokkr::core::Status claim_interface_() noexcept;
+  void release_interface_() noexcept;
 
 private:
   std::string devnode_;
-  FileHandle fd_;
+  brokkr::FileHandle fd_;
 
   bool writable_ = true;
 

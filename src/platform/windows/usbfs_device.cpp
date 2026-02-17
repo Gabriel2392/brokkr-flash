@@ -14,104 +14,118 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
 #include "usbfs_device.hpp"
-#include <iostream>
-#include <stdexcept>
-#include <system_error>
 
-#include <spdlog/spdlog.h>
-
-#pragma comment(lib, "winusb.lib")
+#include <cstring>
+#include <utility>
 
 namespace brokkr::windows {
 
-UsbFsDevice::UsbFsDevice(std::string devnode) : devnode_(std::move(devnode)) {}
+namespace {
 
-UsbFsDevice::~UsbFsDevice() { close(); }
+static std::string win32_err(DWORD e) {
+  char* buf = nullptr;
+  const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
 
-UsbFsDevice::UsbFsDevice(UsbFsDevice &&other) noexcept
-    : devnode_(std::move(other.devnode_)), handle_(other.handle_),
-      ids_(other.ids_), eps_(other.eps_), ifc_num_(other.ifc_num_) {
-  other.handle_ = INVALID_HANDLE_VALUE;
+  const DWORD n = ::FormatMessageA(
+    flags, nullptr, e, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+    reinterpret_cast<LPSTR>(&buf), 0, nullptr
+  );
+
+  std::string out;
+  if (n && buf) out.assign(buf, buf + n);
+  if (buf) ::LocalFree(buf);
+
+  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) {
+    out.pop_back();
+  }
+  if (out.empty()) out = "error " + std::to_string(static_cast<unsigned>(e));
+  return out;
 }
 
-UsbFsDevice &UsbFsDevice::operator=(UsbFsDevice &&other) noexcept {
-  if (this != &other) {
-    close();
-    devnode_ = std::move(other.devnode_);
-    handle_ = other.handle_;
-    ids_ = other.ids_;
-    eps_ = other.eps_;
-    ifc_num_ = other.ifc_num_;
+} // namespace
 
-    other.handle_ = INVALID_HANDLE_VALUE;
-  }
+UsbFsDevice::UsbFsDevice(std::string devnode) : devnode_(std::move(devnode)) {}
+UsbFsDevice::~UsbFsDevice() { close(); }
+
+UsbFsDevice::UsbFsDevice(UsbFsDevice&& o) noexcept { *this = std::move(o); }
+
+UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
+  if (this == &o) return *this;
+  close();
+
+  devnode_ = std::move(o.devnode_);
+  handle_ = o.handle_;
+  ids_ = o.ids_;
+  eps_ = o.eps_;
+  ifc_num_ = o.ifc_num_;
+
+  o.handle_ = INVALID_HANDLE_VALUE;
+  o.ifc_num_ = -1;
+  o.ids_ = {};
+  o.eps_ = {};
   return *this;
 }
 
-bool UsbFsDevice::open_and_init() {
-  // Format the COM port path correctly.
-  // Win32 requires the \\.\ prefix to open ports like COM10 and higher.
+brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
+  close();
+
+  // Format the COM port path correctly: \\.\COM10 and above require the prefix.
   std::string port_path = devnode_;
-  if (port_path.find("\\\\.\\") == std::string::npos &&
-      port_path.find("COM") != std::string::npos) {
+  if (port_path.rfind("\\\\.\\", 0) != 0 && port_path.find("COM") != std::string::npos) {
     port_path = "\\\\.\\" + port_path;
   }
 
-  spdlog::info("Opening COM port: {}", port_path);
-
-  handle_ = CreateFileA(port_path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                        0, // COM ports strictly require exclusive access (0)
-                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  handle_ = ::CreateFileA(
+    port_path.c_str(),
+    GENERIC_READ | GENERIC_WRITE,
+    0, // COM ports generally require exclusive access
+    nullptr,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    nullptr
+  );
 
   if (handle_ == INVALID_HANDLE_VALUE) {
-    spdlog::error("Failed to open COM port '{}', error code: {}", port_path,
-                  GetLastError());
-    return false;
+    const DWORD e = ::GetLastError();
+    return brokkr::core::Status::Fail("Failed to open COM port '" + port_path + "': " + win32_err(e));
   }
 
-  // Configure standard serial parameters
-  DCB dcbSerialParams = {0};
-  dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
+  DCB dcb{};
+  dcb.DCBlength = sizeof(dcb);
 
-  if (GetCommState(handle_, &dcbSerialParams)) {
-    // 115200 is standard for most modems and Samsung CDC interfaces
-    dcbSerialParams.BaudRate = CBR_115200;
-    dcbSerialParams.ByteSize = 8;
-    dcbSerialParams.StopBits = ONESTOPBIT;
-    dcbSerialParams.Parity = NOPARITY;
-
-    if (!SetCommState(handle_, &dcbSerialParams)) {
-      close();
-      spdlog::error("Failed to set COM state for '{}', error code: {}",
-                    port_path, GetLastError());
-      return false;
-    }
-  } else {
+  if (!::GetCommState(handle_, &dcb)) {
+    const DWORD e = ::GetLastError();
     close();
-    spdlog::error("Failed to get COM state for '{}', error code: {}", port_path,
-                  GetLastError());
-    return false;
+    return brokkr::core::Status::Fail("GetCommState failed: " + win32_err(e));
   }
 
-  // Note: A COM port is a stream, not a packet interface.
-  // We leave the UsbEndpoints (eps_) zeroed out as they are irrelevant for
-  // Serial IO.
-  return true;
+  dcb.BaudRate = CBR_115200;
+  dcb.ByteSize = 8;
+  dcb.StopBits = ONESTOPBIT;
+  dcb.Parity   = NOPARITY;
+
+  if (!::SetCommState(handle_, &dcb)) {
+    const DWORD e = ::GetLastError();
+    close();
+    return brokkr::core::Status::Fail("SetCommState failed: " + win32_err(e));
+  }
+
+  // Serial stream: endpoints are irrelevant; keep eps_ zeroed.
+  return brokkr::core::Status::Ok();
 }
 
 void UsbFsDevice::close() noexcept {
   if (handle_ != INVALID_HANDLE_VALUE) {
-    CloseHandle(handle_);
+    ::CloseHandle(handle_);
     handle_ = INVALID_HANDLE_VALUE;
   }
 }
 
-void UsbFsDevice::reset_device() {
-  if (!is_open())
-    return;
-  // Flush the TX/RX buffers to simulate a device reset on the pipe
-  PurgeComm(handle_,
-            PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR);
+void UsbFsDevice::reset_device() noexcept {
+  if (!is_open()) return;
+  (void)::PurgeComm(handle_, PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR);
 }
+
 } // namespace brokkr::windows

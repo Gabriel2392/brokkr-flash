@@ -17,10 +17,11 @@
 
 #pragma once
 
+#include "core/status.hpp"
+
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <vector>
 
 namespace brokkr::app {
 
@@ -33,10 +34,9 @@ struct Options {
   bool gui_mode = false;
   std::optional<std::filesystem::path> pit_print_in;
 
-  bool _no_args = false; // Internal use only. Set to true if no arguments were provided. Used to show help text in that case.
+  bool _no_args = false;
 
-  bool wireless = false; // Send bytes over tcp. Just listen on :13579 for
-                         // connection. Protocol is exactly the same.
+  bool wireless = false;
 
   bool reboot_only = false;
   bool redownload = false;
@@ -55,7 +55,7 @@ struct Options {
   std::optional<std::filesystem::path> file_u;
 };
 
-std::optional<Options> parse_cli(int argc, char **argv);
+brokkr::core::Result<Options> parse_cli(int argc, char** argv) noexcept;
 [[nodiscard]] std::string usage_text();
 
 } // namespace brokkr::app

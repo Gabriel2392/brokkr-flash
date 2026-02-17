@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "core/status.hpp"
 #include "protocol/odin/odin_cmd.hpp"
 #include "protocol/odin/pit.hpp"
 
@@ -27,8 +28,7 @@
 
 namespace brokkr::odin {
 
-std::vector<std::byte> download_pit_bytes(OdinCommands &odin,
-                                          unsigned retries = 8);
-pit::PitTable download_pit_table(OdinCommands &odin, unsigned retries = 8);
+brokkr::core::Result<std::vector<std::byte>> download_pit_bytes(OdinCommands& odin, unsigned retries = 8) noexcept;
+brokkr::core::Result<pit::PitTable> download_pit_table(OdinCommands& odin, unsigned retries = 8) noexcept;
 
 } // namespace brokkr::odin

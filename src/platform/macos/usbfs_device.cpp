@@ -17,9 +17,10 @@
 
 #include "platform/macos/usbfs_device.hpp"
 
+#include <charconv>
 #include <cstdint>
-#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -40,31 +41,41 @@ extern io_service_t find_device_by_location(std::uint32_t locationID);
 
 namespace {
 
-[[noreturn]] static void throw_iokit(const char *what, kern_return_t kr) {
-  spdlog::error("{}: IOKit error 0x{:08x}", what, static_cast<unsigned>(kr));
-  throw std::runtime_error(what);
+static brokkr::core::Status fail_iokit(const char* what, kern_return_t kr) noexcept {
+  return brokkr::core::Status::Failf("{}: IOKit error 0x{:08x}", what, static_cast<unsigned>(kr));
 }
 
-static std::uint32_t parse_location_id(const std::string &s) {
-  return static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
+static std::optional<std::uint32_t> parse_location_id(std::string_view s) noexcept {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
+
+  int base = 10;
+  if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+    base = 16;
+    s.remove_prefix(2);
+  }
+
+  std::uint32_t v = 0;
+  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, base);
+  if (ec != std::errc{} || ptr != s.data() + s.size()) return std::nullopt;
+  return v;
 }
 
 } // namespace
 
 UsbFsDevice::UsbFsDevice(std::string devnode) : devnode_(std::move(devnode)) {}
-
 UsbFsDevice::~UsbFsDevice() { close(); }
 
-UsbFsDevice::UsbFsDevice(UsbFsDevice &&o) noexcept { *this = std::move(o); }
+UsbFsDevice::UsbFsDevice(UsbFsDevice&& o) noexcept { *this = std::move(o); }
 
-UsbFsDevice &UsbFsDevice::operator=(UsbFsDevice &&o) noexcept {
-  if (this == &o)
-    return *this;
+UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
+  if (this == &o) return *this;
   close();
 
   devnode_ = std::move(o.devnode_);
   dev_intf_ = o.dev_intf_;
   o.dev_intf_ = nullptr;
+
   ifc_intf_ = o.ifc_intf_;
   o.ifc_intf_ = nullptr;
 
@@ -72,75 +83,64 @@ UsbFsDevice &UsbFsDevice::operator=(UsbFsDevice &&o) noexcept {
   eps_ = o.eps_;
   ifc_num_ = o.ifc_num_;
   o.ifc_num_ = -1;
+
   pipe_in_ = o.pipe_in_;
   o.pipe_in_ = 0;
+
   pipe_out_ = o.pipe_out_;
   o.pipe_out_ = 0;
 
   return *this;
 }
 
-void UsbFsDevice::open_and_init() {
+brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   close();
 
-  const std::uint32_t locationID = parse_location_id(devnode_);
-  io_service_t service = find_device_by_location(locationID);
-  if (!service) {
-    throw std::runtime_error("USB device not found at location: " + devnode_);
-  }
+  const auto loc = parse_location_id(devnode_);
+  if (!loc) return brokkr::core::Status::Failf("Invalid macOS USB locationID sysname: '{}'", devnode_);
 
-  // Create plugin interface for the device
-  IOCFPlugInInterface **plugIn = nullptr;
-  SInt32 score;
+  io_service_t service = find_device_by_location(*loc);
+  if (!service) return brokkr::core::Status::Failf("USB device not found at location: {}", devnode_);
+
+  IOCFPlugInInterface** plugIn = nullptr;
+  SInt32 score = 0;
   kern_return_t kr = IOCreatePlugInInterfaceForService(
-      service, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID, &plugIn,
-      &score);
+      service, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID, &plugIn, &score);
   IOObjectRelease(service);
 
-  if (kr != kIOReturnSuccess || !plugIn) {
-    throw std::runtime_error("Failed to create plugin for USB device: " +
-                             devnode_);
-  }
+  if (kr != kIOReturnSuccess || !plugIn) return fail_iokit("IOCreatePlugInInterfaceForService(device)", kr);
 
-  // Query for the device interface
-  IOUSBDeviceInterface320 **devIntf = nullptr;
-  HRESULT res = (*plugIn)->QueryInterface(
-      plugIn, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID320),
-      reinterpret_cast<LPVOID *>(&devIntf));
+  IOUSBDeviceInterface320** devIntf = nullptr;
+  const HRESULT res = (*plugIn)->QueryInterface(
+      plugIn, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID320), reinterpret_cast<LPVOID*>(&devIntf));
   (*plugIn)->Release(plugIn);
 
-  if (res != S_OK || !devIntf) {
-    throw std::runtime_error("Failed to get device interface: " + devnode_);
-  }
+  if (res != S_OK || !devIntf) return brokkr::core::Status::Fail("Failed to get IOUSBDeviceInterface320");
 
   dev_intf_ = devIntf;
 
-  // Open the device
   kr = (*devIntf)->USBDeviceOpen(devIntf);
   if (kr != kIOReturnSuccess) {
     kr = (*devIntf)->USBDeviceOpenSeize(devIntf);
     if (kr != kIOReturnSuccess) {
       (*devIntf)->Release(devIntf);
       dev_intf_ = nullptr;
-      throw_iokit("USBDeviceOpen", kr);
+      return fail_iokit("USBDeviceOpen", kr);
     }
   }
 
-  // Read device IDs
   UInt16 vid = 0, pid = 0;
-  (*devIntf)->GetDeviceVendor(devIntf, &vid);
-  (*devIntf)->GetDeviceProduct(devIntf, &pid);
+  (void)(*devIntf)->GetDeviceVendor(devIntf, &vid);
+  (void)(*devIntf)->GetDeviceProduct(devIntf, &pid);
   ids_.vendor = vid;
   ids_.product = pid;
 
   UInt8 curCfg = 0;
-  if ((*devIntf)->GetConfiguration(devIntf, &curCfg) == kIOReturnSuccess &&
-      curCfg == 0) {
+  if ((*devIntf)->GetConfiguration(devIntf, &curCfg) == kIOReturnSuccess && curCfg == 0) {
     IOUSBConfigurationDescriptorPtr configDesc = nullptr;
     kr = (*devIntf)->GetConfigurationDescriptorPtr(devIntf, 0, &configDesc);
     if (kr == kIOReturnSuccess && configDesc) {
-      (void)(*devIntf)->SetConfiguration(devIntf,
-                                         configDesc->bConfigurationValue);
+      (void)(*devIntf)->SetConfiguration(devIntf, configDesc->bConfigurationValue);
     }
   }
 
@@ -153,33 +153,26 @@ void UsbFsDevice::open_and_init() {
   io_iterator_t ifcIter = 0;
   kr = (*devIntf)->CreateInterfaceIterator(devIntf, &ifcRequest, &ifcIter);
   if (kr != kIOReturnSuccess) {
-    (*devIntf)->USBDeviceClose(devIntf);
-    (*devIntf)->Release(devIntf);
-    dev_intf_ = nullptr;
-    throw_iokit("CreateInterfaceIterator", kr);
+    close();
+    return fail_iokit("CreateInterfaceIterator", kr);
   }
 
-  io_service_t usbIfc;
+  io_service_t usbIfc = 0;
   while ((usbIfc = IOIteratorNext(ifcIter)) != 0) {
-    IOCFPlugInInterface **ifcPlugIn = nullptr;
-    SInt32 ifcScore;
-    kr = IOCreatePlugInInterfaceForService(usbIfc,
-                                           kIOUSBInterfaceUserClientTypeID,
-                                           kIOCFPlugInInterfaceID, &ifcPlugIn,
-                                           &ifcScore);
+    IOCFPlugInInterface** ifcPlugIn = nullptr;
+    SInt32 ifcScore = 0;
+    kr = IOCreatePlugInInterfaceForService(
+        usbIfc, kIOUSBInterfaceUserClientTypeID, kIOCFPlugInInterfaceID, &ifcPlugIn, &ifcScore);
     IOObjectRelease(usbIfc);
 
-    if (kr != kIOReturnSuccess || !ifcPlugIn)
-      continue;
+    if (kr != kIOReturnSuccess || !ifcPlugIn) continue;
 
-    IOUSBInterfaceInterface300 **ifcIntf = nullptr;
-    res = (*ifcPlugIn)->QueryInterface(
-        ifcPlugIn, CFUUIDGetUUIDBytes(kIOUSBInterfaceInterfaceID300),
-        reinterpret_cast<LPVOID *>(&ifcIntf));
+    IOUSBInterfaceInterface300** ifcIntf = nullptr;
+    const HRESULT ires = (*ifcPlugIn)->QueryInterface(
+        ifcPlugIn, CFUUIDGetUUIDBytes(kIOUSBInterfaceInterfaceID300), reinterpret_cast<LPVOID*>(&ifcIntf));
     (*ifcPlugIn)->Release(ifcPlugIn);
 
-    if (res != S_OK || !ifcIntf)
-      continue;
+    if (ires != S_OK || !ifcIntf) continue;
 
     kr = (*ifcIntf)->USBInterfaceOpen(ifcIntf);
     if (kr != kIOReturnSuccess) {
@@ -188,8 +181,7 @@ void UsbFsDevice::open_and_init() {
     }
 
     UInt8 alt = 0;
-    if ((*ifcIntf)->GetAlternateSetting(ifcIntf, &alt) == kIOReturnSuccess &&
-        alt != 0) {
+    if ((*ifcIntf)->GetAlternateSetting(ifcIntf, &alt) == kIOReturnSuccess && alt != 0) {
       (void)(*ifcIntf)->SetAlternateInterface(ifcIntf, 0);
       (void)(*ifcIntf)->GetAlternateSetting(ifcIntf, &alt);
     }
@@ -200,10 +192,10 @@ void UsbFsDevice::open_and_init() {
     }
 
     UInt8 numEndpoints = 0;
-    (*ifcIntf)->GetNumEndpoints(ifcIntf, &numEndpoints);
+    (void)(*ifcIntf)->GetNumEndpoints(ifcIntf, &numEndpoints);
 
     UInt8 ifcNumber = 0;
-    (*ifcIntf)->GetInterfaceNumber(ifcIntf, &ifcNumber);
+    (void)(*ifcIntf)->GetInterfaceNumber(ifcIntf, &ifcNumber);
 
     std::uint8_t foundIn = 0, foundOut = 0;
     UsbEndpoints foundEps{};
@@ -211,11 +203,8 @@ void UsbFsDevice::open_and_init() {
     for (UInt8 pipe = 1; pipe <= numEndpoints; pipe++) {
       UInt8 direction = 0, number = 0, transferType = 0, interval = 0;
       UInt16 maxPacketSize = 0;
-      kr = (*ifcIntf)->GetPipeProperties(ifcIntf, pipe, &direction, &number,
-                                         &transferType, &maxPacketSize,
-                                         &interval);
-      if (kr != kIOReturnSuccess)
-        continue;
+      kr = (*ifcIntf)->GetPipeProperties(ifcIntf, pipe, &direction, &number, &transferType, &maxPacketSize, &interval);
+      if (kr != kIOReturnSuccess) continue;
 
       if (transferType == kUSBBulk) {
         if (direction == kUSBIn && !foundIn) {
@@ -246,30 +235,27 @@ void UsbFsDevice::open_and_init() {
   IOObjectRelease(ifcIter);
 
   if (!ifc_intf_) {
-    (*devIntf)->USBDeviceClose(devIntf);
-    (*devIntf)->Release(devIntf);
-    dev_intf_ = nullptr;
-    throw std::runtime_error(
-        "No interface with bulk endpoints found: " + devnode_);
+    close();
+    return brokkr::core::Status::Fail("No interface with bulk endpoints found");
   }
 
-  spdlog::info("Opened USB device at {} (VID: 0x{:04x}, PID: 0x{:04x}, "
-               "bulk_in: 0x{:02x}, bulk_out: 0x{:02x})",
-               devnode_, ids_.vendor, ids_.product, eps_.bulk_in,
-               eps_.bulk_out);
+  spdlog::info("Opened USB device at {} (VID: 0x{:04x}, PID: 0x{:04x}, bulk_in: 0x{:02x}, bulk_out: 0x{:02x})",
+               devnode_, ids_.vendor, ids_.product, eps_.bulk_in, eps_.bulk_out);
+
+  return brokkr::core::Status::Ok();
 }
 
 void UsbFsDevice::close() noexcept {
   if (ifc_intf_) {
-    auto ifcIntf = static_cast<IOUSBInterfaceInterface300 **>(ifc_intf_);
-    (*ifcIntf)->USBInterfaceClose(ifcIntf);
+    auto ifcIntf = static_cast<IOUSBInterfaceInterface300**>(ifc_intf_);
+    (void)(*ifcIntf)->USBInterfaceClose(ifcIntf);
     (*ifcIntf)->Release(ifcIntf);
     ifc_intf_ = nullptr;
   }
 
   if (dev_intf_) {
-    auto devIntf = static_cast<IOUSBDeviceInterface320 **>(dev_intf_);
-    (*devIntf)->USBDeviceClose(devIntf);
+    auto devIntf = static_cast<IOUSBDeviceInterface320**>(dev_intf_);
+    (void)(*devIntf)->USBDeviceClose(devIntf);
     (*devIntf)->Release(devIntf);
     dev_intf_ = nullptr;
   }
@@ -277,12 +263,13 @@ void UsbFsDevice::close() noexcept {
   pipe_in_ = 0;
   pipe_out_ = 0;
   ifc_num_ = -1;
+  eps_ = {};
+  ids_ = {};
 }
 
-void UsbFsDevice::reset_device() {
-  if (!dev_intf_)
-    return;
-  auto devIntf = static_cast<IOUSBDeviceInterface320 **>(dev_intf_);
+void UsbFsDevice::reset_device() noexcept {
+  if (!dev_intf_) return;
+  auto devIntf = static_cast<IOUSBDeviceInterface320**>(dev_intf_);
   (void)(*devIntf)->ResetDevice(devIntf);
 }
 
