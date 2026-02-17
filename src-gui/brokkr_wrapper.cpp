@@ -1,4 +1,5 @@
 #include "brokkr_wrapper.hpp"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -7,18 +8,18 @@
 #include <QStringList>
 #include <QTabWidget>
 #include <QGroupBox>
-#include <QTimer>
-#include <QRadioButton>
-#include <QComboBox>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QJsonValue>
 #include <QProgressBar>
+#include <QMessageBox>
+#include <QTextCursor>
+#include <QSizePolicy>
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     setWindowTitle("Brokkr Flasher");
     resize(850, 600);
+    baseWindowHeight_ = height();
 
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(10, 10, 10, 10);
@@ -28,26 +29,18 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     bannerLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(bannerLabel);
 
-    auto* idComGroup = new QGroupBox("ID:COM", this);
-    auto* idComLayout = new QGridLayout(idComGroup);
-    idComLayout->setSpacing(2);
-    idComLayout->setContentsMargins(5, 5, 5, 5);
+    idComGroup_ = new QGroupBox("ID:COM", this);
+    idComLayout_ = new QGridLayout(idComGroup_);
+    idComLayout_->setSpacing(2);
+    idComLayout_->setContentsMargins(5, 5, 5, 5);
 
-    for (int col = 0; col < 8; ++col) {
-        auto* box = new QLineEdit(this);
-        box->setReadOnly(true);
-        box->setAlignment(Qt::AlignCenter);
-        box->setMinimumHeight(35);
-        box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
-        idComLayout->addWidget(box, 0, col);
-        comBoxes.append(box);
-    }
-    mainLayout->addWidget(idComGroup);
+    rebuildDeviceBoxes_(kBoxesNormal, true);
+    mainLayout->addWidget(idComGroup_);
 
     auto* middleLayout = new QHBoxLayout();
 
     auto* tabWidget = new QTabWidget(this);
-    tabWidget->setFixedWidth(320);
+    tabWidget->setFixedWidth(360);
 
     consoleOutput = new QTextEdit(this);
     consoleOutput->setReadOnly(true);
@@ -68,6 +61,19 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     chkWireless = new QCheckBox("Wireless (-w)", this);
     optLayout->addWidget(chkWireless);
 
+    chkManyDevices = new QCheckBox("Many device flashing", this);
+    optLayout->addWidget(chkManyDevices);
+
+    auto* manyRow = new QHBoxLayout();
+    lblDeviceBoxes = new QLabel("Count: 8", this);
+    sldDeviceBoxes = new QSlider(Qt::Horizontal, this);
+    sldDeviceBoxes->setRange(kBoxesNormal, kBoxesMax);
+    sldDeviceBoxes->setValue(24);
+    sldDeviceBoxes->setEnabled(false);
+    manyRow->addWidget(lblDeviceBoxes);
+    manyRow->addWidget(sldDeviceBoxes, 1);
+    optLayout->addLayout(manyRow);
+
     optLayout->addSpacing(10);
     optLayout->addWidget(new QLabel("Post-Flash Action:", this));
     cmbRebootAction = new QComboBox(this);
@@ -82,47 +88,76 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     auto* pitLayout = new QGridLayout(pitTab);
     pitLayout->setAlignment(Qt::AlignTop);
 
-    pitLayout->addWidget(new QLabel("PIT File:"), 0, 0);
+    chkUsePit = new QCheckBox("Use PIT (--set-pit)", this);
+    pitLayout->addWidget(chkUsePit, 0, 0, 1, 3);
+
+    pitLayout->addWidget(new QLabel("PIT File:"), 1, 0);
+
     editPit = new QLineEdit(this);
     editPit->setEnabled(false);
-    pitLayout->addWidget(editPit, 0, 1);
+    pitLayout->addWidget(editPit, 1, 1);
 
-    auto* btnPit = new QPushButton("Browse", this);
-    btnPit->setEnabled(false);
-    pitLayout->addWidget(btnPit, 0, 2);
-
-    radNonePit = new QRadioButton("None", this);
-    radSetPit = new QRadioButton("Set PIT", this);
-    radGetPit = new QRadioButton("Get PIT", this);
-    radNonePit->setChecked(true);
-
-    auto* radioLayout = new QHBoxLayout();
-    radioLayout->addWidget(radNonePit);
-    radioLayout->addWidget(radSetPit);
-    radioLayout->addWidget(radGetPit);
-    radioLayout->addStretch();
-    pitLayout->addLayout(radioLayout, 1, 1, 1, 2);
+    btnPitBrowse = new QPushButton("Browse", this);
+    btnPitBrowse->setEnabled(false);
+    pitLayout->addWidget(btnPitBrowse, 1, 2);
 
     tabWidget->addTab(pitTab, "Pit");
 
-    connect(radNonePit, &QRadioButton::toggled, this, [this, btnPit](bool checked) {
-        editPit->setEnabled(!checked);
-        btnPit->setEnabled(!checked);
-        });
+    connect(chkUsePit, &QCheckBox::toggled, this, [this](bool checked) {
+        editPit->setEnabled(checked);
+        btnPitBrowse->setEnabled(checked);
+        if (!checked) editPit->clear();
+        updateActionButtons_();
+    });
 
-    connect(btnPit, &QPushButton::clicked, this, [this]() {
-        QString file;
-        if (radGetPit->isChecked()) {
-            file = QFileDialog::getSaveFileName(this, "Save PIT File As", lastDir, "PIT Files (*.pit);;All Files (*)");
-        }
-        else {
-            file = QFileDialog::getOpenFileName(this, "Select PIT File", lastDir, "PIT Files (*.pit);;All Files (*)");
-        }
+    connect(btnPitBrowse, &QPushButton::clicked, this, [this]() {
+        const QString file = QFileDialog::getOpenFileName(
+            this,
+            "Select PIT File",
+            lastDir,
+            "PIT Files (*.pit);;All Files (*)"
+        );
         if (!file.isEmpty()) {
             lastDir = QFileInfo(file).absolutePath();
             editPit->setText(file);
+            updateActionButtons_();
         }
-        });
+    });
+
+    connect(chkManyDevices, &QCheckBox::toggled, this, [this](bool checked) {
+        sldDeviceBoxes->setEnabled(checked);
+
+        if (!checked) {
+            lblDeviceBoxes->setText(QString("Count: %1").arg(kBoxesNormal));
+            rebuildDeviceBoxes_(kBoxesNormal, true);
+            resize(width(), baseWindowHeight_);
+        } else {
+            lblDeviceBoxes->setText(QString("Count: %1").arg(sldDeviceBoxes->value()));
+            rebuildDeviceBoxes_(sldDeviceBoxes->value(), false);
+            applyWindowHeightToContents_();
+        }
+
+        refreshDeviceBoxes_();
+        updateActionButtons_();
+    });
+
+    connect(sldDeviceBoxes, &QSlider::valueChanged, this, [this](int v) {
+        lblDeviceBoxes->setText(QString("Count: %1").arg(v));
+        if (chkManyDevices->isChecked()) {
+            rebuildDeviceBoxes_(v, false);
+            applyWindowHeightToContents_();
+            refreshDeviceBoxes_();
+            updateActionButtons_();
+        }
+    });
+
+    connect(chkWireless, &QCheckBox::toggled, this, [this](bool) {
+        updateActionButtons_();
+    });
+
+    connect(editTarget, &QLineEdit::textChanged, this, [this](const QString&) {
+        updateActionButtons_();
+    });
 
     middleLayout->addWidget(tabWidget);
 
@@ -130,7 +165,12 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     auto* rightLayout = new QVBoxLayout(rightWidget);
     rightLayout->setAlignment(Qt::AlignTop);
 
-    QLabel* tipsLabel = new QLabel("Tips - How to download HOME binary\n  OLD model : Download one binary ...\n  NEW model : Download BL + AP + CP + CSC", this);
+    QLabel* tipsLabel = new QLabel(
+        "Tips - How to download HOME binary\n"
+        "  OLD model : Download one binary ...\n"
+        "  NEW model : Download BL + AP + CP + CSC",
+        this
+    );
     tipsLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 5px;");
     rightLayout->addWidget(tipsLabel);
 
@@ -155,7 +195,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     auto* bottomLayout = new QHBoxLayout();
 
-    // Progress Bar & Status
     statusLabel = new QLabel("Ready", this);
     statusLabel->setStyleSheet("color: #0078D7; font-weight: bold; padding-left: 15px;");
     bottomLayout->addWidget(statusLabel);
@@ -169,16 +208,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     bottomLayout->addStretch();
 
     btnPrintPit = new QPushButton("Print PIT", this);
-    btnPrintPit->setFixedSize(100, 30);
-
     btnRebootDevice = new QPushButton("Reboot Device", this);
-    btnRebootDevice->setFixedSize(100, 30);
-
     btnRun = new QPushButton("Start", this);
-    btnRun->setFixedSize(100, 30);
-
     QPushButton* btnReset = new QPushButton("Reset", this);
-    btnReset->setFixedSize(100, 30);
+
+    const int bottomW = 135;
+    const int bottomH = 32;
+    btnPrintPit->setMinimumSize(bottomW, bottomH);
+    btnRebootDevice->setMinimumSize(bottomW, bottomH);
+    btnRun->setMinimumSize(bottomW, bottomH);
+    btnReset->setMinimumSize(bottomW, bottomH);
 
     bottomLayout->addWidget(btnPrintPit);
     bottomLayout->addWidget(btnRebootDevice);
@@ -189,15 +228,15 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     process = new QProcess(this);
 
-    // Live JSON & Log Parser
     connect(process, &QProcess::readyReadStandardOutput, this, [this]() {
+        const QString key = "PROGRESSUPDATE";
+
         while (process->canReadLine()) {
             QString rawLine = QString::fromLocal8Bit(process->readLine()).trimmed();
             if (rawLine.isEmpty()) continue;
-			const static QString key = "PROGRESSUPDATE";
 
             if (rawLine.startsWith(key)) {
-                QString jsonString = rawLine.mid(14);
+                const QString jsonString = rawLine.mid(key.size());
                 QJsonParseError parseError;
                 QJsonDocument jsonDoc = QJsonDocument::fromJson(jsonString.toUtf8(), &parseError);
 
@@ -215,25 +254,20 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
                     }
 
                     QString statusText = stage;
-                    if (!notice.isEmpty() && notice != "{}") {
-                        statusText += " (" + notice + ")";
-                    }
+                    if (!notice.isEmpty()) statusText += " (" + notice + ")";
                     statusLabel->setText(statusText);
                 }
+                continue;
             }
-            else {
-				// Can be malformed JSON or just a regular log line, either way we print it
-                if (rawLine.contains(key)) {
-                    // drop
-                    return;
-                }
-                consoleOutput->append(rawLine.toHtmlEscaped());
-                QTextCursor cursor = consoleOutput->textCursor();
-                cursor.movePosition(QTextCursor::End);
-                consoleOutput->setTextCursor(cursor);
-            }
+
+            if (rawLine.contains(key)) continue;
+
+            consoleOutput->append(rawLine.toHtmlEscaped());
+            QTextCursor cursor = consoleOutput->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            consoleOutput->setTextCursor(cursor);
         }
-        });
+    });
 
     connect(process, &QProcess::readyReadStandardError, this, [this]() {
         while (process->canReadLine()) {
@@ -245,36 +279,40 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
                 consoleOutput->setTextCursor(cursor);
             }
         }
-        });
+    });
 
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode) {
+    connect(process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         btnRun->setEnabled(true);
         btnRebootDevice->setEnabled(true);
         btnPrintPit->setEnabled(true);
+        updateActionButtons_();
+        statusLabel->setText("Failed to start brokkr");
+    });
+
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int exitCode) {
+        btnRun->setEnabled(true);
+        btnRebootDevice->setEnabled(true);
+        btnPrintPit->setEnabled(true);
+        updateActionButtons_();
+
         consoleOutput->append(QString("\n<i>Brokkr finished with exit code %1</i>").arg(exitCode));
         statusLabel->setText(exitCode == 0 ? "Done" : "Failed");
-        });
+    });
 
     pollProcess = new QProcess(this);
     deviceTimer = new QTimer(this);
 
-    connect(pollProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode) {
+    connect(pollProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int exitCode) {
         if (exitCode != 0) return;
 
         QString output = QString::fromLocal8Bit(pollProcess->readAllStandardOutput()).trimmed();
-        QStringList connectedDevices = output.split('\n', Qt::SkipEmptyParts);
+        connectedDevices_ = output.split('\n', Qt::SkipEmptyParts);
 
-        for (auto* box : comBoxes) {
-            box->clear();
-            box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
-        }
-
-        for (int i = 0; i < connectedDevices.size() && i < comBoxes.size(); ++i) {
-            QString portName = connectedDevices[i].trimmed();
-            comBoxes[i]->setText(QString("%1:[%2]").arg(i).arg(portName));
-            comBoxes[i]->setStyleSheet("background-color: #00e5ff; color: black; font-weight: bold; border: 1px solid #00acc1;");
-        }
-        });
+        refreshDeviceBoxes_();
+        updateActionButtons_();
+    });
 
     connect(deviceTimer, &QTimer::timeout, this, [this]() {
         if (process->state() == QProcess::NotRunning && pollProcess->state() == QProcess::NotRunning) {
@@ -282,29 +320,31 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 #ifdef Q_OS_WIN
             program += ".exe";
 #endif
-            pollProcess->start(program, { "--gui-mode", "--print-connected-only" });
+            pollProcess->start(program, {"--gui-mode", "--print-connected-only"});
         }
-        });
+    });
 
     deviceTimer->start(2000);
 
     connect(btnPrintPit, &QPushButton::clicked, this, [this]() {
+        QString why;
+        if (!canRunPrintPit_(&why)) { showBlocked_("Cannot print PIT", why); return; }
+
         QStringList args;
-        if (!editTarget->text().isEmpty()) {
-            args << "--target" << editTarget->text();
-        }
+        if (!editTarget->text().isEmpty()) args << "--target" << editTarget->text();
         args << "--print-pit";
         executeBrokkr(args);
-        });
+    });
 
     connect(btnRebootDevice, &QPushButton::clicked, this, [this]() {
+        QString why;
+        if (!canRunReboot_(&why)) { showBlocked_("Cannot reboot", why); return; }
+
         QStringList args;
-        if (!editTarget->text().isEmpty()) {
-            args << "--target" << editTarget->text();
-        }
+        if (!editTarget->text().isEmpty()) args << "--target" << editTarget->text();
         args << "--reboot";
         executeBrokkr(args);
-        });
+    });
 
     connect(btnRun, &QPushButton::clicked, this, &BrokkrWrapper::onRunClicked);
 
@@ -313,10 +353,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         editCSC->clear(); editUserData->clear();
         consoleOutput->clear(); editTarget->clear();
         editPit->clear();
-        radNonePit->setChecked(true);
+        chkUsePit->setChecked(false);
         cmbRebootAction->setCurrentIndex(0);
 
-        // Reset Progress UI
         progressBar->setValue(0);
         statusLabel->setText("Ready");
 
@@ -325,7 +364,168 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
                 chk->setChecked(false);
             }
         }
-        });
+        updateActionButtons_();
+    });
+
+    updateActionButtons_();
+}
+
+void BrokkrWrapper::applyWindowHeightToContents_() {
+    if (!layout()) return;
+
+    const int want = layout()->sizeHint().height() + 30;
+    if (height() < want) {
+        resize(width(), want);
+    }
+}
+
+void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
+    while (idComLayout_->count() > 0) {
+        QLayoutItem* it = idComLayout_->takeAt(0);
+        if (!it) break;
+        if (auto* w = it->widget()) w->deleteLater();
+        delete it;
+    }
+    comBoxes.clear();
+
+    if (singleRow) {
+        for (int col = 0; col < boxCount; ++col) {
+            auto* box = new QLineEdit(idComGroup_);
+            box->setReadOnly(true);
+            box->setAlignment(Qt::AlignCenter);
+            box->setMinimumHeight(35);
+            box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
+            idComLayout_->addWidget(box, 0, col);
+            comBoxes.append(box);
+        }
+        return;
+    }
+
+    for (int i = 0; i < boxCount; ++i) {
+        const int row = i / kBoxesColsMany;
+        const int col = i % kBoxesColsMany;
+
+        auto* box = new QLineEdit(idComGroup_);
+        box->setReadOnly(true);
+        box->setAlignment(Qt::AlignCenter);
+        box->setMinimumHeight(35);
+        box->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
+        idComLayout_->addWidget(box, row, col);
+        comBoxes.append(box);
+    }
+}
+
+void BrokkrWrapper::refreshDeviceBoxes_() {
+    overflowDevices_ = false;
+
+    for (auto* box : comBoxes) {
+        box->clear();
+        box->setToolTip(QString());
+        box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
+    }
+
+    const int shown = std::min<int>(connectedDevices_.size(), comBoxes.size());
+    for (int i = 0; i < shown; ++i) {
+        const QString sysname = connectedDevices_[i].trimmed();
+        comBoxes[i]->setText(QString("%1:[%2]").arg(i).arg(sysname));
+        comBoxes[i]->setToolTip(sysname);
+        comBoxes[i]->setStyleSheet("background-color: #00e5ff; color: black; font-weight: bold; border: 1px solid #00acc1;");
+    }
+
+    if (connectedDevices_.size() > comBoxes.size() && !comBoxes.isEmpty()) {
+        overflowDevices_ = true;
+        const int extra = connectedDevices_.size() - comBoxes.size();
+
+        auto* last = comBoxes.back();
+        last->setText(QString("... +%1 more (use CLI)").arg(extra));
+        last->setStyleSheet("background-color: #ffcc80; color: black; font-weight: bold; border: 1px solid #fb8c00;");
+    }
+}
+
+bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
+    const bool wireless = chkWireless->isChecked();
+    const bool hasTarget = !editTarget->text().trimmed().isEmpty();
+
+    if (wireless) return true;
+    if (hasTarget) return true;
+
+    if (connectedDevices_.isEmpty()) {
+        if (whyNot) *whyNot = "No connected devices detected. Connect a device or enable Wireless.";
+        return false;
+    }
+    if (overflowDevices_) {
+        if (whyNot) *whyNot =
+            "Too many devices are connected for the current GUI box limit.\n"
+            "Increase the slider, set a specific target, or use the CLI.";
+        return false;
+    }
+    return true;
+}
+
+bool BrokkrWrapper::canRunReboot_(QString* whyNot) const {
+    const bool wireless = chkWireless->isChecked();
+    const bool hasTarget = !editTarget->text().trimmed().isEmpty();
+
+    if (wireless) return true;
+    if (hasTarget) return true;
+
+    if (connectedDevices_.isEmpty()) {
+        if (whyNot) *whyNot = "No connected devices detected.";
+        return false;
+    }
+    if (overflowDevices_) {
+        if (whyNot) *whyNot = "Too many devices for GUI reboot. Increase the slider, set a target, or use the CLI.";
+        return false;
+    }
+    return true;
+}
+
+bool BrokkrWrapper::canRunPrintPit_(QString* whyNot) const {
+    const bool wireless = chkWireless->isChecked();
+    const bool hasTarget = !editTarget->text().trimmed().isEmpty();
+
+    if (wireless) return true;
+    if (hasTarget) return true;
+
+    if (connectedDevices_.isEmpty()) {
+        if (whyNot) *whyNot = "No connected devices detected.";
+        return false;
+    }
+
+    if (connectedDevices_.size() != 1) {
+        if (whyNot) *whyNot =
+            "Printing PIT from device requires exactly one connected device.\n"
+            "Disconnect extra devices or set a specific target.";
+        return false;
+    }
+
+    if (overflowDevices_) {
+        if (whyNot) *whyNot = "Too many devices for GUI PIT print. Increase the slider, set a target, or use the CLI.";
+        return false;
+    }
+
+    return true;
+}
+
+void BrokkrWrapper::updateActionButtons_() {
+    const bool busy = (process->state() != QProcess::NotRunning);
+
+    if (busy) {
+        btnRun->setEnabled(false);
+        btnRebootDevice->setEnabled(false);
+        btnPrintPit->setEnabled(false);
+        return;
+    }
+
+    QString why;
+    btnRun->setEnabled(canRunStart_(&why));
+    btnRebootDevice->setEnabled(canRunReboot_(&why));
+    btnPrintPit->setEnabled(canRunPrintPit_(&why));
+}
+
+void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const {
+    QMessageBox::warning(const_cast<BrokkrWrapper*>(this), title, msg);
 }
 
 void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {
@@ -333,7 +533,8 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
     layout->addWidget(chk, row, 0);
 
     auto* btn = new QPushButton(label, this);
-    btn->setFixedSize(70, 25);
+    btn->setMinimumWidth(95);
+    btn->setFixedHeight(28);
     layout->addWidget(btn, row, 1);
 
     lineEdit = new QLineEdit(this);
@@ -352,11 +553,13 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
             lineEdit->setText(file);
             chk->setChecked(true);
         }
-        });
+        updateActionButtons_();
+    });
 
-    connect(chk, &QCheckBox::toggled, this, [lineEdit](bool checked) {
+    connect(chk, &QCheckBox::toggled, this, [this, lineEdit](bool checked) {
         lineEdit->setEnabled(checked);
-        });
+        updateActionButtons_();
+    });
 }
 
 void BrokkrWrapper::executeBrokkr(const QStringList& args) {
@@ -364,7 +567,6 @@ void BrokkrWrapper::executeBrokkr(const QStringList& args) {
     btnRebootDevice->setEnabled(false);
     btnPrintPit->setEnabled(false);
 
-    // Auto-reset progress on new action
     progressBar->setValue(0);
     statusLabel->setText("Starting...");
 
@@ -381,37 +583,41 @@ void BrokkrWrapper::executeBrokkr(const QStringList& args) {
 }
 
 void BrokkrWrapper::onRunClicked() {
-    QStringList args;
+    QString why;
+    if (!canRunStart_(&why)) {
+        showBlocked_("Cannot start", why);
+        return;
+    }
 
-	args << "--gui-mode";
+    QStringList args;
 
     if (chkWireless->isChecked()) args << "-w";
 
-    // Fixed ComboBox logic
-    int actionIndex = cmbRebootAction->currentIndex();
-    if (actionIndex == 1) {
-        args << "--redownload";
-    }
-    else if (actionIndex == 2) {
-        args << "--no-reboot";
-    }
+    const int actionIndex = cmbRebootAction->currentIndex();
+    if (actionIndex == 1) args << "--redownload";
+    else if (actionIndex == 2) args << "--no-reboot";
 
-    if (!editTarget->text().isEmpty()) { args << "--target" << editTarget->text(); }
+    if (!editTarget->text().isEmpty()) args << "--target" << editTarget->text();
 
-    if (!editPit->text().isEmpty() && !radNonePit->isChecked()) {
-        if (radSetPit->isChecked()) {
-            args << "--set-pit" << editPit->text();
-        }
-        else if (radGetPit->isChecked()) {
-            args << "--get-pit" << editPit->text();
-        }
+    if (chkUsePit->isChecked() && !editPit->text().isEmpty()) {
+        args << "--set-pit" << editPit->text();
     }
 
-    if (editAP->isEnabled() && !editAP->text().isEmpty()) { args << "-a" << editAP->text(); }
-    if (editBL->isEnabled() && !editBL->text().isEmpty()) { args << "-b" << editBL->text(); }
-    if (editCP->isEnabled() && !editCP->text().isEmpty()) { args << "-c" << editCP->text(); }
-    if (editCSC->isEnabled() && !editCSC->text().isEmpty()) { args << "-s" << editCSC->text(); }
-    if (editUserData->isEnabled() && !editUserData->text().isEmpty()) { args << "-u" << editUserData->text(); }
+    if (editAP->isEnabled() && !editAP->text().isEmpty()) args << "-a" << editAP->text();
+    if (editBL->isEnabled() && !editBL->text().isEmpty()) args << "-b" << editBL->text();
+    if (editCP->isEnabled() && !editCP->text().isEmpty()) args << "-c" << editCP->text();
+    if (editCSC->isEnabled() && !editCSC->text().isEmpty()) args << "-s" << editCSC->text();
+    if (editUserData->isEnabled() && !editUserData->text().isEmpty()) args << "-u" << editUserData->text();
+
+    const bool hasAnyFlash =
+        (args.contains("-a") || args.contains("-b") || args.contains("-c") || args.contains("-s") || args.contains("-u"));
+
+    const bool hasPit = args.contains("--set-pit");
+
+    if (!hasAnyFlash && !hasPit) {
+        showBlocked_("Cannot start", "Select at least one firmware file or a PIT file.");
+        return;
+    }
 
     executeBrokkr(args);
 }
