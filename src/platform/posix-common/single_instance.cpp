@@ -25,6 +25,12 @@
 
 namespace brokkr::posix_common {
 
+// Apple doesn't have SOCK_CLOEXEC, but accept4 is not
+// available either, so this is fine.
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#endif
+
 SingleInstanceLock::~SingleInstanceLock() = default;
 
 SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
