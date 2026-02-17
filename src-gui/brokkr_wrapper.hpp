@@ -37,7 +37,6 @@ class QSocketNotifier;
 class DeviceSquare;
 
 class BrokkrWrapper : public QWidget {
-    Q_OBJECT
 
 public:
     explicit BrokkrWrapper(QWidget* parent = nullptr);

@@ -1,5 +1,6 @@
 #include "brokkr_wrapper.hpp"
 
+#include <QMetaObject>
 #include <QSet>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -222,9 +223,8 @@ protected:
         const int z = w_ ? w_->logDeviceCountForLog() : 0;
         line = QString("<%1> %2").arg(z).arg(line);
 
-        QMetaObject::invokeMethod(w_, "appendLogLineFromEngine",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(QString, htmlEsc(line)));
+        QMetaObject::invokeMethod(w_, [w=w_, s=htmlEsc(line)]() { w->appendLogLineFromEngine(s); },
+                                  Qt::QueuedConnection);
     }
 
     void flush_() override {}

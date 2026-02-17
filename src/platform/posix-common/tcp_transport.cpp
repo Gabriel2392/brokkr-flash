@@ -19,6 +19,7 @@
 #include "platform/posix-common/tcp_transport.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <utility>
 
@@ -93,6 +94,27 @@ void TcpConnection::set_sock_timeouts_() noexcept {
 
   (void)do_setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   (void)do_setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+  int one = 1;
+  (void)do_setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+
+#ifdef TCP_KEEPIDLE
+  int idle = 2;
+  (void)do_setsockopt(fd_, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+#endif
+#ifdef TCP_KEEPINTVL
+  int intvl = 1;
+  (void)do_setsockopt(fd_, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+#endif
+#ifdef TCP_KEEPCNT
+  int cnt = 2;
+  (void)do_setsockopt(fd_, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+#endif
+
+#ifdef TCP_USER_TIMEOUT
+  int uto = timeout_ms_;
+  (void)do_setsockopt(fd_, IPPROTO_TCP, TCP_USER_TIMEOUT, &uto, sizeof(uto));
+#endif
 }
 
 void TcpConnection::set_timeout_ms(int ms) noexcept {
@@ -104,17 +126,50 @@ std::string TcpConnection::peer_label() const {
   return fmt::format("{}:{}", peer_ip_, peer_port_);
 }
 
-int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
+int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/) {
   if (!connected()) return -1;
 
   const std::uint8_t* p = data.data();
   std::size_t left = data.size();
 
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
+
   while (left) {
-    const ssize_t n = do_send(fd_, p, left, MSG_NOSIGNAL);
+    int ms_left = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
+    );
+    if (ms_left <= 0) {
+      spdlog::warn("TcpConnection::send: timeout (giving up)");
+      return -1;
+    }
+
+    pollfd pfd{};
+    pfd.fd = fd_.fd;
+    pfd.events = POLLOUT;
+
+    const int pr = ::poll(&pfd, 1, ms_left);
+    if (pr == 0) {
+      spdlog::warn("TcpConnection::send: timeout (giving up)");
+      return -1;
+    }
+    if (pr < 0) {
+      const int e = errno;
+      if (e == EINTR) continue;
+      spdlog::error("TcpConnection::send: poll: {}", std::strerror(e));
+      return -1;
+    }
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      spdlog::warn("TcpConnection::send: peer closed");
+      return -1;
+    }
+
+    const ssize_t n = do_send(fd_, p, left, MSG_NOSIGNAL | MSG_DONTWAIT);
     if (n > 0) {
       p += static_cast<std::size_t>(n);
       left -= static_cast<std::size_t>(n);
+
+      deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
+
       if (spdlog::should_log(spdlog::level::debug)) {
         spdlog::debug("TcpConnection::send {} bytes ({} left)", n, left);
       }
@@ -128,15 +183,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
 
     const int e = errno;
     if (e == EINTR) continue;
-
-    if (e == EAGAIN || e == EWOULDBLOCK) {
-      if (retries-- > 0) {
-        ::usleep(10'000);
-        continue;
-      }
-      spdlog::warn("TcpConnection::send: timeout (giving up)");
-      return -1;
-    }
+    if (e == EAGAIN || e == EWOULDBLOCK) continue;
 
     spdlog::error("TcpConnection::send: {}", std::strerror(e));
     return -1;
@@ -145,12 +192,42 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
   return static_cast<int>(data.size());
 }
 
-int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
+int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
   if (!connected()) return -1;
   if (data.empty()) return 0;
 
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
+
   for (;;) {
-    const ssize_t n = do_recv(fd_, data.data(), data.size(), 0);
+    int ms_left = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
+    );
+    if (ms_left <= 0) {
+      spdlog::warn("TcpConnection::recv: timeout (giving up)");
+      return -1;
+    }
+
+    pollfd pfd{};
+    pfd.fd = fd_.fd;
+    pfd.events = POLLIN;
+
+    const int pr = ::poll(&pfd, 1, ms_left);
+    if (pr == 0) {
+      spdlog::warn("TcpConnection::recv: timeout (giving up)");
+      return -1;
+    }
+    if (pr < 0) {
+      const int e = errno;
+      if (e == EINTR) continue;
+      spdlog::error("TcpConnection::recv: poll: {}", std::strerror(e));
+      return -1;
+    }
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      spdlog::warn("TcpConnection::recv: peer closed");
+      return -1;
+    }
+
+    const ssize_t n = do_recv(fd_, data.data(), data.size(), MSG_DONTWAIT);
     if (n > 0) {
       if (spdlog::should_log(spdlog::level::debug)) {
         spdlog::debug("TcpConnection::recv {} bytes", n);
@@ -164,15 +241,7 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
     const int e = errno;
     if (e == EINTR) continue;
-
-    if (e == EAGAIN || e == EWOULDBLOCK) {
-      if (retries-- > 0) {
-        ::usleep(10'000);
-        continue;
-      }
-      spdlog::warn("TcpConnection::recv: timeout (giving up)");
-      return -1;
-    }
+    if (e == EAGAIN || e == EWOULDBLOCK) continue;
 
     spdlog::error("TcpConnection::recv: {}", std::strerror(e));
     return -1;
