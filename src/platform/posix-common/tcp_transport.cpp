@@ -1,4 +1,5 @@
 /*
+ *
  * Copyright (c) 2026 Gabriel2392
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,6 +25,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -69,7 +71,18 @@ void TcpConnection::close_() noexcept {
   }
 }
 
-bool TcpConnection::connected() const noexcept { return fd_.valid(); }
+bool TcpConnection::connected() const noexcept {
+  if (!fd_.valid()) return false;
+
+  unsigned char c = 0;
+  const ssize_t n = ::recv(fd_.fd, &c, 1, MSG_PEEK | MSG_DONTWAIT);
+  if (n > 0) return true;
+  if (n == 0) return false;
+
+  const int e = errno;
+  if (e == EAGAIN || e == EWOULDBLOCK) return true;
+  return false;
+}
 
 void TcpConnection::set_sock_timeouts_() noexcept {
   if (!fd_.valid()) return;
@@ -214,26 +227,52 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
 brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   if (!fd_.valid()) return brokkr::core::Result<TcpConnection>::Fail("TcpListener: not listening");
 
+  pollfd pfd{};
+  pfd.fd = fd_.fd;
+  pfd.events = POLLIN;
+
+  for (;;) {
+    int pr = ::poll(&pfd, 1, 100);
+    if (pr == 0) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+    if (pr < 0) {
+      const int e = errno;
+      if (e == EINTR) continue;
+      if (e == EBADF) return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
+      return brokkr::core::Result<TcpConnection>::Failf("poll: {}", std::strerror(e));
+    }
+
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
+    }
+
+    break;
+  }
+
   sockaddr_in peer{};
   socklen_t peer_len = sizeof(peer);
 
-  const int cfd = do_accept(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len, SOCK_CLOEXEC);
-  if (cfd < 0) {
+  for (;;) {
+    const int cfd = do_accept(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len, SOCK_CLOEXEC);
+    if (cfd >= 0) {
+      char ipbuf[INET_ADDRSTRLEN]{};
+      const char* ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
+      if (!ip) {
+        const int e = errno;
+        ::close(cfd);
+        return brokkr::core::Result<TcpConnection>::Failf("inet_ntop: {}", std::strerror(e));
+      }
+
+      const std::uint16_t p = ntohs(peer.sin_port);
+      spdlog::info("TcpListener: accepted {}:{}", ip, p);
+      return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
+    }
+
     const int e = errno;
+    if (e == EINTR) continue;
+    if (e == EAGAIN || e == EWOULDBLOCK) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+    if (e == EBADF || e == EINVAL) return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
     return brokkr::core::Result<TcpConnection>::Failf("accept: {}", std::strerror(e));
   }
-
-  char ipbuf[INET_ADDRSTRLEN]{};
-  const char* ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
-  if (!ip) {
-    const int e = errno;
-    ::close(cfd);
-    return brokkr::core::Result<TcpConnection>::Failf("inet_ntop: {}", std::strerror(e));
-  }
-
-  const std::uint16_t p = ntohs(peer.sin_port);
-  spdlog::info("TcpListener: accepted {}:{}", ip, p);
-  return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
 }
 
 } // namespace brokkr::posix_common

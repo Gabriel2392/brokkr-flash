@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "app/interface.hpp"
 #include "core/status.hpp"
+#include "protocol/odin/group_flasher.hpp"
 
 #include <array>
 #include <cstdint>
@@ -34,6 +34,6 @@ struct Md5Job {
 };
 
 brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept;
-brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, FlashInterface& ui) noexcept;
+brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui) noexcept;
 
 } // namespace brokkr::app

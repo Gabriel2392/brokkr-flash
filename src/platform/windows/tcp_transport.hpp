@@ -21,7 +21,6 @@
 #include "core/status.hpp"
 
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string>
 
@@ -79,6 +78,10 @@ public:
 
   brokkr::core::Status bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog = 4) noexcept;
   brokkr::core::Result<TcpConnection> accept_one() noexcept;
+
+  void close() noexcept {
+    if (fd_ != INVALID_SOCKET) { ::closesocket(fd_); fd_ = INVALID_SOCKET; }
+  }
 
 private:
   SOCKET fd_ = INVALID_SOCKET;

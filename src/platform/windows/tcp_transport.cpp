@@ -65,7 +65,32 @@ void TcpConnection::close_() noexcept {
   }
 }
 
-bool TcpConnection::connected() const noexcept { return fd_ != INVALID_SOCKET; }
+bool TcpConnection::connected() const noexcept {
+  if (fd_ == INVALID_SOCKET) return false;
+
+  WSAPOLLFD pfd{};
+  pfd.fd = fd_;
+  pfd.events = POLLRDNORM | POLLERR | POLLHUP;
+
+  const int r = WSAPoll(&pfd, 1, 0);
+  if (r == SOCKET_ERROR) return false;
+  if (r == 0) return true;
+
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return false;
+
+  if (pfd.revents & POLLRDNORM) {
+    char c = 0;
+    const int n = ::recv(fd_, &c, 1, MSG_PEEK);
+    if (n == 0) return false;
+    if (n < 0) {
+      const int err = WSAGetLastError();
+      if (err == WSAEWOULDBLOCK) return true;
+      return false;
+    }
+  }
+
+  return true;
+}
 
 void TcpConnection::set_sock_timeouts_() noexcept {
   if (!connected()) return;

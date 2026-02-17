@@ -27,12 +27,12 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <numeric>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 
+#include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
 namespace brokkr::app {
@@ -132,7 +132,7 @@ md5_hash_prefetch(const std::filesystem::path& path,
                   std::uint64_t bytes_to_hash,
                   std::atomic_uint64_t& done,
                   std::uint64_t total,
-                  FlashInterface& ui) noexcept
+                  const brokkr::odin::Ui& ui) noexcept
 {
   constexpr std::size_t kBuf = 8 * 1024 * 1024;
   struct Slot { std::vector<unsigned char> buf; std::size_t n = 0; };
@@ -174,7 +174,8 @@ md5_hash_prefetch(const std::filesystem::path& path,
 
     const auto new_done =
       done.fetch_add(static_cast<std::uint64_t>(s.n), std::memory_order_relaxed) + static_cast<std::uint64_t>(s.n);
-    ui.progress(new_done, total, new_done, total);
+
+    if (ui.on_progress) ui.on_progress(new_done, total, new_done, total);
   }
 
   const auto pst = pf.status();
@@ -208,16 +209,16 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesy
   return brokkr::core::Result<std::vector<Md5Job>>::Ok(std::move(jobs));
 }
 
-brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, FlashInterface& ui) noexcept {
+brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui) noexcept {
   if (jobs.empty()) return brokkr::core::Status::Ok();
 
   std::uint64_t total = 0;
   for (const auto& j : jobs) total += j.bytes_to_hash;
 
-  ui.stage("Checking package checksums");
+  if (ui.on_stage) ui.on_stage("Checking package checksums");
   spdlog::info("Checking MD5 on {} package(s), {} bytes total", jobs.size(), total);
 
-  {
+  if (ui.on_plan) {
     brokkr::odin::PlanItem pi;
     pi.kind = brokkr::odin::PlanItem::Kind::Part;
     pi.part_id = 0;
@@ -225,11 +226,10 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, FlashInterface&
     pi.part_name = "Checksums";
     pi.source_base = fmt::format("{} package(s)", jobs.size());
     pi.size = total;
-
-    ui.plan({std::move(pi)}, total);
-    ui.active(0);
-    ui.progress(0, total, 0, total);
+    ui.on_plan({std::move(pi)}, total);
   }
+  if (ui.on_item_active) ui.on_item_active(0);
+  if (ui.on_progress) ui.on_progress(0, total, 0, total);
 
   const std::size_t threads = std::min<std::size_t>(
     jobs.size(),
@@ -264,7 +264,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, FlashInterface&
   auto wst = pool.wait();
   if (!wst.ok) return wst;
 
-  ui.done_item(0);
+  if (ui.on_item_done) ui.on_item_done(0);
   spdlog::info("MD5 OK");
   return brokkr::core::Status::Ok();
 }

@@ -1,4 +1,5 @@
 /*
+ *
  * Copyright (c) 2026 Gabriel2392
  *
  * This program is free software: you can redistribute it and/or modify
@@ -76,6 +77,8 @@ public:
 
   brokkr::core::Status bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog = 4) noexcept;
   brokkr::core::Result<TcpConnection> accept_one() noexcept;
+
+  void close() noexcept { fd_.close(); }
 
 private:
   brokkr::FileHandle fd_;
