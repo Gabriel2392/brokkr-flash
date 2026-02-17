@@ -36,4 +36,7 @@ private:
     QRadioButton* radGetPit;
     QComboBox* cmbRebootAction;
     QPushButton* btnRebootDevice;
+    QPushButton* btnPrintPit;
+    QRadioButton* radNonePit;
+    QString lastDir;
 };

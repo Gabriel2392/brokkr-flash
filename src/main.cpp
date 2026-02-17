@@ -35,8 +35,10 @@ int main(int argc, char **argv) {
 	}
 
     if (opt->gui_mode) {
-        // Change log pattern to exclude datetime
-		spdlog::set_pattern("[%^%l%$] %v");
+		// Change log pattern to exclude some information and making it compact.
+        // This is because in GUI mode, the logs are meant to be parsed by brokkr-gui and shown to the user 
+        // in a more user-friendly way, so we want to avoid redundant information like log levels and date.
+		spdlog::set_pattern("%H:%M:%S> %v");
     }
     if (opt->_no_args) {
         if (opt->gui_mode) {
