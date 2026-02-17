@@ -41,6 +41,25 @@ if (POLICY CMP0141)
   set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
+# Check modern C++ features
+include(CheckCXXSourceCompiles)
+# Check __cpp_lib_byteswap
+set(BYTESWAP_SRC
+"#include <version>
+#if defined(__cpp_lib_byteswap) && __cpp_lib_byteswap >= 201907L
+#include <bit>
+int main() {
+    std::byteswap(0x12345678);
+    return 0;
+}
+#else
+#error \"__cpp_lib_byteswap not supported\"
+#endif")
+check_cxx_source_compiles("${BYTESWAP_SRC}" HAS_BYTESWAP)
+if (NOT HAS_BYTESWAP)
+    message(FATAL_ERROR "Compiler does not support __cpp_lib_byteswap, which is required")
+endif()
+
 # Platform-specific source files and definitions
 if (LINUX)
     add_compile_definitions(
