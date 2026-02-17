@@ -65,8 +65,8 @@ static void print_connected(bool only) {
                                       .products = default_pids()};
   for (const auto &d : brokkr::platform::enumerate_usb_devices_sysfs(f)) {
     if (only) {
-       std::cout << d.sysname << "\n";
-	   continue;
+      std::cout << d.sysname << "\n";
+      continue;
     }
 
     spdlog::info("Found device: {}", d.describe());
@@ -266,32 +266,39 @@ static decltype(auto) with_odin(brokkr::core::IByteTransport &link,
 /* --- wireless --- */
 // TODO: Test with WPS.
 
-static bool run_wireless(const Options &opt) {
+RunResult run_wireless(const Options &opt) {
   if (opt.print_pit && opt.pit_print_in) {
     const auto bytes = File::read_all(*opt.pit_print_in);
     if (!bytes) {
       spdlog::error("Failed to read PIT file: {}", opt.pit_print_in->string());
-      return false;
+      return RunResult::kIOFail;
     }
     print_pit_table(brokkr::odin::pit::parse({bytes->data(), bytes->size()}));
-    return true;
+    return RunResult::Success;
   }
 
   auto lock =
       brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
   if (!lock) {
     spdlog::error("Another instance is already running");
-    return false;
+    return RunResult::kOtherInstanceRunning;
   }
 
-  FlashInterface ui(!opt.gui_mode);
+  FlashInterface ui(!opt.gui_mode, opt.gui_mode);
   ui.stage("Waiting for wireless device");
 
   brokkr::platform::TcpListener lst;
-  lst.bind_and_listen("0.0.0.0", 13579);
+  if (!lst.bind_and_listen("0.0.0.0", 13579)) {
+    ui.fail("Failed to bind to port 13579");
+    return RunResult::kIOFail;
+  }
 
-  auto conn = lst.accept_one();
-  const std::string dev_id = fmt::format("wifi:{}", conn.peer_label());
+  auto conn_ = lst.accept_one();
+  if (!conn_) {
+    ui.fail("Failed to accept incoming connection");
+    return RunResult::kIOFail;
+  }
+  const std::string dev_id = fmt::format("wifi:{}", conn_->peer_label());
 
   auto shield =
       brokkr::core::SignalShield::enable([&](const char *sig_desc, int count) {
@@ -335,27 +342,28 @@ static bool run_wireless(const Options &opt) {
   try {
     if (opt.print_pit && !opt.pit_print_in) {
       const auto bytes =
-          with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
+          with_odin(*conn_, cfg, [&](brokkr::odin::OdinCommands &odin) {
             return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
           });
       print_pit_table(brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
-      brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
-      return 0;
+      brokkr::odin::OdinCommands(*conn_).shutdown(pit_shutdown_mode);
+      return RunResult::Success;
     }
 
     if (opt.pit_get_out) {
       const auto bytes =
-          with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
+          with_odin(*conn_, cfg, [&](brokkr::odin::OdinCommands &odin) {
             return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
           });
-      bool ret = false;
+      RunResult ret;
       if (!File::write_all(*opt.pit_get_out, bytes)) {
         ui.fail("Failed to save PIT to " + opt.pit_get_out->string());
+        ret = RunResult::kIOFail;
       } else {
         ui.done("Saved PIT to " + opt.pit_get_out->string());
-        ret = true;
+        ret = RunResult::Success;
       }
-      brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
+      brokkr::odin::OdinCommands(*conn_).shutdown(pit_shutdown_mode);
       return ret;
     }
 
@@ -364,34 +372,34 @@ static bool run_wireless(const Options &opt) {
       auto bytes = File::read_all(*opt.pit_set_in);
       if (!bytes) {
         ui.fail("Failed to read PIT file: " + opt.pit_set_in->string());
-        return false;
+        return RunResult::kIOFail;
       }
       auto pit_bytes = std::make_shared<File::ByteArray>(*bytes);
       if (!has_flash_files(opt)) {
-        with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
+        with_odin(*conn_, cfg, [&](brokkr::odin::OdinCommands &odin) {
           odin.set_pit({pit_bytes->data(), pit_bytes->size()},
                        cfg.preflash_retries);
           return true;
         });
         ui.done("Uploaded PIT from " + opt.pit_set_in->string());
-        brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
-        return true;
+        brokkr::odin::OdinCommands(*conn_).shutdown(pit_shutdown_mode);
+        return RunResult::Success;
       }
       pit_to_upload = std::move(pit_bytes);
     }
 
     if (!has_flash_files(opt) && !opt.reboot_only) {
       std::cerr << usage_text();
-      return false;
+      return RunResult::InvalidUsage;
     }
 
-    brokkr::odin::Target t{.id = dev_id, .link = &conn};
+    brokkr::odin::Target t{.id = dev_id, .link = &*conn_};
     std::vector<brokkr::odin::Target *> devs{&t};
 
     if (opt.reboot_only) {
       brokkr::odin::flash(devs, {}, {}, cfg, hooks,
                           brokkr::odin::Mode::RebootOnly);
-      return true;
+      return RunResult::Success;
     }
 
     const auto inputs = build_flash_inputs(opt);
@@ -414,58 +422,58 @@ static bool run_wireless(const Options &opt) {
     if (srcs.empty()) {
       spdlog::error("No valid flashable files");
       ui.fail("No valid flashable files");
-      return false;
+      return RunResult::InvalidUsage;
     }
 
     brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, hooks,
                         brokkr::odin::Mode::Flash);
-    return true;
+    return RunResult::Success;
 
   } catch (const std::exception &e) {
     const std::string msg = std::string("ERROR: ") + e.what();
     ui.fail(msg);
     spdlog::error("Exception in wireless run: {}", e.what());
-    return false;
+    return RunResult::Unknown;
   }
 }
 
 /* --- USB/main --- */
 
-int run(const Options &opt) {
-  if (opt.wireless)
-    return !run_wireless(opt);
+RunResult run(const Options &opt) {
   if (opt.print_connected) {
-	// Enable the logging back (To show the device info) and print all devices, not just the sysname.
-	spdlog::set_level(spdlog::level::info);
+    // Enable the logging back (To show the device info) and print all devices,
+    // not just the sysname.
+    spdlog::set_level(spdlog::level::info);
     print_connected(false);
-    return 0;
+    return RunResult::Success;
   }
+
   if (opt.print_connected_only) {
     print_connected(true);
-    return 0;
+    return RunResult::Success;
   }
 
   if (opt.print_pit && opt.pit_print_in) {
     const auto bytes = File::read_all(*opt.pit_print_in);
     if (!bytes) {
       spdlog::error("Failed to read PIT file: {}", opt.pit_print_in->string());
-      return 1;
+      return RunResult::kIOFail;
     }
     print_pit_table(brokkr::odin::pit::parse({bytes->data(), bytes->size()}));
-    return 0;
+    return RunResult::Success;
   }
 
   auto lock =
       brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
   if (!lock) {
     spdlog::error("Another instance is already running");
-    return 2;
+    return RunResult::kOtherInstanceRunning;
   }
 
   auto targets = enumerate_targets(opt);
   if (targets.empty()) {
     spdlog::error("No supported devices found.");
-    return 3;
+    return RunResult::NoDevices;
   }
 
   brokkr::odin::Cfg cfg;
@@ -490,7 +498,7 @@ int run(const Options &opt) {
     if (!conn.open()) {
       spdlog::error("Failed to open connection to device {}: {}", info.sysname,
                     info.devnode());
-      return 1;
+      return RunResult::ConnectionFail;
     }
     return fn(conn);
   };
@@ -499,42 +507,46 @@ int run(const Options &opt) {
     if (targets.size() != 1) {
       std::cerr << "--print-pit without a file requires exactly one device "
                    "(use --target).\n";
-      return 4;
+      return RunResult::InvalidUsage;
     }
-    usb_one(targets.front(), [&](brokkr::platform::UsbFsConnection &conn) {
-      const auto bytes =
-          with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
-            return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
-          });
-      print_pit_table(brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
-      brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
-      return 0;
-    });
-    return 0;
+    return usb_one(
+        targets.front(), [&](brokkr::platform::UsbFsConnection &conn) {
+          const auto bytes =
+              with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
+                return brokkr::odin::download_pit_bytes(odin,
+                                                        cfg.preflash_retries);
+              });
+          print_pit_table(
+              brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
+          brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
+          return RunResult::Success;
+        });
   }
 
   if (opt.pit_get_out) {
     if (targets.size() != 1) {
       std::cerr << "PIT get requires exactly one device (use --target).\n";
-      return 4;
+      return RunResult::InvalidUsage;
     }
-    usb_one(targets.front(), [&](brokkr::platform::UsbFsConnection &conn) {
-      const auto bytes =
-          with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
-            return brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
-          });
-      int ret = 0;
-      if (!File::write_all(*opt.pit_get_out, bytes)) {
-        spdlog::error("Failed to save PIT to {}", opt.pit_get_out->string());
-        ret = 1;
-      } else {
-        spdlog::info("Saved PIT to {}", opt.pit_get_out->string());
-        ret = 0;
-      }
-      brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
-      return ret;
-    });
-    return 0;
+    return usb_one(
+        targets.front(), [&](brokkr::platform::UsbFsConnection &conn) {
+          const auto bytes =
+              with_odin(conn, cfg, [&](brokkr::odin::OdinCommands &odin) {
+                return brokkr::odin::download_pit_bytes(odin,
+                                                        cfg.preflash_retries);
+              });
+          RunResult ret;
+          if (!File::write_all(*opt.pit_get_out, bytes)) {
+            spdlog::error("Failed to save PIT to {}",
+                          opt.pit_get_out->string());
+            ret = RunResult::kIOFail;
+          } else {
+            spdlog::info("Saved PIT to {}", opt.pit_get_out->string());
+            ret = RunResult::Success;
+          }
+          brokkr::odin::OdinCommands(conn).shutdown(pit_shutdown_mode);
+          return ret;
+        });
   }
 
   std::shared_ptr<const File::ByteArray> pit_to_upload;
@@ -543,14 +555,14 @@ int run(const Options &opt) {
     auto file = File::read_all(*opt.pit_set_in);
     if (!file) {
       spdlog::error("Failed to read PIT file: {}", opt.pit_set_in->string());
-      return 1;
+      return RunResult::kIOFail;
     }
     pit_to_upload = std::make_shared<File::ByteArray>(*file);
   }
 
   if (!has_flash_files(opt) && !opt.reboot_only && !opt.pit_set_in) {
     std::cerr << usage_text();
-    return 1;
+    return RunResult::InvalidUsage;
   }
 
   std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> storage;
@@ -564,7 +576,7 @@ int run(const Options &opt) {
     storage.push_back(std::move(ctx));
   }
 
-  FlashInterface ui(!opt.gui_mode);
+  FlashInterface ui(!opt.gui_mode, opt.gui_mode);
 
   auto shield =
       brokkr::core::SignalShield::enable([&](const char *sig_desc, int count) {
@@ -591,12 +603,12 @@ int run(const Options &opt) {
     if (opt.reboot_only) {
       brokkr::odin::flash(devs, {}, {}, cfg, hooks,
                           brokkr::odin::Mode::RebootOnly);
-      return 0;
+      return RunResult::Success;
     }
     if (opt.pit_set_in && !has_flash_files(opt)) {
       brokkr::odin::flash(devs, {}, pit_to_upload, cfg, hooks,
                           brokkr::odin::Mode::PitSetOnly);
-      return 0;
+      return RunResult::Success;
     }
 
     const auto inputs = build_flash_inputs(opt);
@@ -618,19 +630,19 @@ int run(const Options &opt) {
       if (!is_pit_name(s.basename))
         srcs.push_back(std::move(s));
     if (srcs.empty()) {
-      spdlog::error("No valid flashable files");
       ui.fail("No valid flashable files");
-      return 1;
+      spdlog::error("No valid flashable files");
+      return RunResult::NoFlashFiles;
     }
 
     brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, hooks,
                         brokkr::odin::Mode::Flash);
-    return 0;
+    return RunResult::Success;
 
   } catch (const std::exception &e) {
     ui.fail(fmt::format("Error: {}", e.what()));
-	spdlog::error("Exception in run: {}", e.what());
-    return 1;
+    spdlog::error("Exception in run: {}", e.what());
+    return RunResult::Unknown;
   }
 }
 

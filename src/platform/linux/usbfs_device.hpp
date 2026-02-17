@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "platform/posix-common/filehandle.hpp"
 #include <cstdint>
 #include <string>
 
@@ -46,12 +47,12 @@ public:
   UsbFsDevice(UsbFsDevice &&) noexcept;
   UsbFsDevice &operator=(UsbFsDevice &&) noexcept;
 
-  void open_and_init();
+  bool open_and_init();
 
   void close() noexcept;
-  bool is_open() const noexcept { return fd_ >= 0; }
+  bool is_open() const noexcept { return fd_.valid(); }
 
-  int fd() const noexcept { return fd_; }
+  int fd() const noexcept { return fd_.fd; }
   bool writable() const noexcept { return writable_; }
 
   UsbIds ids() const noexcept { return ids_; }
@@ -76,7 +77,7 @@ private:
 
 private:
   std::string devnode_;
-  int fd_ = -1;
+  FileHandle fd_;
 
   bool writable_ = true;
 

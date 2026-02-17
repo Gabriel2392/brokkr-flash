@@ -16,6 +16,7 @@
  */
 
 #include "platform/linux/usbfs_conn.hpp"
+#include "spdlog/spdlog.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -34,10 +35,14 @@ constexpr std::size_t BULK_BUFFER_LENGTH_NO_LIMIT = 128 * 1024;
 UsbFsConnection::UsbFsConnection(UsbFsDevice &dev) : dev_(dev) {}
 
 bool UsbFsConnection::open() {
-  if (connected_)
+  if (connected_) {
+    spdlog::warn("UsbFsConnection::open: already connected");
     return true;
-  if (!dev_.is_open())
+  }
+  if (!dev_.is_open()) {
+    spdlog::error("UsbFsConnection::open: device not open");
     return false;
+  }
 
   max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT
                                                 : BULK_BUFFER_LENGTH_NO_LIMIT;
@@ -55,8 +60,10 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
     return -1;
 
   const auto eps = dev_.endpoints();
-  if (eps.bulk_out == 0)
+  if (eps.bulk_out == 0) {
+    spdlog::error("UsbFsConnection::send: no bulk OUT endpoint");
     return -1;
+  }
 
   const std::uint8_t *p = data.data();
   const std::uint8_t *end = p + data.size();
@@ -81,8 +88,14 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
         p += rc;
         break;
       }
-      if (++attempt > retries)
+
+      spdlog::error("UsbFsConnection::send: bulk transfer error: {}",
+                    std::strerror(errno));
+      if (++attempt > retries) {
+        spdlog::error("UsbFsConnection::send: giving up after {} attempts",
+                      attempt);
         return -1;
+      }
       ::usleep(10'000);
     }
   }
@@ -104,12 +117,16 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data,
 }
 
 int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
-  if (!connected_)
+  if (!connected_) {
+    spdlog::error("UsbFsConnection::recv_zlp: not connected");
     return -1;
+  }
 
   const auto eps = dev_.endpoints();
-  if (eps.bulk_in == 0)
+  if (eps.bulk_in == 0) {
+    spdlog::error("UsbFsConnection::recv_zlp: no bulk IN endpoint");
     return -1;
+  }
 
   usbdevfs_bulktransfer zlp{};
   zlp.ep = eps.bulk_in;
@@ -121,12 +138,16 @@ int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
 }
 
 int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
-  if (!connected_)
+  if (!connected_) {
+    spdlog::error("UsbFsConnection::recv: not connected");
     return -1;
+  }
 
   const auto eps = dev_.endpoints();
-  if (eps.bulk_in == 0)
+  if (eps.bulk_in == 0) {
+    spdlog::error("UsbFsConnection::recv: no bulk IN endpoint");
     return -1;
+  }
 
   if (data.size() == 0) {
     return recv_zlp();
@@ -152,8 +173,13 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
       retBytes = ::ioctl(dev_.fd(), USBDEVFS_BULK, &bulk);
       if (retBytes >= 0)
         break;
-      if (++attempt > retries)
+      spdlog::error("UsbFsConnection::recv: bulk transfer error: {}",
+                    std::strerror(errno));
+      if (++attempt > retries) {
+        spdlog::error("UsbFsConnection::recv: giving up after {} attempts",
+                      attempt);
         return -1;
+      }
       ::usleep(10'000);
     }
 

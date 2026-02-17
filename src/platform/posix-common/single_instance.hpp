@@ -20,7 +20,7 @@
 #include <optional>
 #include <string>
 
-namespace brokkr::macos {
+namespace brokkr::posix_common {
 
 class SingleInstanceLock {
 public:
@@ -45,4 +45,4 @@ private:
   std::string name_;
 };
 
-} // namespace brokkr::macos
+} // namespace brokkr::posix_common

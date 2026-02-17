@@ -21,6 +21,8 @@
 
 #include <cstdint>
 #include <string>
+#include <span>
+#include <optional>
 
 #include <WinSock2.h>
 #include <windows.h>
@@ -77,10 +79,10 @@ public:
   TcpListener(const TcpListener &) = delete;
   TcpListener &operator=(const TcpListener &) = delete;
 
-  void bind_and_listen(std::string bind_ip, std::uint16_t port,
+  bool bind_and_listen(std::string bind_ip, std::uint16_t port,
                        int backlog = 4);
 
-  TcpConnection accept_one();
+  std::optional<TcpConnection> accept_one();
 
 private:
   SOCKET fd_ = INVALID_SOCKET;

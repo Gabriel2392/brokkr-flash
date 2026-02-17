@@ -32,7 +32,7 @@ namespace brokkr::app {
 
 class FlashInterface {
 public:
-  FlashInterface(bool is_tty_enabled);
+  FlashInterface(bool is_tty_enabled, bool output_in_json);
   ~FlashInterface();
 
   FlashInterface(const FlashInterface &) = delete;
@@ -82,7 +82,7 @@ private:
 
   std::string bar_(double frac, std::size_t width_cols) const;
 
-  bool tty_ = false, color_ = false, utf8_ = false;
+  bool tty_ = false, color_ = false, utf8_ = false, output_json_ = false;
 
   mutable std::mutex mtx_;
 

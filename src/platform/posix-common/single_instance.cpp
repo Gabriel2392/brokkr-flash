@@ -15,17 +15,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "platform/linux/single_instance.hpp"
+#include "single_instance.hpp"
 
-#include <cerrno>
-#include <cstring>
 #include <utility>
 
-#include <sys/socket.h>
-#include <sys/un.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 
-namespace brokkr::linux {
+namespace brokkr::posix_common {
 
 SingleInstanceLock::~SingleInstanceLock() {
   if (fd_ >= 0) {
@@ -52,25 +50,13 @@ SingleInstanceLock::operator=(SingleInstanceLock &&o) noexcept {
 
 std::optional<SingleInstanceLock>
 SingleInstanceLock::try_acquire(std::string name) {
-  const int fd = ::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  std::string path = "/tmp/" + name + ".lock";
+
+  const int fd = ::open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
   if (fd < 0)
     return std::nullopt;
 
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-
-  if (name.size() + 1 > sizeof(addr.sun_path)) {
-    ::close(fd);
-    return std::nullopt;
-  }
-
-  addr.sun_path[0] = '\0';
-  std::memcpy(addr.sun_path + 1, name.data(), name.size());
-
-  const socklen_t len =
-      static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name.size());
-
-  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), len) != 0) {
+  if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
     ::close(fd);
     return std::nullopt;
   }
@@ -78,4 +64,4 @@ SingleInstanceLock::try_acquire(std::string name) {
   return SingleInstanceLock{fd, std::move(name)};
 }
 
-} // namespace brokkr::linux
+} // namespace brokkr::posix_common

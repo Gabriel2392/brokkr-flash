@@ -67,12 +67,12 @@ if (LINUX)
     )
     add_library(brokkr-platform INTERFACE)
     target_sources(brokkr-platform INTERFACE
-        src/platform/linux/signal_shield.cpp
-        src/platform/linux/single_instance.cpp
+        src/platform/posix-common/signal_shield.cpp
+        src/platform/posix-common/single_instance.cpp
+        src/platform/posix-common/tcp_transport.cpp
         src/platform/linux/sysfs_usb.cpp
         src/platform/linux/usbfs_device.cpp
         src/platform/linux/usbfs_conn.cpp
-        src/platform/linux/tcp_transport.cpp
     )
 elseif (WIN32)
     add_compile_definitions(
@@ -95,12 +95,13 @@ elseif (APPLE)
     )
     add_library(brokkr-platform INTERFACE)
     target_sources(brokkr-platform INTERFACE
-        src/platform/macos/signal_shield.cpp
-        src/platform/macos/single_instance.cpp      
+        src/platform/posix-common/signal_shield.cpp
+        src/platform/posix-common/single_instance.cpp
+        src/platform/posix-common/tcp_transport.cpp      
         src/platform/macos/sysfs_usb.cpp
         src/platform/macos/usbfs_device.cpp
         src/platform/macos/usbfs_conn.cpp
-        src/platform/macos/tcp_transport.cpp
+        
     )
     target_link_libraries(brokkr-platform INTERFACE
         "-framework IOKit"
@@ -139,6 +140,9 @@ add_executable(brokkr
     src/app/md5_verify.cpp
 )
 
+if (WIN32)
+    target_sources(brokkr PRIVATE assets/icon.rc)
+endif()
 find_package(Threads REQUIRED)
 target_include_directories(brokkr PRIVATE src src/lz4)
 target_link_libraries(brokkr PRIVATE Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only brokkr-platform brokkr-lib)
@@ -219,6 +223,9 @@ if (Qt6_FOUND)
         src-gui/main_gui.cpp 
         src-gui/brokkr_wrapper.cpp
     )
+    if (WIN32)
+        target_sources(brokkr-gui PRIVATE assets/icon.rc)
+    endif()
     target_link_libraries(brokkr-gui PRIVATE 
         Qt6::Core 
         Qt6::Gui 

@@ -11,6 +11,10 @@
 #include <QRadioButton>
 #include <QComboBox>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QProgressBar>
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     setWindowTitle("Brokkr Flasher");
@@ -29,16 +33,14 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     idComLayout->setSpacing(2);
     idComLayout->setContentsMargins(5, 5, 5, 5);
 
-    for (int row = 0; row < 2; ++row) {
-        for (int col = 0; col < 8; ++col) {
-            auto* box = new QLineEdit(this);
-            box->setReadOnly(true);
-            box->setAlignment(Qt::AlignCenter);
-            box->setMinimumHeight(35);
-            box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
-            idComLayout->addWidget(box, row, col);
-            comBoxes.append(box);
-        }
+    for (int col = 0; col < 8; ++col) {
+        auto* box = new QLineEdit(this);
+        box->setReadOnly(true);
+        box->setAlignment(Qt::AlignCenter);
+        box->setMinimumHeight(35);
+        box->setStyleSheet("background-color: transparent; border: 1px solid gray;");
+        idComLayout->addWidget(box, 0, col);
+        comBoxes.append(box);
     }
     mainLayout->addWidget(idComGroup);
 
@@ -82,16 +84,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     pitLayout->addWidget(new QLabel("PIT File:"), 0, 0);
     editPit = new QLineEdit(this);
-    editPit->setEnabled(false); // Initially disabled
+    editPit->setEnabled(false);
     pitLayout->addWidget(editPit, 0, 1);
 
     auto* btnPit = new QPushButton("Browse", this);
-    btnPit->setEnabled(false); // Initially disabled
+    btnPit->setEnabled(false);
     pitLayout->addWidget(btnPit, 0, 2);
 
     radNonePit = new QRadioButton("None", this);
-    radSetPit = new QRadioButton("Set PIT (Flash)", this);
-    radGetPit = new QRadioButton("Get PIT (Extract)", this);
+    radSetPit = new QRadioButton("Set PIT", this);
+    radGetPit = new QRadioButton("Get PIT", this);
     radNonePit->setChecked(true);
 
     auto* radioLayout = new QHBoxLayout();
@@ -103,7 +105,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     tabWidget->addTab(pitTab, "Pit");
 
-    // Toggle the PIT inputs when "None" is checked/unchecked
     connect(radNonePit, &QRadioButton::toggled, this, [this, btnPit](bool checked) {
         editPit->setEnabled(!checked);
         btnPit->setEnabled(!checked);
@@ -154,8 +155,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     auto* bottomLayout = new QHBoxLayout();
 
-    QLabel* linkLabel = new QLabel("<a href='#'>Brokkr Community</a>", this);
-    bottomLayout->addWidget(linkLabel);
+    // Progress Bar & Status
+    statusLabel = new QLabel("Ready", this);
+    statusLabel->setStyleSheet("color: #0078D7; font-weight: bold; padding-left: 15px;");
+    bottomLayout->addWidget(statusLabel);
+
+    progressBar = new QProgressBar(this);
+    progressBar->setRange(0, 100);
+    progressBar->setValue(0);
+    progressBar->setTextVisible(true);
+    bottomLayout->addWidget(progressBar, 1);
 
     bottomLayout->addStretch();
 
@@ -180,17 +189,70 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     process = new QProcess(this);
 
+    // Live JSON & Log Parser
     connect(process, &QProcess::readyReadStandardOutput, this, [this]() {
-        consoleOutput->append(QString::fromLocal8Bit(process->readAllStandardOutput()).trimmed());
+        while (process->canReadLine()) {
+            QString rawLine = QString::fromLocal8Bit(process->readLine()).trimmed();
+            if (rawLine.isEmpty()) continue;
+			const static QString key = "PROGRESSUPDATE";
+
+            if (rawLine.startsWith(key)) {
+                QString jsonString = rawLine.mid(14);
+                QJsonParseError parseError;
+                QJsonDocument jsonDoc = QJsonDocument::fromJson(jsonString.toUtf8(), &parseError);
+
+                if (parseError.error == QJsonParseError::NoError && jsonDoc.isObject()) {
+                    QJsonObject obj = jsonDoc.object();
+
+                    QString stage = obj["stage"].toString();
+                    double done = obj["overall_done"].toDouble();
+                    double total = obj["overall_total"].toDouble();
+                    QString notice = obj["notice"].toString();
+
+                    if (total > 0) {
+                        int percent = static_cast<int>((done / total) * 100.0);
+                        progressBar->setValue(percent);
+                    }
+
+                    QString statusText = stage;
+                    if (!notice.isEmpty() && notice != "{}") {
+                        statusText += " (" + notice + ")";
+                    }
+                    statusLabel->setText(statusText);
+                }
+            }
+            else {
+				// Can be malformed JSON or just a regular log line, either way we print it
+                if (rawLine.contains(key)) {
+                    // drop
+                    return;
+                }
+                consoleOutput->append(rawLine.toHtmlEscaped());
+                QTextCursor cursor = consoleOutput->textCursor();
+                cursor.movePosition(QTextCursor::End);
+                consoleOutput->setTextCursor(cursor);
+            }
+        }
         });
+
     connect(process, &QProcess::readyReadStandardError, this, [this]() {
-        consoleOutput->append("<font color=\"#ff5555\">" + QString::fromLocal8Bit(process->readAllStandardError()).trimmed() + "</font>");
+        while (process->canReadLine()) {
+            QString rawLine = QString::fromLocal8Bit(process->readLine()).trimmed();
+            if (!rawLine.isEmpty()) {
+                consoleOutput->append("<font color=\"#ff5555\">" + rawLine.toHtmlEscaped() + "</font>");
+                QTextCursor cursor = consoleOutput->textCursor();
+                cursor.movePosition(QTextCursor::End);
+                consoleOutput->setTextCursor(cursor);
+            }
+        }
         });
+
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int exitCode) {
         btnRun->setEnabled(true);
         btnRebootDevice->setEnabled(true);
         btnPrintPit->setEnabled(true);
         consoleOutput->append(QString("\n<i>Brokkr finished with exit code %1</i>").arg(exitCode));
+        statusLabel->setText(exitCode == 0 ? "Done" : "Failed");
         });
 
     pollProcess = new QProcess(this);
@@ -251,8 +313,12 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         editCSC->clear(); editUserData->clear();
         consoleOutput->clear(); editTarget->clear();
         editPit->clear();
-        radNonePit->setChecked(true); // Automatically triggers the toggle signal to disable the picker
+        radNonePit->setChecked(true);
         cmbRebootAction->setCurrentIndex(0);
+
+        // Reset Progress UI
+        progressBar->setValue(0);
+        statusLabel->setText("Ready");
 
         for (int i = 0; i < fileLayout->count(); ++i) {
             if (auto* chk = qobject_cast<QCheckBox*>(fileLayout->itemAt(i)->widget())) {
@@ -298,6 +364,10 @@ void BrokkrWrapper::executeBrokkr(const QStringList& args) {
     btnRebootDevice->setEnabled(false);
     btnPrintPit->setEnabled(false);
 
+    // Auto-reset progress on new action
+    progressBar->setValue(0);
+    statusLabel->setText("Starting...");
+
     QString program = "brokkr";
 #ifdef Q_OS_WIN
     program += ".exe";
@@ -306,17 +376,19 @@ void BrokkrWrapper::executeBrokkr(const QStringList& args) {
     QStringList finalArgs;
     finalArgs << "--gui-mode" << args;
 
-    consoleOutput->append("<b>> " + program + " " + finalArgs.join(" ") + "</b>\n");
+    consoleOutput->append("<b>&gt; " + program.toHtmlEscaped() + " " + finalArgs.join(" ").toHtmlEscaped() + "</b>\n");
     process->start(program, finalArgs);
 }
 
 void BrokkrWrapper::onRunClicked() {
     QStringList args;
 
+	args << "--gui-mode";
+
     if (chkWireless->isChecked()) args << "-w";
 
+    // Fixed ComboBox logic
     int actionIndex = cmbRebootAction->currentIndex();
-
     if (actionIndex == 1) {
         args << "--redownload";
     }

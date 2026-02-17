@@ -52,12 +52,6 @@ namespace brokkr::windows {
 
 using ssize_t = std::make_signed_t<std::size_t>;
 
-[[noreturn]] static void throw_winsockerr(const char *what) {
-  spdlog::error("{} failed with error code {}", what, WSAGetLastError());
-  throw std::runtime_error(std::string(what) + ": " +
-                           std::to_string(WSAGetLastError()));
-}
-
 TcpConnection::TcpConnection(int fd, std::string peer_ip,
                              std::uint16_t peer_port)
     : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port) {
@@ -204,7 +198,7 @@ TcpListener::~TcpListener() {
   WSACleanup();
 }
 
-void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
+bool TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
                                   int backlog) {
   if (fd_ != INVALID_SOCKET) {
     ::closesocket(fd_);
@@ -215,12 +209,16 @@ void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
   port_ = port;
 
   fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd_ < 0)
-    throw_winsockerr("socket");
+  if (fd_ < 0) {
+	  spdlog::error("socket() failed with error code {}", WSAGetLastError());
+	  return false;
+  }
 
   int one = 1;
-  (void)::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, (const char *)&one,
-                     sizeof(one));
+  if (!::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, (const char*)&one,
+      sizeof(one))) {
+	  spdlog::error("setsockopt(SO_REUSEADDR) failed with error code {}", WSAGetLastError());
+  }
 
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -232,14 +230,17 @@ void TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port,
 
   if (::bind(fd_, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) !=
       0) {
-    throw_winsockerr("bind");
+	  spdlog::error("bind() failed with error code {}", WSAGetLastError());
+	  return false;
   }
   if (::listen(fd_, backlog) != 0) {
-    throw_winsockerr("listen");
+	  spdlog::error("listen() failed with error code {}", WSAGetLastError());
+	  return false;
   }
+  return true;
 }
 
-TcpConnection TcpListener::accept_one() {
+std::optional<TcpConnection> TcpListener::accept_one() {
   if (fd_ == INVALID_SOCKET)
     throw std::runtime_error("TcpListener: not listening");
 
@@ -247,13 +248,17 @@ TcpConnection TcpListener::accept_one() {
   socklen_t peer_len = sizeof(peer);
 
   const int cfd = ::accept(fd_, reinterpret_cast<sockaddr *>(&peer), &peer_len);
-  if (cfd < 0)
-    throw_winsockerr("accept");
+  if (cfd < 0) {
+      spdlog::error("accept() failed with error code {}", WSAGetLastError());
+      return std::nullopt;
+  }
 
   char ipbuf[INET_ADDRSTRLEN]{};
   const char *ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
-  if (!ip)
-    ip = "unknown";
+  if (!ip) {
+      spdlog::error("inet_ntop() failed with error code {}", WSAGetLastError());
+	  return std::nullopt;
+  }
 
   const std::uint16_t p = ntohs(peer.sin_port);
   return TcpConnection(cfd, std::string(ip), p);

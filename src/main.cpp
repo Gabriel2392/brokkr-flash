@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
 		// Change log pattern to exclude some information and making it compact.
         // This is because in GUI mode, the logs are meant to be parsed by brokkr-gui and shown to the user 
         // in a more user-friendly way, so we want to avoid redundant information like log levels and date.
-		spdlog::set_pattern("%H:%M:%S> %v");
+		spdlog::set_pattern("%H:%M:%S %v");
     }
     if (opt->_no_args) {
         if (opt->gui_mode) {
@@ -57,7 +57,8 @@ int main(int argc, char **argv) {
       return EXIT_SUCCESS;
     }
 
-    return brokkr::app::run(*opt);
+	auto ret = opt->wireless ? brokkr::app::run_wireless(*opt) : brokkr::app::run(*opt);
+	return ret == brokkr::app::RunResult::Success ? EXIT_SUCCESS : static_cast<int>(ret);
   } catch (const std::exception &e) {
     spdlog::error(e.what());
     return EXIT_FAILURE;

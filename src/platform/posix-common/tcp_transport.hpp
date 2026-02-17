@@ -18,11 +18,14 @@
 #pragma once
 
 #include "core/byte_transport.hpp"
+#include "filehandle.hpp"
 
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 
-namespace brokkr::linux {
+namespace brokkr::posix_common {
 
 class TcpConnection final : public brokkr::core::IByteTransport {
 public:
@@ -47,18 +50,16 @@ public:
   int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
   int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
 
-  int recv_zlp(unsigned /*retries*/ = 0) override {
-    return 0;
-  } // not used on tcp
+  int recv_zlp(unsigned /*retries*/ = 0) override { return 0; }
 
   std::string peer_label() const;
 
 private:
   void close_() noexcept;
-  bool set_sock_timeouts_() noexcept;
+  void set_sock_timeouts_() noexcept;
 
 private:
-  int fd_ = -1;
+  FileHandle fd_;
   int timeout_ms_ = 1000;
 
   std::string peer_ip_;
@@ -73,15 +74,15 @@ public:
   TcpListener(const TcpListener &) = delete;
   TcpListener &operator=(const TcpListener &) = delete;
 
-  void bind_and_listen(std::string bind_ip, std::uint16_t port,
-                       int backlog = 4);
+  [[nodiscard]] bool bind_and_listen(std::string bind_ip, std::uint16_t port,
+                                     int backlog = 4);
 
-  TcpConnection accept_one();
+  std::optional<TcpConnection> accept_one();
 
 private:
-  int fd_ = -1;
+  FileHandle fd_;
   std::string bind_ip_;
   std::uint16_t port_ = 0;
 };
 
-} // namespace brokkr::linux
+} // namespace brokkr::posix_common

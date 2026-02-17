@@ -21,6 +21,18 @@
 
 namespace brokkr::app {
 
-int run(const Options &opt);
+enum class RunResult {
+    Success,
+    kIOFail,
+    kOtherInstanceRunning,
+    InvalidUsage,
+    NoFlashFiles,
+	NoDevices,
+	ConnectionFail,
+    Unknown,
+};
+
+RunResult run(const Options &opt);
+RunResult run_wireless(const Options& opt);
 
 } // namespace brokkr::app

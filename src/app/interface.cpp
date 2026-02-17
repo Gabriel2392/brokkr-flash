@@ -181,7 +181,7 @@ bool FlashInterface::utf8_enabled_() {
 #endif
 }
 
-FlashInterface::FlashInterface(bool is_tty_enabled) {
+FlashInterface::FlashInterface(bool is_tty_enabled, bool output_in_json) : output_json_(output_in_json) {
   if (is_tty_enabled) {
       tty_ = is_tty_();
       color_ = colors_enabled_();
@@ -273,38 +273,44 @@ void FlashInterface::done_item(std::size_t index) {
 }
 
 void FlashInterface::progress(std::uint64_t overall_done,
-                              std::uint64_t overall_total,
-                              std::uint64_t item_done,
-                              std::uint64_t item_total) {
-  std::lock_guard lk(mtx_);
-  overall_done_ = overall_done;
-  overall_total_ = overall_total;
-  item_done_ = item_done;
-  item_total_ = item_total;
+    std::uint64_t overall_total,
+    std::uint64_t item_done,
+    std::uint64_t item_total) {
+    std::lock_guard lk(mtx_);
+    overall_done_ = overall_done;
+    overall_total_ = overall_total;
+    item_done_ = item_done;
+    item_total_ = item_total;
 
-  const auto now = std::chrono::steady_clock::now();
-  if (overall_done_ < last_rate_bytes_) {
-    last_rate_ts_ = now;
-    last_rate_bytes_ = overall_done_;
-    ema_rate_bps_ = 0.0;
-    redraw_(false);
-    return;
-  }
+    const auto now = std::chrono::steady_clock::now();
+    if (overall_done_ < last_rate_bytes_) {
+        last_rate_ts_ = now;
+        last_rate_bytes_ = overall_done_;
+        ema_rate_bps_ = 0.0;
+        redraw_(false);
+        return;
+    }
 
-  const auto dt = std::chrono::duration_cast<std::chrono::duration<double>>(
-                      now - last_rate_ts_)
-                      .count();
-  const auto db = static_cast<double>(overall_done_ - last_rate_bytes_);
+    const auto dt = std::chrono::duration_cast<std::chrono::duration<double>>(
+        now - last_rate_ts_)
+        .count();
+    const auto db = static_cast<double>(overall_done_ - last_rate_bytes_);
 
-  if (dt >= 0.2) {
-    const double inst = (dt > 0.0) ? (db / dt) : 0.0;
-    ema_rate_bps_ =
-        (ema_rate_bps_ <= 1e-9) ? inst : (ema_rate_bps_ * 0.90 + inst * 0.10);
-    last_rate_ts_ = now;
-    last_rate_bytes_ = overall_done_;
-  }
+    // Only update calculations AND redraw the UI 5 times a second
+    if (dt >= 0.2) {
+        const double inst = (dt > 0.0) ? (db / dt) : 0.0;
+        ema_rate_bps_ =
+            (ema_rate_bps_ <= 1e-9) ? inst : (ema_rate_bps_ * 0.90 + inst * 0.10);
+        last_rate_ts_ = now;
+        last_rate_bytes_ = overall_done_;
+        redraw_(false);
+    }
 
-  redraw_(false);
+    // Force a final redraw when it hits exactly 100%
+    // so the user doesn't get stuck seeing 99.8% at the end.
+    else if (overall_done_ == overall_total_ && overall_total_ > 0) {
+        redraw_(false);
+    }
 }
 
 void FlashInterface::notice(std::string msg) {
@@ -456,14 +462,22 @@ void FlashInterface::redraw_(bool force) {
   last_redraw_ = now;
 
   if (!tty_) {
-    if (!force)
-      return;
-    spdlog::info("Devices={} Stage={} Overall={}/{} cpu_bl_id={}{}{}",
+    if (output_json_) {
+      // Output JSON status updates in a machine-readable format.
+      fmt::print(R"(PROGRESSUPDATE{{"devices": {}, "stage": "{}", "overall_done": {}, "overall_total": {}, "cpu_bl_id": "{}", "notice": "{}", "status": "{}"}}
+)",
+                   dev_count_, (stage_.empty() ? "-" : stage_),
+                   overall_done_, overall_total_,
+                   (model_.empty() ? "-" : model_),
+                   notice_line_, status_line_);
+    } else {
+        spdlog::info("Devices={} Stage={} Overall={}/{} cpu_bl_id={}{}{}",
                  dev_count_, (stage_.empty() ? "-" : stage_),
                  bytes_h_(overall_done_), bytes_h_(overall_total_),
                  (model_.empty() ? "-" : model_),
                  (notice_line_.empty() ? "" : (" | " + notice_line_)),
                  (status_line_.empty() ? "" : (" | " + status_line_)));
+    }
     return;
   }
 

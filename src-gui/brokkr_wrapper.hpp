@@ -7,6 +7,9 @@
 #include <QTextEdit>
 #include <QProcess>
 #include <QRadioButton>
+#include <QComboBox>
+#include <QLabel>
+#include <QProgressBar>
 
 class BrokkrWrapper : public QWidget {
     Q_OBJECT // MOC will find this perfectly now!
@@ -22,21 +25,35 @@ private:
     void executeBrokkr(const QStringList& args);
     void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
-    QLineEdit* editAP, * editBL, * editCP, * editCSC, * editUserData;
-    QLineEdit* editTarget;
-    QCheckBox* chkWireless, * chkNoReboot, * chkPrintPit;
-    QPushButton* btnRun, * btnConnected;
-    QTextEdit* consoleOutput;
     QProcess* process;
-    QList<QLineEdit*> comBoxes;
     QProcess* pollProcess;
-	QTimer* deviceTimer;
+    QTimer* deviceTimer;
+    QList<QLineEdit*> comBoxes;
+
+    QTextEdit* consoleOutput;
+
+    QLineEdit* editTarget;
+    QCheckBox* chkWireless;
+    QComboBox* cmbRebootAction;
+
     QLineEdit* editPit;
+    QRadioButton* radNonePit;
     QRadioButton* radSetPit;
     QRadioButton* radGetPit;
-    QComboBox* cmbRebootAction;
-    QPushButton* btnRebootDevice;
+
+    QLineEdit* editBL;
+    QLineEdit* editAP;
+    QLineEdit* editCP;
+    QLineEdit* editCSC;
+    QLineEdit* editUserData;
+    
+    QLabel* statusLabel;
+    
+    QProgressBar* progressBar;
+    
+    QPushButton* btnRun;
     QPushButton* btnPrintPit;
-    QRadioButton* radNonePit;
+    QPushButton* btnRebootDevice;
+
     QString lastDir;
 };

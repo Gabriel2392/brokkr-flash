@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "platform/macos/signal_shield.hpp"
+#include "signal_shield.hpp"
 
 #include <pthread.h>
 #include <signal.h>
