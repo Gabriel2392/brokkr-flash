@@ -60,7 +60,7 @@ public:
 
 private:
   void close_() noexcept;
-  bool set_sock_timeouts_() noexcept;
+  void set_sock_timeouts_() noexcept;
 
 private:
   SOCKET fd_ = INVALID_SOCKET;

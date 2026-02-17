@@ -200,6 +200,8 @@ bool UsbFsDevice::release_interface_() {
   if (!fd_.valid() || ifc_num_ < 0)
     return false;
   int ifc = ifc_num_;
+  // Please ignore ENODEV errors here, as they can happen if the device is unplugged while we're
+  // still trying to release the interface. In that case, we can just consider the interface released.
   return do_ioctl(fd_, USBDEVFS_RELEASEINTERFACE, &ifc) == 0;
 }
 
