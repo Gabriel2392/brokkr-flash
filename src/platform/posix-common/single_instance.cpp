@@ -18,10 +18,12 @@
 #include "single_instance.hpp"
 #include "platform/posix-common/filehandle.hpp"
 
+#include <cstring>
 #include <utility>
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
 
 namespace brokkr::posix_common {
 
@@ -31,7 +33,16 @@ namespace brokkr::posix_common {
 #define SOCK_CLOEXEC 0
 #endif
 
-SingleInstanceLock::~SingleInstanceLock() = default;
+SingleInstanceLock::~SingleInstanceLock() {
+#if defined(__APPLE__)
+  // Clean up the filesystem socket so a future instance can acquire the lock.
+  if (fd_.valid() && !name_.empty()) {
+    const std::string path = "/tmp/single_instance_lock_" + name_;
+    ::unlink(path.c_str());
+  }
+#endif
+  // fd_ closes itself via FileHandle RAII
+}
 
 SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
   *this = std::move(o);
@@ -55,16 +66,32 @@ SingleInstanceLock::try_acquire(std::string name) {
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
 
+  socklen_t len = 0;
+
+#if defined(__linux__)
+  // Linux abstract namespace socket: sun_path[0] is set to 0, and the name
+  // starts from sun_path[1]. The socket will not appear in the filesystem.
   if (name.size() + 1 > sizeof(addr.sun_path)) {
     fd.close();
     return std::nullopt;
   }
-
   addr.sun_path[0] = '\0';
   std::memcpy(addr.sun_path + 1, name.data(), name.size());
-
-  const socklen_t len =
-      static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name.size());
+  len = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name.size());
+#elif defined(__APPLE__)
+  // macOS doesn't support abstract namespace sockets, so we use a regular
+  // filesystem socket in /tmp. The socket file is cleaned up in the destructor.
+  // If bind fails (EADDRINUSE), another instance is running.
+  const std::string path = "/tmp/single_instance_lock_" + name;
+  if (path.size() >= sizeof(addr.sun_path)) {
+    fd.close();
+    return std::nullopt;
+  }
+  std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+  len = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() + 1);
+#else
+#error "Unsupported POSIX platform for SingleInstanceLock"
+#endif
 
   if (do_bind(fd, reinterpret_cast<const sockaddr *>(&addr), len) != 0) {
     fd.close();
