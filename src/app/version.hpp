@@ -19,27 +19,21 @@
 
 #include <string>
 
-#define BROKKR_VERSION_BASE "1.0.0"
-#define BROKKR_VERSION_STAGE "release"
-
-#ifndef BROKKR_COMMIT_COUNT
-#define BROKKR_COMMIT_COUNT "0"
-#endif
-
 #include <fmt/format.h>
 
 namespace brokkr::app {
 
 inline const std::string &version_string() {
   static const std::string v = [] {
-    const std::string base = BROKKR_VERSION_BASE;
-    const std::string stage = BROKKR_VERSION_STAGE;
+    const std::string base = BROKKR_VERSION;
+    const std::string stage = BROKKR_BUILD_TYPE;
     const std::string cnt = BROKKR_COMMIT_COUNT;
 
-    if (stage == "release") {
-      return fmt::format("{}-{}", base, stage);
-    }
+#ifdef NDEBUG
+    return fmt::format("{}-{}", base, stage);
+#else
     return fmt::format("{}-{}+{}", base, stage, cnt);
+#endif
   }();
   return v;
 }
