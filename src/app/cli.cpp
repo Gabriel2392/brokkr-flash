@@ -103,7 +103,7 @@ Compatibility aliases:
   return out;
 }
 
-Options parse_cli(int argc, char **argv) {
+std::optional<Options> parse_cli(int argc, char **argv) {
   Options o;
 
   auto any_flash_file = [&] {
@@ -123,20 +123,23 @@ Options parse_cli(int argc, char **argv) {
     }
     if (a == "--print-connected") {
       o.print_connected = true;
-      // Disable logging to show last connection found messages (So it won't duplicate)
-	  spdlog::set_level(spdlog::level::off);
+      // Disable logging to show last connection found messages (So it won't
+      // duplicate)
+      spdlog::set_level(spdlog::level::off);
       continue;
     }
-	if (a == "--print-connected-only") {
+    if (a == "--print-connected-only") {
       o.print_connected_only = true;
-	  // Disable logging, since this is meant for machine parsing (e.g. by brokkr-gui) and we don't want to duplicate the sysname output with log messages.
-	  spdlog::set_level(spdlog::level::off);
+      // Disable logging, since this is meant for machine parsing (e.g. by
+      // brokkr-gui) and we don't want to duplicate the sysname output with log
+      // messages.
+      spdlog::set_level(spdlog::level::off);
       continue;
     }
     if (a == "--gui-mode") {
       o.gui_mode = true;
       continue;
-	}
+    }
 
     if (a == "--print-pit" || is_opt(a, "--print-pit")) {
       o.print_pit = true;
@@ -175,19 +178,22 @@ Options parse_cli(int argc, char **argv) {
     }
 
     if (a == "--verbose" || a == "-v") {
-      // We must ignore -v if --print-connected family is specified. They have their own logic.
+      // We must ignore -v if --print-connected family is specified. They have
+      // their own logic.
       if (!o.print_connected && !o.print_connected_only)
         spdlog::set_level(spdlog::level::debug);
       continue;
-	}
+    }
 
     if (a == "--target" || is_opt(a, "--target")) {
       std::string_view v;
       if (auto ov = opt_value(a, "--target"))
         v = *ov;
       else {
-        if (i + 1 >= argc)
-          throw std::runtime_error("--target requires value");
+        if (i + 1 >= argc) {
+          spdlog::error("--target requires a value");
+          return std::nullopt;
+        }
         v = argv[++i];
       }
       o.target_sysname = std::string(v);
@@ -234,27 +240,32 @@ Options parse_cli(int argc, char **argv) {
     }
 
     if (a.starts_with("-")) {
-      throw std::runtime_error("Unknown option: " + std::string(a));
+      spdlog::error("Unknown option: {}", a);
+      return std::nullopt;
     }
 
-    throw std::runtime_error(
-        "Positional inputs are not supported. Use -a/-b/-c/-s/-u.");
+    spdlog::error(
+        "Positional arguments are not supported: {}, Use -a/-b/-c/-s/-u", a);
+    return std::nullopt;
   }
 
   if (o.wireless) {
-    if (o.target_sysname)
-      throw std::runtime_error("--wireless cannot be used with --target");
-    if (o.print_connected)
-      throw std::runtime_error(
-          "--wireless cannot be used with --print-connected");
+    if (o.target_sysname) {
+      spdlog::error("--wireless cannot be used with --target");
+      return std::nullopt;
+    }
+    if (o.print_connected || o.print_connected_only) {
+      spdlog::error("--wireless cannot be used with --print-connected(-only)");
+      return std::nullopt;
+    }
 
     const bool has_wireless_op = o.reboot_only || o.pit_get_out.has_value() ||
                                  o.pit_set_in.has_value() || any_flash_file();
 
     if (!has_wireless_op) {
-      throw std::runtime_error(
-          "--wireless requires either --reboot, --get/--get-pit, "
-          "--set/--set-pit, or flash inputs (-a/-b/-c/-s/-u)");
+      spdlog::error("--wireless requires either --reboot, --get/--get-pit, "
+                    "--set/--set-pit, or flash inputs (-a/-b/-c/-s/-u)");
+      return std::nullopt;
     }
   }
 
@@ -264,21 +275,24 @@ Options parse_cli(int argc, char **argv) {
                                o.reboot_only;
 
     if (has_other_ops) {
-      throw std::runtime_error(
-          "--print-pit must be used alone (it cannot be combined with "
-          "flashing, --get/--set, or --reboot)");
+      spdlog::error("--print-pit cannot be combined with flashing, "
+                    "--get/--set, or --reboot");
+      return std::nullopt;
     }
   }
 
   if (o.pit_get_out && o.pit_set_in) {
-    throw std::runtime_error("Cannot use --get-pit and --set-pit together");
+    spdlog::error("Cannot use --get-pit and --set-pit together");
+    return std::nullopt;
   }
   if (o.pit_get_out && any_flash_file()) {
-    throw std::runtime_error("--get-pit does not accept flash inputs");
+    spdlog::error("--get-pit cannot be combined with flash inputs");
+    return std::nullopt;
   }
 
   if (o.reboot_only && !o.reboot_after_flash) {
-    throw std::runtime_error("--reboot cannot be used with --no-reboot");
+    spdlog::error("--reboot cannot be used with --no-reboot");
+    return std::nullopt;
   }
 
   const bool has_other_ops = (o.pit_get_out.has_value() ||
@@ -288,17 +302,21 @@ Options parse_cli(int argc, char **argv) {
   }
 
   if (o.redownload && !o.reboot_after_flash) {
-    throw std::runtime_error("--redownload cannot be used with --no-reboot");
+    spdlog::error("--redownload cannot be used with --no-reboot");
+    return std::nullopt;
   }
   if (o.redownload && o.reboot_only) {
-    throw std::runtime_error("--redownload cannot be used with --reboot");
+    spdlog::error("--redownload cannot be used with --reboot");
+    return std::nullopt;
   }
   if (o.redownload) {
     const bool allowed_context = o.pit_get_out.has_value() ||
                                  o.pit_set_in.has_value() || any_flash_file() ||
                                  o.print_pit;
     if (!allowed_context) {
-      throw std::runtime_error("--redownload cannot be used alone");
+      spdlog::error("--redownload must be used with some other operation (e.g. "
+                    "flashing, --get/--set, or --print-pit)");
+      return std::nullopt;
     }
   }
 

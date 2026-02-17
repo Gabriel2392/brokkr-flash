@@ -55,7 +55,7 @@ struct Options {
   std::optional<std::filesystem::path> file_u;
 };
 
-Options parse_cli(int argc, char **argv);
-std::string usage_text();
+std::optional<Options> parse_cli(int argc, char **argv);
+[[nodiscard]] std::string usage_text();
 
 } // namespace brokkr::app

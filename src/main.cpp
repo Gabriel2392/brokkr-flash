@@ -29,29 +29,33 @@ int main(int argc, char **argv) {
 
   try {
     auto opt = brokkr::app::parse_cli(argc, argv);
+    if (!opt) {
+      spdlog::error("Failed to parse command line arguments. Use --help to see usage.");
+      return EXIT_FAILURE;
+	}
 
-    if (opt.gui_mode) {
+    if (opt->gui_mode) {
         // Change log pattern to exclude datetime
 		spdlog::set_pattern("[%^%l%$] %v");
     }
-    if (opt._no_args) {
-        if (opt.gui_mode) {
-			spdlog::error("Please tick some buttons to perform actions.");
+    if (opt->_no_args) {
+        if (opt->gui_mode) {
+			spdlog::error("Please give some inputs to perform actions.");
         } else {
 		    spdlog::error("No arguments provided. Use --help to see usage.");
         }
 		return EXIT_FAILURE;
     }
-    if (opt.help) {
+    if (opt->help) {
       spdlog::info(brokkr::app::usage_text());
       return EXIT_SUCCESS;
     }
-    if (opt.version) {
+    if (opt->version) {
       spdlog::info("Brokkr Flash v{}", brokkr::app::version_string());
       return EXIT_SUCCESS;
     }
 
-    return brokkr::app::run(opt);
+    return brokkr::app::run(*opt);
   } catch (const std::exception &e) {
     spdlog::error(e.what());
     return EXIT_FAILURE;
