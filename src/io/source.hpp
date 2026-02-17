@@ -37,6 +37,10 @@ public:
   virtual std::uint64_t size() const = 0;
 
   virtual std::size_t read(std::span<std::byte> out) = 0;
+
+  // If read() returns 0 before size() bytes are produced, callers may check status()
+  // to distinguish "EOF" vs "read failed".
+  virtual brokkr::core::Status status() const noexcept { return brokkr::core::Status::Ok(); }
 };
 
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept;

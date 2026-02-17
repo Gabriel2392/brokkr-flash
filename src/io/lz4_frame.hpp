@@ -49,8 +49,6 @@ struct Lz4FrameHeaderInfo {
 
 brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src) noexcept;
 
-//   u32 block_size_le;  (bit31 => uncompressed block)
-//   u8 block_data[block_size & 0x7fffffff]
 class Lz4BlockStreamReader {
 public:
   static brokkr::core::Result<Lz4BlockStreamReader> open(std::unique_ptr<ByteSource> src) noexcept;
@@ -91,7 +89,7 @@ public:
   std::uint64_t size() const override { return total_out_; }
   std::size_t read(std::span<std::byte> out) override;
 
-  brokkr::core::Status status() const noexcept { return st_; }
+  brokkr::core::Status status() const noexcept override { return st_; }
 
 private:
   Lz4DecompressedSource(std::unique_ptr<ByteSource> src, Lz4FrameHeaderInfo hdr) noexcept;

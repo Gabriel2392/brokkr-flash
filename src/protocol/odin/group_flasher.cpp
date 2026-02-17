@@ -100,7 +100,11 @@ static bool any_lz4(const std::vector<ImageSpec>& v) {
 static brokkr::core::Status read_exact(io::ByteSource& src, std::byte* dst, std::size_t n, std::string_view name) noexcept {
   for (std::size_t off = 0; off < n;) {
     const std::size_t got = src.read({dst + off, n - off});
-    if (!got) return brokkr::core::Status::Fail("Short read: " + std::string(name));
+    if (!got) {
+      auto st = src.status();
+      if (!st.ok) return st;
+      return brokkr::core::Status::Fail("Short read: " + std::string(name));
+    }
     off += got;
   }
   return brokkr::core::Status::Ok();

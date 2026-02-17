@@ -120,6 +120,23 @@ struct File {
   }
 };
 
+static brokkr::core::Result<File::ByteArray> read_all_source(brokkr::io::ByteSource& src) noexcept {
+  const auto sz64 = src.size();
+  if (sz64 > File::kMax) return brokkr::core::Result<File::ByteArray>::Fail("Source too large: " + src.display_name());
+
+  File::ByteArray out(static_cast<std::size_t>(sz64));
+  for (std::size_t off = 0; off < out.size();) {
+    const std::size_t got = src.read({out.data() + off, out.size() - off});
+    if (!got) {
+      auto st = src.status();
+      if (!st.ok) return brokkr::core::Result<File::ByteArray>::Fail(std::move(st.msg));
+      return brokkr::core::Result<File::ByteArray>::Fail("Short read: " + src.display_name());
+    }
+    off += got;
+  }
+  return brokkr::core::Result<File::ByteArray>::Ok(std::move(out));
+}
+
 static std::shared_ptr<const File::ByteArray> pit_from_specs(const std::vector<brokkr::odin::ImageSpec>& specs) {
   const brokkr::odin::ImageSpec* pit = nullptr;
   for (const auto& s : specs) if (is_pit_name(s.basename)) pit = &s;
@@ -128,10 +145,10 @@ static std::shared_ptr<const File::ByteArray> pit_from_specs(const std::vector<b
   auto sr = pit->open();
   if (!sr) { spdlog::error("PIT open failed: {}", sr.st.msg); return {}; }
 
-  auto br = File::read_all(sr.value->display_name());
-  if (!br) { spdlog::error("PIT read failed: {}", br.st.msg); return {}; }
+  auto rr = read_all_source(*sr.value);
+  if (!rr) { spdlog::error("PIT read failed: {}", rr.st.msg); return {}; }
 
-  return std::make_shared<const File::ByteArray>(std::move(br.value));
+  return std::make_shared<const File::ByteArray>(std::move(rr.value));
 }
 
 static void print_pit_table(const brokkr::odin::pit::PitTable& t) {
@@ -224,9 +241,6 @@ open_single_connection(const UsbDeviceSysfsInfo& info, const brokkr::odin::Cfg& 
 
   conn.set_timeout_ms(cfg.preflash_timeout_ms);
 
-  // Important: conn holds reference to dev, so we must "leak" dev lifetime into conn.
-  // The simplest way here: store dev inside a static heap holder tied to the connection.
-  // Instead of doing that, we just don't use this helper for long-lived connections.
   return brokkr::core::Result<brokkr::platform::UsbFsConnection>::Fail("internal: open_single_connection not supported by-value");
 }
 
@@ -286,8 +300,7 @@ RunResult run_wireless(const Options& opt) {
     opt.reboot_after_flash ? brokkr::odin::OdinCommands::ShutdownMode::Reboot :
                              brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
 
-  const auto pit_shutdown_mode_for_manual =
-    pit_shutdown_mode; // naming: used for --print-pit/--get-pit paths
+  const auto pit_shutdown_mode_for_manual = pit_shutdown_mode;
 
   if (opt.print_pit && !opt.pit_print_in) {
     auto br = with_odin_result(conn, cfg, [&](brokkr::odin::OdinCommands& odin) {
