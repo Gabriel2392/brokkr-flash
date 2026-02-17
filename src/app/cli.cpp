@@ -85,6 +85,7 @@ Options:
   --reboot                     reboot all selected devices without flashing. Must be used alone.
   --redownload                 after operation, try to reboot back into Download Mode (Might not work with all devices)
   --no-reboot                  do not reboot after flashing (incompatible with --redownload)
+  --verbose, -v                enable verbose logging
 
 Flash inputs:
   -a <AP file>
@@ -158,6 +159,11 @@ Options parse_cli(int argc, char **argv) {
       o.reboot_after_flash = false;
       continue;
     }
+
+    if (a == "--verbose" || a == "-v") {
+      spdlog::set_level(spdlog::level::debug);
+      continue;
+	}
 
     if (a == "--target" || is_opt(a, "--target")) {
       std::string_view v;
