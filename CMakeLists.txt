@@ -113,14 +113,8 @@ endif()
 target_include_directories(brokkr-platform INTERFACE src)
 target_link_libraries(brokkr-platform INTERFACE spdlog::spdlog_header_only fmt::fmt-header-only)
 
-add_executable(brokkr
-    src/main.cpp
-
-    src/app/cli.cpp
-    src/app/run.cpp
-    src/app/interface.cpp
-    src/app/md5_verify.cpp
-
+add_library(brokkr-lib INTERFACE)
+target_sources(brokkr-lib INTERFACE
     src/core/thread_pool.cpp
 
     src/io/tar.cpp
@@ -136,8 +130,18 @@ add_executable(brokkr
     src/protocol/odin/group_flasher.cpp
     src/protocol/odin/pit_transfer.cpp)
 
+add_executable(brokkr
+    src/main.cpp
+
+    src/app/cli.cpp
+    src/app/run.cpp
+    src/app/interface.cpp
+    src/app/md5_verify.cpp
+)
+
+find_package(Threads REQUIRED)
 target_include_directories(brokkr PRIVATE src src/lz4)
-target_link_libraries(brokkr PRIVATE brokkr-platform)
+target_link_libraries(brokkr PRIVATE Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only brokkr-platform brokkr-lib)
 
 # If not Windows, and using GCC or Clang, and building in Release or RelWithDebInfo mode, enable some optimizations and large file support
 if (
@@ -169,6 +173,7 @@ if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
         message(STATUS "Enabling LTO (Link time optimization)")
         set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_target_properties(brokkr-lib PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 endif()
 
@@ -200,9 +205,6 @@ target_compile_definitions(brokkr PRIVATE
   BROKKR_BUILD_TYPE=\"${BROKKR_BUILD_TYPE}\"
   BROKKR_VERSION=\"${PROJECT_VERSION}\"
 )
-
-find_package(Threads REQUIRED)
-target_link_libraries(brokkr PRIVATE Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
