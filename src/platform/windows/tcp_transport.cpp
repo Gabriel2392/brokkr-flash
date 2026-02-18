@@ -184,7 +184,7 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port_);
-  if (::InetPton(AF_INET, bind_ip_.c_str(), &addr.sin_addr) != 1) {
+  if (::InetPtonA(AF_INET, bind_ip_.c_str(), &addr.sin_addr) != 1) {
     return brokkr::core::Status::Failf("Invalid bind ip: {}", bind_ip_);
   }
 

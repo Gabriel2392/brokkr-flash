@@ -679,7 +679,7 @@ void BrokkrWrapper::closeEvent(QCloseEvent* e) {
 }
 
 #if defined(Q_OS_WIN)
-bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, long* result) {
+bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
     (void)eventType;
     (void)result;
     MSG* msg = reinterpret_cast<MSG*>(message);

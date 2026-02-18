@@ -145,12 +145,14 @@ if (Qt6_FOUND)
     if (WIN32)
         add_executable(brokkr WIN32 
             src-gui/main_gui.cpp 
+            src-gui/brokkr_wrapper.hpp
             src-gui/brokkr_wrapper.cpp
             assets/icon.rc
         )
     else()
         add_executable(brokkr 
-            src-gui/main_gui.cpp 
+            src-gui/main_gui.cpp
+            src-gui/brokkr_wrapper.hpp
             src-gui/brokkr_wrapper.cpp
         )
     endif()
@@ -166,6 +168,11 @@ if (Qt6_FOUND)
         Qt6::Core 
         Qt6::Gui 
         Qt6::Widgets
+    )
+
+    # Enable Qt MOC (Meta-Object Compiler) for Q_OBJECT macros
+    set_target_properties(brokkr PROPERTIES
+        AUTOMOC ON
     )
 
     if (MSVC)

@@ -9,6 +9,7 @@
 #include <QLineEdit>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QObject>
 #include <QTextEdit>
 #include <QComboBox>
 #include <QLabel>
@@ -51,7 +52,7 @@ protected:
     void closeEvent(QCloseEvent* e) override;
 
 #if defined(Q_OS_WIN)
-    bool nativeEvent(const QByteArray& eventType, void* message, long* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
 
 private slots:
