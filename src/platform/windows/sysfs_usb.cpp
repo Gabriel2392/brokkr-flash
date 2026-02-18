@@ -120,7 +120,7 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
       info.device_path = portName;
       info.vendor = vid;
       info.product = pid;
-      spdlog::info("Found Device: {} (VID: 0x{:04x}, PID: 0x{:04x})", info.device_path, vid, pid);
+      spdlog::debug("Found Device: {} (VID: 0x{:04x}, PID: 0x{:04x})", info.device_path, vid, pid);
       result.push_back(std::move(info));
     }
 
@@ -151,7 +151,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
     info.product = dev.product;
     result.push_back(info);
   }
-  spdlog::info("Total matching USB devices found: {}", result.size());
+  spdlog::debug("Total USB devices found: {}", result.size());
   return result;
 }
 
