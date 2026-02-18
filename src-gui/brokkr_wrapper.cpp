@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QVariantAnimation>
 #include <QSpacerItem>
+#include <QPalette>
 #include <QPen>
 
 #include <algorithm>
@@ -133,6 +134,7 @@ protected:
         p.setRenderHint(QPainter::Antialiasing, false);
 
         const QRect r = rect().adjusted(1, 1, -1, -1);
+        p.fillRect(r, palette().color(QPalette::Base));
 
         const int fillW = static_cast<int>(std::lround(r.width() * fill_));
         if (fillW > 0) {
@@ -346,6 +348,14 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     mainLayout->addWidget(bannerLabel);
 
     idComGroup_ = new QGroupBox("ID:COM", this);
+    {
+        auto pal = idComGroup_->palette();
+        QColor bg = pal.color(QPalette::Window);
+        bg = bg.darker(110);
+        pal.setColor(QPalette::Window, bg);
+        idComGroup_->setPalette(pal);
+        idComGroup_->setAutoFillBackground(true);
+    }
     idComLayout_ = new QGridLayout(idComGroup_);
     idComLayout_->setSpacing(4);
     idComLayout_->setContentsMargins(5, 5, 5, 5);
@@ -910,6 +920,7 @@ void BrokkrWrapper::setSquaresProgress_(double frac, bool animate) {
     for (int i = 0; i < n; ++i) {
         auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
         if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         if (animate) sq->setFillAnimated(frac, 120);
         else sq->setFill(frac);
@@ -921,6 +932,7 @@ void BrokkrWrapper::setSquaresText_(const QString& s) {
     for (int i = 0; i < n; ++i) {
         auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
         if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         sq->setText(s);
     }
@@ -932,6 +944,7 @@ void BrokkrWrapper::setSquaresActiveColor_(bool enhanced) {
     for (int i = 0; i < n; ++i) {
         auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
         if (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]) continue;
         sq->setVariant(enhanced ? DeviceSquare::Variant::Blue : DeviceSquare::Variant::Green);
     }
@@ -939,8 +952,11 @@ void BrokkrWrapper::setSquaresActiveColor_(bool enhanced) {
 
 void BrokkrWrapper::setSquaresFinal_(bool ok) {
     if (!ok) {
-        for (auto* sq : devSquares_) {
+        const int n = devSquares_.size();
+        for (int i = 0; i < n; ++i) {
+            auto* sq = devSquares_[i];
             if (!sq) continue;
+            if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
             sq->setVariant(DeviceSquare::Variant::Red);
             sq->setText("FAIL!");
             sq->setFillAnimated(1.0, 250);
@@ -953,6 +969,7 @@ void BrokkrWrapper::setSquaresFinal_(bool ok) {
     for (int i = 0; i < n; ++i) {
         auto* sq = devSquares_[i];
         if (!sq) continue;
+        if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
         const bool failed = (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]);
         if (failed) {
             sq->setVariant(DeviceSquare::Variant::Red);
@@ -1015,11 +1032,9 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
         box->setAlignment(Qt::AlignCenter);
         box->setMinimumHeight(22);
         box->setStyleSheet(
-            "background: transparent;"
-            "border: 1px solid gray;"
+            "border: 1px solid palette(mid);"
             "font-size: 9px;"
-            "selection-background-color: transparent;"
-            "selection-color: black;"
+            "color: palette(dark);"
         );
 
         if (singleCellNoStretch && fixedCellW > 0) {
@@ -1051,6 +1066,7 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
         }
 
         slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+        slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
         return;
     }
 
@@ -1063,6 +1079,7 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
     }
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 }
 
 void BrokkrWrapper::refreshDeviceBoxes_() {
@@ -1071,13 +1088,13 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     for (auto* box : comBoxes) {
         box->clear();
         box->setToolTip(QString());
+        auto pal = box->palette();
+        pal.setColor(QPalette::Base, palette().color(QPalette::Window));
+        box->setPalette(pal);
         box->setStyleSheet(
-            "background: transparent;"
-            "border: 1px solid gray;"
+            "border: 1px solid palette(mid);"
             "font-size: 9px;"
-            "color: black;"
-            "selection-background-color: transparent;"
-            "selection-color: black;"
+            "color: palette(dark);"
         );
     }
 
@@ -1092,14 +1109,22 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
         const QString raw = QString("%1:[%2]").arg(i).arg(sysname);
         comBoxes[i]->setText(elideFor(comBoxes[i], raw));
         comBoxes[i]->setToolTip(sysname);
+        {
+            auto pal = comBoxes[i]->palette();
+            QColor hl = pal.color(QPalette::Highlight);
+            hl.setAlpha(50);
+            QColor base = palette().color(QPalette::Base);
+            // blend highlight into base at low opacity for a subtle theme-aware tint
+            const int r2 = (base.red()   * (255 - hl.alpha()) + hl.red()   * hl.alpha()) / 255;
+            const int g2 = (base.green() * (255 - hl.alpha()) + hl.green() * hl.alpha()) / 255;
+            const int b2 = (base.blue()  * (255 - hl.alpha()) + hl.blue()  * hl.alpha()) / 255;
+            pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+            comBoxes[i]->setPalette(pal);
+        }
         comBoxes[i]->setStyleSheet(
-            "background: transparent;"
-            "color: black;"
             "font-weight: bold;"
-            "border: 1px solid gray;"
+            "border: 1px solid palette(highlight);"
             "font-size: 9px;"
-            "selection-background-color: #00e5ff;"
-            "selection-color: black;"
         );
     }
 
@@ -1109,14 +1134,21 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
         auto* last = comBoxes.back();
         const QString raw = QString("... +%1 more").arg(extra);
         last->setText(elideFor(last, raw));
+        {
+            auto pal = last->palette();
+            QColor base = palette().color(QPalette::Base);
+            QColor warn(255, 183, 77);  // orange accent
+            warn.setAlpha(50);
+            const int r2 = (base.red()   * (255 - warn.alpha()) + warn.red()   * warn.alpha()) / 255;
+            const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
+            const int b2 = (base.blue()  * (255 - warn.alpha()) + warn.blue()  * warn.alpha()) / 255;
+            pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+            last->setPalette(pal);
+        }
         last->setStyleSheet(
-            "background: transparent;"
-            "color: black;"
             "font-weight: bold;"
-            "border: 1px solid gray;"
+            "border: 1px solid #ffb74d;"
             "font-size: 9px;"
-            "selection-background-color: #ffcc80;"
-            "selection-color: black;"
         );
     }
 }
@@ -1264,6 +1296,11 @@ void BrokkrWrapper::startWorkStart_() {
     enhanced_speed_ = false;
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    {
+        const int activeCount = std::min<int>(uiDevicesSnapshot.size(), devSquares_.size());
+        for (int i = 0; i < activeCount; ++i) slotActive_[static_cast<std::size_t>(i)] = 1;
+    }
 
     setSquaresProgress_(0.0, false);
     setSquaresText_("");
@@ -1374,14 +1411,21 @@ void BrokkrWrapper::startWorkStart_() {
                             devSquares_[idx]->setFill(1.0);
                         }
                         if (idx < comBoxes.size() && comBoxes[idx]) {
+                            {
+                                auto pal = comBoxes[idx]->palette();
+                                QColor base = palette().color(QPalette::Base);
+                                QColor fail(176, 0, 0);
+                                fail.setAlpha(45);
+                                const int r2 = (base.red()   * (255 - fail.alpha()) + fail.red()   * fail.alpha()) / 255;
+                                const int g2 = (base.green() * (255 - fail.alpha()) + fail.green() * fail.alpha()) / 255;
+                                const int b2 = (base.blue()  * (255 - fail.alpha()) + fail.blue()  * fail.alpha()) / 255;
+                                pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+                                comBoxes[idx]->setPalette(pal);
+                            }
                             comBoxes[idx]->setStyleSheet(
-                                "background: transparent;"
-                                "color: black;"
                                 "font-weight: bold;"
                                 "border: 2px solid #b00000;"
                                 "font-size: 9px;"
-                                "selection-background-color: transparent;"
-                                "selection-color: black;"
                             );
                         }
 
@@ -1619,6 +1663,11 @@ void BrokkrWrapper::startWorkPrintPit_() {
     setBusy_(true);
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    {
+        const int activeCount = std::min<int>(connectedDevices_.size(), devSquares_.size());
+        for (int i = 0; i < activeCount; ++i) slotActive_[static_cast<std::size_t>(i)] = 1;
+    }
 
     setSquaresProgress_(0.0, false);
     setSquaresText_("PIT");

@@ -107,6 +107,7 @@ private:
     QList<QLineEdit*> comBoxes;
 
     std::vector<std::uint8_t> slotFailed_;
+    std::vector<std::uint8_t> slotActive_;
 
     QTabWidget* tabWidget_ = nullptr;
     QTextEdit* consoleOutput = nullptr;
