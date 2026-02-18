@@ -1,184 +1,238 @@
-name: CMake on multiple platforms
+name: Self-contained bundles
 
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  # ═══════════════════════════════════════════════════
+  #  Linux – Ubuntu 24.04, AppImage
+  # ═══════════════════════════════════════════════════
+  linux_appimage:
+    name: Linux AppImage x64
+    runs-on: ubuntu-24.04
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            build_type: Release
-            c_compiler: clang
-            cpp_compiler: clang++
-
-          - os: macos-latest
-            build_type: Release
-            c_compiler: clang
-            cpp_compiler: clang++
-
-          - os: windows-latest
-            build_type: Release
-            c_compiler: cl
-            cpp_compiler: cl
+    env:
+      QT_VERSION: "6.7.3"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set build dir
-        id: strings
-        shell: bash
-        run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-
-      # ---- Qt6: install via aqtinstall for GUI target ----
-      - name: Install Qt6 dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install build deps
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev
+          sudo apt-get install -y \
+            gcc-14 g++-14 ninja-build cmake patchelf \
+            libgl1-mesa-dev libfuse2 imagemagick wget file
 
-      - name: Install Qt6
+      - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.3'
+          version: ${{ env.QT_VERSION }}
           cache: true
+          arch: linux_gcc_64
 
-      # ---- macOS: install brew LLVM so we do NOT use AppleClang ----
-      - name: Install LLVM (macOS)
-        if: matrix.os == 'macos-latest'
-        shell: bash
+      - name: Configure
         run: |
           set -euo pipefail
-          brew update
-          brew install llvm
-
-      - name: Configure (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          extra_args=(
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-            -DCMAKE_CXX_STANDARD=23
-            -DCMAKE_CXX_STANDARD_REQUIRED=ON
-            -DCMAKE_CXX_EXTENSIONS=OFF
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 \
+            -DCMAKE_CXX_COMPILER=g++-14 \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
-          )
 
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            extra_args+=(
-              -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-              -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-              -DCMAKE_EXE_LINKER_FLAGS_RELEASE=-s
-              -DCMAKE_SHARED_LINKER_FLAGS_RELEASE=-s
-              -DCMAKE_MODULE_LINKER_FLAGS_RELEASE=-s
-            )
-          fi
+      - name: Build
+        run: cmake --build build --parallel 2
 
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            LLVM_PREFIX="$(brew --prefix llvm)"
+      - name: Stage AppDir
+        run: |
+          set -euo pipefail
+          rm -rf AppDir
+          cmake --install build --prefix "$PWD/AppDir/usr"
 
-            # Use brew clang/clang++ (not AppleClang)
-            extra_args+=(
-              -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang"
-              -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++"
-              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
-            )
+          mkdir -p AppDir/usr/lib
+          cp "$(g++-14 -print-file-name=libstdc++.so.6)" AppDir/usr/lib/ || true
+          cp "$(gcc-14 -print-file-name=libgcc_s.so.1)"  AppDir/usr/lib/ || true
 
-            # CRITICAL: ensure we link against brew libc++/libc++abi (matches brew headers)
-            # Also avoid "-s" on macOS ld (obsolete); we strip after build.
-            extra_args+=(
-              -DCMAKE_EXE_LINKER_FLAGS="-L$LLVM_PREFIX/lib -L$LLVM_PREFIX/lib/c++ -Wl,-rpath,$LLVM_PREFIX/lib -Wl,-rpath,$LLVM_PREFIX/lib/c++"
-              -DCMAKE_SHARED_LINKER_FLAGS="-L$LLVM_PREFIX/lib -L$LLVM_PREFIX/lib/c++ -Wl,-rpath,$LLVM_PREFIX/lib -Wl,-rpath,$LLVM_PREFIX/lib/c++"
-              -DCMAKE_MODULE_LINKER_FLAGS="-L$LLVM_PREFIX/lib -L$LLVM_PREFIX/lib/c++ -Wl,-rpath,$LLVM_PREFIX/lib -Wl,-rpath,$LLVM_PREFIX/lib/c++"
-            )
-          fi
+      - name: Desktop file + icon
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/share/applications \
+                   AppDir/usr/share/icons/hicolor/256x256/apps
 
-          cmake -B "${{ steps.strings.outputs.build-output-dir }}" \
-                -S "${{ github.workspace }}" \
-                "${extra_args[@]}"
+          # Desktop file – no leading whitespace
+          cat > AppDir/usr/share/applications/brokkr.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=Brokkr
+          Exec=brokkr
+          Icon=brokkr
+          Categories=Utility;
+          Terminal=false
+          DESKTOP
+          sed -i 's/^[[:space:]]*//' AppDir/usr/share/applications/brokkr.desktop
 
-      - name: Configure (Windows)
-        if: matrix.os == 'windows-latest'
+          # Extract largest frame from ICO, then force-resize to exactly 256x256
+          convert assets/brokkr.ico /tmp/brokkr_frame.png
+          biggest="$(ls -rS /tmp/brokkr_frame*.png | tail -n1)"
+          convert "$biggest" -resize 256x256! \
+            AppDir/usr/share/icons/hicolor/256x256/apps/brokkr.png
+
+          # Verify
+          identify AppDir/usr/share/icons/hicolor/256x256/apps/brokkr.png
+
+      - name: Build AppImage
+        run: |
+          set -euo pipefail
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+          export PATH="$QT_ROOT_DIR/bin:$PATH"
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            -e AppDir/usr/bin/brokkr \
+            -d AppDir/usr/share/applications/brokkr.desktop \
+            -i AppDir/usr/share/icons/hicolor/256x256/apps/brokkr.png \
+            --plugin qt \
+            --output appimage
+
+          mv Brokkr-x86_64.AppImage Brokkr-linux-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brokkr-linux-x86_64.AppImage
+          path: Brokkr-linux-x86_64.AppImage
+
+  # ═══════════════════════════════════════════════════
+  #  Windows x64  (NSIS installer)
+  #
+  #  Qt 6.7.x archives use "msvc2019" naming even
+  #  though they work fine with VS 2022 toolchain.
+  # ═══════════════════════════════════════════════════
+  windows_installer:
+    name: Windows installer x64
+    runs-on: windows-2022
+
+    env:
+      QT_VERSION: "6.7.3"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install NSIS + Ninja
+        shell: powershell
+        run: choco install nsis ninja -y
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+          arch: win64_msvc2019_64
+
+      - name: Configure
         shell: bash
         run: |
           set -euo pipefail
-          cmake -B "${{ steps.strings.outputs.build-output-dir }}" \
-                -S "${{ github.workspace }}" \
-                -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-                -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-                -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-                -DCMAKE_CXX_STANDARD=23 \
-                -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-                -DCMAKE_CXX_EXTENSIONS=OFF \
-                -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
-                -DCPACK_GENERATOR="ZIP;TGZ" \
-                -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT="" \
-                -DCMAKE_EXE_LINKER_FLAGS_RELEASE="/INCREMENTAL:NO /DEBUG:NONE"
+          echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR"
 
       - name: Build
         shell: bash
-        run: |
-          set -euo pipefail
-          cmake --build "${{ steps.strings.outputs.build-output-dir }}" \
-                --config ${{ matrix.build_type }} \
-                --parallel 2
+        run: cmake --build build --parallel 2
 
-      - name: Strip (Linux/macOS, best-effort)
-        if: matrix.os != 'windows-latest'
+      - name: Package (NSIS installer)
         shell: bash
         run: |
           set -euo pipefail
-          cd "${{ steps.strings.outputs.build-output-dir }}"
+          cd build
+          cpack -G NSIS -C Release || {
+            echo "::error::NSIS packaging failed – dumping log:"
+            cat _CPack_Packages/*/NSIS/NSISOutput.log 2>/dev/null || true
+            exit 1
+          }
+          installer="$(ls -1 *.exe | head -n1)"
+          mv "$installer" ../Brokkr-windows-x64.exe
 
-          while IFS= read -r -d '' f; do
-            file "$f" | grep -E "ELF|Mach-O" >/dev/null || continue
-            # macOS: -x strips local symbols; safe for release
-            if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-              strip -x "$f" || true
-            else
-              strip "$f" || true
-            fi
-          done < <(find . -type f -perm -111 -print0)
-
-      - name: Test
-        shell: bash
-        working-directory: ${{ steps.strings.outputs.build-output-dir }}
-        run: ctest --build-config ${{ matrix.build_type }} --parallel 2
-
-      # ---- PACKAGING ----
-      - name: CPack (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        shell: bash
-        working-directory: ${{ steps.strings.outputs.build-output-dir }}
-        run: cpack
-
-      - name: CPack (Windows ZIP only)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        working-directory: ${{ steps.strings.outputs.build-output-dir }}
-        run: cpack -G ZIP
-
-      - name: CPack (Windows TGZ only)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        working-directory: ${{ steps.strings.outputs.build-output-dir }}
-        run: cpack -G TGZ
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.build_type }}
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/Brokkr-*.*
-            ${{ steps.strings.outputs.build-output-dir }}/**/brokkr*
-            ${{ steps.strings.outputs.build-output-dir }}/**/Brokkr*
-            ${{ steps.strings.outputs.build-output-dir }}/*.exe
+          name: Brokkr-windows-x64.exe
+          path: Brokkr-windows-x64.exe
+
+  # ═══════════════════════════════════════════════════
+  #  macOS arm64 only
+  # ═══════════════════════════════════════════════════
+  macos_app:
+    name: macOS app arm64
+    runs-on: macos-15
+
+    env:
+      QT_VERSION: "6.7.3"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+          arch: clang_64
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+
+      # ── THE FIX ─────────────────────────────────────
+      # Qt 6.7 injects -framework AGL during generation.
+      # macOS 14+/15+ SDK removed AGL.framework.
+      # Strip it from the generated build file directly.
+      # ────────────────────────────────────────────────
+      - name: Strip missing AGL framework from build files
+        run: |
+          set -euo pipefail
+          echo "Before:"
+          grep -c 'framework AGL' build/build.ninja || echo "(none)"
+          sed -i '' 's/ -framework AGL//g; s/-framework AGL //g; s/-framework AGL//g' build/build.ninja
+          echo "After:"
+          grep -c 'framework AGL' build/build.ninja && exit 1 || echo "✓ All AGL references removed"
+
+      - name: Build
+        run: cmake --build build --parallel 3
+
+      - name: Deploy + zip
+        run: |
+          set -euo pipefail
+          APP="build/brokkr.app"
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-arm64.app.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brokkr-macos-arm64.app.zip
+          path: Brokkr-macos-arm64.app.zip
