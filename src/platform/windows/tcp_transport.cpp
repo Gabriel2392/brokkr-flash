@@ -17,11 +17,14 @@
 
 #include "platform/windows/tcp_transport.hpp"
 
+#include <chrono>
+#include <cstring>
 #include <utility>
 
 // clang-format off
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 // clang-format on
 
 #include <spdlog/spdlog.h>
@@ -30,14 +33,20 @@
 
 namespace brokkr::windows {
 
-static void backoff_10ms() noexcept { ::Sleep(10); }
+static void set_nonblocking_(SOCKET s, bool on) noexcept {
+  u_long mode = on ? 1UL : 0UL;
+  (void)::ioctlsocket(s, FIONBIO, &mode);
+}
 
 TcpConnection::TcpConnection(SOCKET fd, std::string peer_ip, std::uint16_t peer_port)
   : fd_(fd)
   , peer_ip_(std::move(peer_ip))
   , peer_port_(peer_port)
 {
+  if (fd_ != INVALID_SOCKET) set_nonblocking_(fd_, true);
+
   set_sock_timeouts_();
+
   int one = 1;
   (void)::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof(one));
 }
@@ -93,11 +102,22 @@ bool TcpConnection::connected() const noexcept {
 }
 
 void TcpConnection::set_sock_timeouts_() noexcept {
-  if (!connected()) return;
+  if (fd_ == INVALID_SOCKET) return;
 
   DWORD tv = static_cast<DWORD>(timeout_ms_);
   (void)::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
   (void)::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+
+  int one = 1;
+  (void)::setsockopt(fd_, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char*>(&one), sizeof(one));
+
+  tcp_keepalive ka{};
+  ka.onoff = 1;
+  ka.keepalivetime = 2000;
+  ka.keepaliveinterval = 1000;
+
+  DWORD bytes = 0;
+  (void)::WSAIoctl(fd_, SIO_KEEPALIVE_VALS, &ka, sizeof(ka), nullptr, 0, &bytes, nullptr, nullptr);
 }
 
 void TcpConnection::set_timeout_ms(int ms) noexcept {
@@ -109,47 +129,84 @@ std::string TcpConnection::peer_label() const {
   return fmt::format("{}:{}", peer_ip_, peer_port_);
 }
 
-int TcpConnection::send(std::span<const std::uint8_t> data, unsigned retries) {
+int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/) {
+  if (fd_ == INVALID_SOCKET) return -1;
   if (!connected()) return -1;
 
   const std::uint8_t* p = data.data();
   std::size_t left = data.size();
 
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
+
   while (left) {
+    int ms_left = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
+    );
+    if (ms_left <= 0) return -1;
+
+    WSAPOLLFD pfd{};
+    pfd.fd = fd_;
+    pfd.events = POLLWRNORM;
+
+    const int pr = WSAPoll(&pfd, 1, ms_left);
+    if (pr == 0) return -1;
+    if (pr == SOCKET_ERROR) {
+      const int err = WSAGetLastError();
+      if (err == WSAEINTR) continue;
+      return -1;
+    }
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+
     const int n = ::send(fd_, reinterpret_cast<const char*>(p), static_cast<int>(left), 0);
     if (n > 0) {
       p += static_cast<std::size_t>(n);
       left -= static_cast<std::size_t>(n);
+      deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
       continue;
     }
 
     if (n == 0) return -1;
 
     const int err = WSAGetLastError();
-    if (err == WSAEWOULDBLOCK || err == WSAETIMEDOUT) {
-      if (retries-- > 0) { backoff_10ms(); continue; }
-      return -1;
-    }
+    if (err == WSAEWOULDBLOCK) continue;
     return -1;
   }
 
   return static_cast<int>(data.size());
 }
 
-int TcpConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
+int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
+  if (fd_ == INVALID_SOCKET) return -1;
   if (!connected()) return -1;
   if (data.empty()) return 0;
 
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
+
   for (;;) {
+    int ms_left = static_cast<int>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
+    );
+    if (ms_left <= 0) return -1;
+
+    WSAPOLLFD pfd{};
+    pfd.fd = fd_;
+    pfd.events = POLLRDNORM;
+
+    const int pr = WSAPoll(&pfd, 1, ms_left);
+    if (pr == 0) return -1;
+    if (pr == SOCKET_ERROR) {
+      const int err = WSAGetLastError();
+      if (err == WSAEINTR) continue;
+      return -1;
+    }
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+
     const int n = ::recv(fd_, reinterpret_cast<char*>(data.data()), static_cast<int>(data.size()), 0);
     if (n > 0) return n;
     if (n == 0) return -1;
 
     const int err = WSAGetLastError();
-    if (err == WSAEWOULDBLOCK || err == WSAETIMEDOUT) {
-      if (retries-- > 0) { backoff_10ms(); continue; }
-      return -1;
-    }
+    if (err == WSAEWOULDBLOCK) continue;
     return -1;
   }
 }
@@ -178,6 +235,8 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
   fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
   if (fd_ == INVALID_SOCKET) return brokkr::core::Status::Failf("socket failed: {}", WSAGetLastError());
 
+  set_nonblocking_(fd_, true);
+
   int one = 1;
   (void)::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
 
@@ -196,18 +255,39 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
     return brokkr::core::Status::Failf("listen failed: {}", WSAGetLastError());
   }
 
-  spdlog::info("TcpListener: listening on {}:{}", bind_ip_, port_);
+  spdlog::debug("TcpListener: listening on {}:{}", bind_ip_, port_);
   return brokkr::core::Status::Ok();
 }
 
 brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   if (fd_ == INVALID_SOCKET) return brokkr::core::Result<TcpConnection>::Fail("TcpListener: not listening");
 
+  WSAPOLLFD pfd{};
+  pfd.fd = fd_;
+  pfd.events = POLLRDNORM;
+
+  const int pr = WSAPoll(&pfd, 1, 100);
+  if (pr == 0) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+  if (pr == SOCKET_ERROR) {
+    const int err = WSAGetLastError();
+    if (err == WSAEINTR) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+    return brokkr::core::Result<TcpConnection>::Failf("poll: {}", err);
+  }
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+    return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
+  }
+
   sockaddr_in peer{};
   int peer_len = sizeof(peer);
 
   SOCKET cfd = ::accept(fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len);
-  if (cfd == INVALID_SOCKET) return brokkr::core::Result<TcpConnection>::Failf("accept failed: {}", WSAGetLastError());
+  if (cfd == INVALID_SOCKET) {
+    const int err = WSAGetLastError();
+    if (err == WSAEWOULDBLOCK) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+    return brokkr::core::Result<TcpConnection>::Failf("accept failed: {}", err);
+  }
+
+  set_nonblocking_(cfd, true);
 
   char ipbuf[INET_ADDRSTRLEN]{};
   const char* ip = ::inet_ntop(AF_INET, &peer.sin_addr, ipbuf, sizeof(ipbuf));
@@ -217,7 +297,7 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   }
 
   const std::uint16_t p = ntohs(peer.sin_port);
-  spdlog::info("TcpListener: accepted {}:{}", ip, p);
+  spdlog::debug("TcpListener: accepted {}:{}", ip, p);
   return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
 }
 
