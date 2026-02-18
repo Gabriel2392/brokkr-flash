@@ -250,11 +250,21 @@ if (Qt6_FOUND)
     set(CMAKE_AUTORCC ON)
 
     # Install rules
+    
+    # Generate deploy script for Qt applications
+    qt_generate_deploy_app_script(
+        TARGET brokkr
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+
+    install(SCRIPT ${deploy_script})
     install(TARGETS brokkr RUNTIME DESTINATION bin)
 
 else()
     message(WARNING "Qt6 NOT FOUND. The 'brokkr' target (now GUI-based) cannot be built.")
     message(NOTICE "To fix this, ensure Qt6 is installed and CMAKE_PREFIX_PATH is set correctly.")
+    message(FATAL_ERROR "Qt6 is required for the GUI target. Please install Qt6 and try again.")
 endif()
 
 
