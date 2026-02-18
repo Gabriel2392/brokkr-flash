@@ -290,6 +290,31 @@ if(WIN32)
   set(CPACK_NSIS_WELCOME_TITLE "Welcome to The ${PROJECT_NAME} Project Installer")
   set(CPACK_NSIS_BRANDING_TEXT "Open source Samsung Odin, in your hands")
   set(CPACK_NSIS_MANIFEST_DPI_AWARE TRUE)
+
+  # Start Menu shortcut + Add/Remove Programs icon
+  set(CPACK_PACKAGE_EXECUTABLES "brokkr" "Brokkr")
+  set(CPACK_NSIS_INSTALLED_ICON_NAME "bin/brokkr.exe")
+
+  # Bundle and silently install VC++ Redistributable if found
+  if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(_vcredist_name "vc_redist.x64.exe")
+  else()
+    set(_vcredist_name "vc_redist.x86.exe")
+  endif()
+
+  if(DEFINED ENV{VCToolsRedistDir})
+    file(TO_CMAKE_PATH "$ENV{VCToolsRedistDir}" _vcredist_dir)
+    set(_vcredist_path "${_vcredist_dir}/${_vcredist_name}")
+    if(EXISTS "${_vcredist_path}")
+      message(STATUS "Found vcredist: ${_vcredist_path}")
+      install(FILES "${_vcredist_path}" DESTINATION redist)
+      set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
+          ExecWait '\\\"$INSTDIR\\\\redist\\\\${_vcredist_name}\\\" /install /quiet /norestart'
+      ")
+    else()
+      message(WARNING "VCToolsRedistDir set but ${_vcredist_name} not found at: ${_vcredist_path}")
+    endif()
+  endif()
 endif()
 
 if (LINUX)
