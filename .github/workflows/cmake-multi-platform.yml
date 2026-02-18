@@ -37,6 +37,19 @@ jobs:
         shell: bash
         run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
+      # ---- Qt6: install via aqtinstall for GUI target ----
+      - name: Install Qt6 dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          cache: true
+
       # ---- macOS: install brew LLVM so we do NOT use AppleClang ----
       - name: Install LLVM (macOS)
         if: matrix.os == 'macos-latest'
@@ -57,6 +70,7 @@ jobs:
             -DCMAKE_CXX_STANDARD=23
             -DCMAKE_CXX_STANDARD_REQUIRED=ON
             -DCMAKE_CXX_EXTENSIONS=OFF
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           )
 
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
@@ -105,6 +119,7 @@ jobs:
                 -DCMAKE_CXX_STANDARD=23 \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
                 -DCMAKE_CXX_EXTENSIONS=OFF \
+                -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
                 -DCPACK_GENERATOR="ZIP;TGZ" \
                 -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT="" \
                 -DCMAKE_EXE_LINKER_FLAGS_RELEASE="/INCREMENTAL:NO /DEBUG:NONE"
