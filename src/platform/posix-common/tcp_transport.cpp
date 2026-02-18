@@ -40,9 +40,7 @@
 namespace brokkr::posix_common {
 
 TcpConnection::TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port)
-  : fd_(fd)
-  , peer_ip_(std::move(peer_ip))
-  , peer_port_(peer_port)
+  : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port)
 {
   set_sock_timeouts_();
 
@@ -122,9 +120,7 @@ void TcpConnection::set_timeout_ms(int ms) noexcept {
   set_sock_timeouts_();
 }
 
-std::string TcpConnection::peer_label() const {
-  return fmt::format("{}:{}", peer_ip_, peer_port_);
-}
+std::string TcpConnection::peer_label() const { return fmt::format("{}:{}", peer_ip_, peer_port_); }
 
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/) {
   if (!connected()) return -1;
@@ -170,9 +166,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/
 
       deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms_);
 
-      if (spdlog::should_log(spdlog::level::debug)) {
-        spdlog::debug("TcpConnection::send {} bytes ({} left)", n, left);
-      }
+      if (spdlog::should_log(spdlog::level::debug)) spdlog::debug("TcpConnection::send {} bytes ({} left)", n, left);
       continue;
     }
 
@@ -229,9 +223,7 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
 
     const ssize_t n = do_recv(fd_, data.data(), data.size(), MSG_DONTWAIT);
     if (n > 0) {
-      if (spdlog::should_log(spdlog::level::debug)) {
-        spdlog::debug("TcpConnection::recv {} bytes", n);
-      }
+      if (spdlog::should_log(spdlog::level::debug)) spdlog::debug("TcpConnection::recv {} bytes", n);
       return static_cast<int>(n);
     }
     if (n == 0) {
@@ -264,7 +256,7 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
   fd_.take(do_socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (!fd_.valid()) {
     const int e = errno;
-    return brokkr::core::Status::Failf("socket: {}", std::strerror(e));
+    return brokkr::core::failf("socket: {}", std::strerror(e));
   }
 
   int one = 1;
@@ -275,26 +267,26 @@ brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint
   addr.sin_port = htons(port_);
   if (::inet_pton(AF_INET, bind_ip_.c_str(), &addr.sin_addr) != 1) {
     fd_.close();
-    return brokkr::core::Status::Failf("Invalid bind ip: {}", bind_ip_);
+    return brokkr::core::failf("Invalid bind ip: {}", bind_ip_);
   }
 
   if (do_bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
     const int e = errno;
     fd_.close();
-    return brokkr::core::Status::Failf("bind: {}", std::strerror(e));
+    return brokkr::core::failf("bind: {}", std::strerror(e));
   }
   if (do_listen(fd_, backlog) != 0) {
     const int e = errno;
     fd_.close();
-    return brokkr::core::Status::Failf("listen: {}", std::strerror(e));
+    return brokkr::core::failf("listen: {}", std::strerror(e));
   }
 
   spdlog::debug("TcpListener: listening on {}:{}", bind_ip_, port_);
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
-  if (!fd_.valid()) return brokkr::core::Result<TcpConnection>::Fail("TcpListener: not listening");
+  if (!fd_.valid()) return brokkr::core::fail("TcpListener: not listening");
 
   pollfd pfd{};
   pfd.fd = fd_.fd;
@@ -302,18 +294,15 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
 
   for (;;) {
     int pr = ::poll(&pfd, 1, 100);
-    if (pr == 0) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
+    if (pr == 0) return brokkr::core::fail("accept: timeout");
     if (pr < 0) {
       const int e = errno;
       if (e == EINTR) continue;
-      if (e == EBADF) return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
-      return brokkr::core::Result<TcpConnection>::Failf("poll: {}", std::strerror(e));
+      if (e == EBADF) return brokkr::core::fail("accept: listener closed");
+      return brokkr::core::failf("poll: {}", std::strerror(e));
     }
 
-    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-      return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
-    }
-
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return brokkr::core::fail("accept: listener closed");
     break;
   }
 
@@ -328,19 +317,19 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
       if (!ip) {
         const int e = errno;
         ::close(cfd);
-        return brokkr::core::Result<TcpConnection>::Failf("inet_ntop: {}", std::strerror(e));
+        return brokkr::core::failf("inet_ntop: {}", std::strerror(e));
       }
 
       const std::uint16_t p = ntohs(peer.sin_port);
       spdlog::debug("TcpListener: accepted {}:{}", ip, p);
-      return brokkr::core::Result<TcpConnection>::Ok(TcpConnection(cfd, std::string(ip), p));
+      return TcpConnection(cfd, std::string(ip), p);
     }
 
     const int e = errno;
     if (e == EINTR) continue;
-    if (e == EAGAIN || e == EWOULDBLOCK) return brokkr::core::Result<TcpConnection>::Fail("accept: timeout");
-    if (e == EBADF || e == EINVAL) return brokkr::core::Result<TcpConnection>::Fail("accept: listener closed");
-    return brokkr::core::Result<TcpConnection>::Failf("accept: {}", std::strerror(e));
+    if (e == EAGAIN || e == EWOULDBLOCK) return brokkr::core::fail("accept: timeout");
+    if (e == EBADF || e == EINVAL) return brokkr::core::fail("accept: listener closed");
+    return brokkr::core::failf("accept: {}", std::strerror(e));
   }
 }
 

@@ -18,35 +18,25 @@
 #pragma once
 
 #include "core/status.hpp"
-#include "io/tar.hpp"
+#include "io/source.hpp"
 
 #include <cstddef>
-#include <cstdint>
-#include <filesystem>
-#include <memory>
 #include <span>
-#include <string>
 
 namespace brokkr::io {
 
-class ByteSource {
-public:
-  virtual ~ByteSource() = default;
-
-  virtual std::string display_name() const = 0;
-  virtual std::uint64_t size() const = 0;
-
-  virtual std::size_t read(std::span<std::byte> out) = 0;
-
-  virtual brokkr::core::Status status() const noexcept { return {}; }
-};
-
-brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept;
-brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path, const TarEntry& entry) noexcept;
-
-inline std::string basename(std::string_view path_like) {
-  std::filesystem::path p(path_like);
-  return p.filename().string();
+inline brokkr::core::Status read_exact(ByteSource& src, std::span<std::byte> out) noexcept {
+  std::size_t off = 0;
+  while (off < out.size()) {
+    const std::size_t got = src.read(out.subspan(off));
+    if (!got) {
+      auto st = src.status();
+      if (!st) return st;
+      return brokkr::core::fail("Short read: " + src.display_name());
+    }
+    off += got;
+  }
+  return {};
 }
 
 } // namespace brokkr::io

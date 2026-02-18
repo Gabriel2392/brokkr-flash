@@ -99,20 +99,10 @@ struct Ui {
   std::function<void()> on_done;
 };
 
-enum class Mode { Flash, RebootOnly, PitSetOnly };
-
 brokkr::core::Status flash(std::vector<Target*>& devs,
                            const std::vector<ImageSpec>& sources,
                            std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
                            const Cfg& cfg,
-                           Ui ui,
-                           Mode mode) noexcept;
-
-brokkr::core::Status flash(std::vector<UsbTarget*>& devs,
-                           const std::vector<ImageSpec>& sources,
-                           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
-                           const Cfg& cfg,
-                           Ui ui,
-                           Mode mode) noexcept;
+                           Ui ui) noexcept;
 
 } // namespace brokkr::odin

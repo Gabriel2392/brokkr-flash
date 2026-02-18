@@ -17,21 +17,17 @@
 
 #include "io/source.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <utility>
-
-#include <spdlog/spdlog.h>
 
 namespace brokkr::io {
 
 class RawFileSource final : public ByteSource {
 public:
   explicit RawFileSource(std::filesystem::path p, std::uint64_t size)
-    : path_(std::move(p)), in_(path_, std::ios::binary), size_(size)
-  {}
+    : path_(std::move(p)), in_(path_, std::ios::binary), size_(size) {}
 
   bool opened() const noexcept { return in_.is_open(); }
 
@@ -57,8 +53,7 @@ public:
     : tar_path_(std::move(tar))
     , entry_(std::move(e))
     , in_(tar_path_, std::ios::binary)
-    , remaining_(entry_.size)
-  {}
+    , remaining_(entry_.size) {}
 
   bool opened() const noexcept { return in_.is_open(); }
 
@@ -92,27 +87,21 @@ private:
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept {
   std::error_code ec;
   const auto sz = std::filesystem::file_size(path, ec);
-  if (ec) return brokkr::core::Result<std::unique_ptr<ByteSource>>::Failf("open_raw_file: stat failed: {}", path.string());
+  if (ec) return brokkr::core::failf("open_raw_file: stat failed: {}", path.string());
 
   auto ptr = std::make_unique<RawFileSource>(path, static_cast<std::uint64_t>(sz));
-  if (!ptr->opened()) {
-    return brokkr::core::Result<std::unique_ptr<ByteSource>>::Failf("open_raw_file: cannot open: {}", path.string());
-  }
+  if (!ptr->opened()) return brokkr::core::failf("open_raw_file: cannot open: {}", path.string());
 
-  return brokkr::core::Result<std::unique_ptr<ByteSource>>::Ok(std::move(ptr));
+  return std::move(ptr);
 }
 
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path, const TarEntry& entry) noexcept {
   auto ptr = std::make_unique<TarEntrySource>(tar_path, entry);
 
-  if (!ptr->opened()) {
-    return brokkr::core::Result<std::unique_ptr<ByteSource>>::Failf("open_tar_entry: cannot open tar: {}", tar_path.string());
-  }
-  if (!ptr->seek_to_data()) {
-    return brokkr::core::Result<std::unique_ptr<ByteSource>>::Failf("open_tar_entry: seek failed: {}", tar_path.string());
-  }
+  if (!ptr->opened()) return brokkr::core::failf("open_tar_entry: cannot open tar: {}", tar_path.string());
+  if (!ptr->seek_to_data()) return brokkr::core::failf("open_tar_entry: seek failed: {}", tar_path.string());
 
-  return brokkr::core::Result<std::unique_ptr<ByteSource>>::Ok(std::move(ptr));
+  return std::move(ptr);
 }
 
 } // namespace brokkr::io

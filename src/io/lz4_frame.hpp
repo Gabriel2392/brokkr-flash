@@ -100,7 +100,6 @@ private:
 private:
   std::unique_ptr<ByteSource> src_;
   std::string display_;
-
   Lz4FrameHeaderInfo hdr_{};
 
   std::uint64_t total_out_ = 0;

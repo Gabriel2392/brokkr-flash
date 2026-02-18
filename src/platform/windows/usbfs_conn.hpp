@@ -30,7 +30,7 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
 public:
   explicit UsbFsConnection(UsbFsDevice& dev);
 
-  Kind kind() const noexcept override { return Kind::TcpStream; } // serial COM is closer to tcp than to usb. this is only used for handshake for now.
+  Kind kind() const noexcept override { return Kind::TcpStream; }
 
   brokkr::core::Status open() noexcept;
   void close() noexcept;

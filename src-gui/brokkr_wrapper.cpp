@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -89,11 +90,7 @@ public:
     bool hasHeightForWidth() const override { return true; }
     int heightForWidth(int w) const override { return std::max(1, (w * 3) / 5); }
 
-    void setFill(double v) {
-        fill_ = std::clamp(v, 0.0, 1.0);
-        updateGeometry();
-        update();
-    }
+    void setFill(double v) { fill_ = std::clamp(v, 0.0, 1.0); updateGeometry(); update(); }
 
     void setFillAnimated(double v, int ms) {
         v = std::clamp(v, 0.0, 1.0);
@@ -107,21 +104,9 @@ public:
     void setVariant(Variant v) {
         var_ = v;
         switch (var_) {
-            case Variant::Green:
-                top_ = QColor("#b4e051");
-                bot_ = QColor("#5ba30a");
-                textCol_ = QColor("#000000");
-                break;
-            case Variant::Blue:
-                top_ = QColor("#68b3e4");
-                bot_ = QColor("#186ba6");
-                textCol_ = QColor("#000033");
-                break;
-            case Variant::Red:
-                top_ = QColor("#d95757");
-                bot_ = QColor("#9a0a0a");
-                textCol_ = QColor("#000000");
-                break;
+            case Variant::Green: top_ = QColor("#b4e051"); bot_ = QColor("#5ba30a"); textCol_ = QColor("#000000"); break;
+            case Variant::Blue:  top_ = QColor("#68b3e4"); bot_ = QColor("#186ba6"); textCol_ = QColor("#000033"); break;
+            case Variant::Red:   top_ = QColor("#d95757"); bot_ = QColor("#9a0a0a"); textCol_ = QColor("#000000"); break;
         }
         update();
     }
@@ -187,17 +172,11 @@ namespace {
 static constexpr std::uint16_t SAMSUNG_VID = 0x04E8;
 static constexpr std::uint16_t ODIN_PIDS[] = {0x6601, 0x685D, 0x68C3};
 
-static std::vector<std::uint16_t> default_pids() {
-    return {std::begin(ODIN_PIDS), std::end(ODIN_PIDS)};
-}
+static std::vector<std::uint16_t> default_pids() { return {std::begin(ODIN_PIDS), std::end(ODIN_PIDS)}; }
 
-static bool is_pit_name(std::string_view base) {
-    return brokkr::core::ends_with_ci(base, ".pit");
-}
+static bool is_pit_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".pit"); }
 
-static QString htmlEsc(const QString& s) {
-    return s.toHtmlEscaped();
-}
+static QString htmlEsc(const QString& s) { return s.toHtmlEscaped(); }
 
 static QString human_bytes(std::uint64_t b) {
     const char* units[] = {"B", "KB", "MB", "GB", "TB"};
@@ -225,8 +204,7 @@ protected:
         const int z = w_ ? w_->logDeviceCountForLog() : 0;
         line = QString("<%1> %2").arg(z).arg(line);
 
-        QMetaObject::invokeMethod(w_, [w=w_, s=htmlEsc(line)]() { w->appendLogLineFromEngine(s); },
-                                  Qt::QueuedConnection);
+        QMetaObject::invokeMethod(w_, [w=w_, s=htmlEsc(line)]() { w->appendLogLineFromEngine(s); }, Qt::QueuedConnection);
     }
 
     void flush_() override {}
@@ -243,8 +221,7 @@ static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrWrapper* w) {
     return log;
 }
 
-static std::optional<brokkr::platform::UsbDeviceSysfsInfo>
-select_target(QString sysname_q) {
+static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_target(QString sysname_q) {
     const std::string sysname = sysname_q.trimmed().toStdString();
     if (sysname.empty()) return {};
 
@@ -257,44 +234,41 @@ select_target(QString sysname_q) {
     return info;
 }
 
-static std::vector<brokkr::platform::UsbDeviceSysfsInfo>
-enumerate_targets() {
+static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_targets() {
     brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID, .products = default_pids()};
     return brokkr::platform::enumerate_usb_devices_sysfs(f);
 }
 
-static brokkr::core::Result<std::vector<std::byte>>
-read_all_source(brokkr::io::ByteSource& src) noexcept {
+static brokkr::core::Result<std::vector<std::byte>> read_all_source(brokkr::io::ByteSource& src) noexcept {
     constexpr std::uint64_t kMax = 256ull * 1024ull * 1024ull;
     const auto sz64 = src.size();
-    if (sz64 > kMax) return brokkr::core::Result<std::vector<std::byte>>::Fail("Source too large: " + src.display_name());
+    if (sz64 > kMax) return brokkr::core::fail("Source too large: " + src.display_name());
 
     std::vector<std::byte> out(static_cast<std::size_t>(sz64));
     for (std::size_t off = 0; off < out.size();) {
         const std::size_t got = src.read({out.data() + off, out.size() - off});
         if (!got) {
             auto st = src.status();
-            if (!st.ok) return brokkr::core::Result<std::vector<std::byte>>::Fail(std::move(st.msg));
-            return brokkr::core::Result<std::vector<std::byte>>::Fail("Short read: " + src.display_name());
+            if (!st) return brokkr::core::fail(std::move(st.error()));
+            return brokkr::core::fail("Short read: " + src.display_name());
         }
         off += got;
     }
-    return brokkr::core::Result<std::vector<std::byte>>::Ok(std::move(out));
+    return out;
 }
 
-static std::shared_ptr<const std::vector<std::byte>>
-pit_from_specs(const std::vector<brokkr::odin::ImageSpec>& specs) {
+static std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<brokkr::odin::ImageSpec>& specs) {
     const brokkr::odin::ImageSpec* pit = nullptr;
     for (const auto& s : specs) if (is_pit_name(s.basename)) pit = &s;
     if (!pit) return {};
 
     auto sr = pit->open();
-    if (!sr) { spdlog::error("PIT open failed: {}", sr.st.msg); return {}; }
+    if (!sr) { spdlog::error("PIT open failed: {}", sr.error()); return {}; }
 
-    auto rr = read_all_source(*sr.value);
-    if (!rr) { spdlog::error("PIT read failed: {}", rr.st.msg); return {}; }
+    auto rr = read_all_source(**sr);
+    if (!rr) { spdlog::error("PIT read failed: {}", rr.error()); return {}; }
 
-    return std::make_shared<const std::vector<std::byte>>(std::move(rr.value));
+    return std::make_shared<const std::vector<std::byte>>(std::move(*rr));
 }
 
 static void print_pit_table_to_log(const brokkr::odin::pit::PitTable& t) {
@@ -325,6 +299,26 @@ static brokkr::odin::OdinCommands::ShutdownMode shutdown_mode_from_ui(int idx) {
     if (idx == 1) return brokkr::odin::OdinCommands::ShutdownMode::ReDownload;
     if (idx == 2) return brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
     return brokkr::odin::OdinCommands::ShutdownMode::Reboot;
+}
+
+static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& link,
+                                                const brokkr::odin::Cfg& cfg,
+                                                brokkr::odin::OdinCommands::ShutdownMode sm) noexcept
+{
+    brokkr::odin::OdinCommands odin(link);
+    link.set_timeout_ms(cfg.preflash_timeout_ms);
+
+    BRK_TRY(odin.handshake(cfg.preflash_retries));
+    BRK_TRYV(_, odin.get_version(cfg.preflash_retries));
+
+    link.set_timeout_ms(cfg.flash_timeout_ms);
+
+    BRK_TRYV(bytes, brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries));
+    BRK_TRYV(tbl, brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
+
+    print_pit_table_to_log(tbl);
+
+    return odin.shutdown(sm);
 }
 
 } // namespace
@@ -675,9 +669,7 @@ BrokkrWrapper::~BrokkrWrapper() {
 #endif
 }
 
-void BrokkrWrapper::appendLogLineFromEngine(const QString& html) {
-    appendLogLine_(html);
-}
+void BrokkrWrapper::appendLogLineFromEngine(const QString& html) { appendLogLine_(html); }
 
 void BrokkrWrapper::closeEvent(QCloseEvent* e) {
     if (busy_) {
@@ -696,17 +688,13 @@ bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qint
     if (!msg) return false;
 
     if (msg->message == WM_DEVICECHANGE) {
-        if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) {
-            requestUsbRefresh_();
-        }
+        if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) requestUsbRefresh_();
     }
     return false;
 }
 #endif
 
-void BrokkrWrapper::requestUsbRefresh_() noexcept {
-    usbDirty_.store(true, std::memory_order_relaxed);
-}
+void BrokkrWrapper::requestUsbRefresh_() noexcept { usbDirty_.store(true, std::memory_order_relaxed); }
 
 void BrokkrWrapper::refreshConnectedDevices_() {
     QStringList shown;
@@ -737,12 +725,8 @@ void BrokkrWrapper::refreshConnectedDevices_() {
         const QSet<QString> prev = QSet<QString>(physicalUsbPrev_.begin(), physicalUsbPrev_.end());
         const QSet<QString> now  = QSet<QString>(physicalUsb.begin(), physicalUsb.end());
 
-        for (const auto& s : now) {
-            if (!prev.contains(s)) spdlog::info("Connected: {}", s.toStdString());
-        }
-        for (const auto& s : prev) {
-            if (!now.contains(s)) spdlog::info("Disconnected: {}", s.toStdString());
-        }
+        for (const auto& s : now) if (!prev.contains(s)) spdlog::info("Connected: {}", s.toStdString());
+        for (const auto& s : prev) if (!now.contains(s)) spdlog::info("Disconnected: {}", s.toStdString());
 
         if (physicalWirelessPrev_ && (!physicalWireless || physicalWirelessIdPrev_ != physicalWirelessId)) {
             if (!physicalWirelessIdPrev_.isEmpty()) spdlog::info("Disconnected: {}", physicalWirelessIdPrev_.toStdString());
@@ -784,8 +768,8 @@ void BrokkrWrapper::startWirelessListener_() {
         wireless_conn_.reset();
         wireless_listener_.emplace();
         auto st = wireless_listener_->bind_and_listen("0.0.0.0", 13579);
-        if (!st.ok) {
-            spdlog::error("Wireless listen failed: {}", st.msg);
+        if (!st) {
+            spdlog::error("Wireless listen failed: {}", st.error());
             wireless_listener_.reset();
             requestUsbRefresh_();
             return;
@@ -796,15 +780,13 @@ void BrokkrWrapper::startWirelessListener_() {
         for (;;) {
             if (st.stop_requested()) return;
 
-            // If connected, keep thread alive so it can accept again after a disconnect.
             {
                 bool connected = false;
                 {
                     std::lock_guard lk(wireless_mtx_);
                     if (wireless_conn_) {
-                        if (wireless_conn_->connected()) {
-                            connected = true;
-                        } else {
+                        if (wireless_conn_->connected()) connected = true;
+                        else {
                             wireless_conn_.reset();
                             wireless_sysname_.clear();
                             QMetaObject::invokeMethod(this, [this]() { requestUsbRefresh_(); }, Qt::QueuedConnection);
@@ -831,18 +813,17 @@ void BrokkrWrapper::startWirelessListener_() {
                 continue;
             }
 
-            const QString peer = QString::fromStdString(ar.value.peer_label());
+            const QString peer = QString::fromStdString(ar->peer_label());
             const int sep = peer.lastIndexOf(':');
             const QString sys = (sep > 0) ? peer.left(sep) : peer;
 
             {
                 std::lock_guard lk(wireless_mtx_);
-                wireless_conn_.emplace(std::move(ar.value));
+                wireless_conn_.emplace(std::move(*ar));
                 wireless_sysname_ = sys;
             }
 
             QMetaObject::invokeMethod(this, [this]() { refreshConnectedDevices_(); }, Qt::QueuedConnection);
-            continue;
         }
     });
 
@@ -897,6 +878,7 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
     if (chkWireless) chkWireless->setEnabled(enabled);
 
     const bool wireless = (chkWireless && chkWireless->isChecked());
+
     if (btnManyDevices_) btnManyDevices_->setEnabled(enabled && !wireless);
     if (sldDeviceBoxes) sldDeviceBoxes->setEnabled(enabled && !wireless && btnManyDevices_ && btnManyDevices_->isChecked());
 
@@ -1114,7 +1096,6 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
             QColor hl = pal.color(QPalette::Highlight);
             hl.setAlpha(50);
             QColor base = palette().color(QPalette::Base);
-            // blend highlight into base at low opacity for a subtle theme-aware tint
             const int r2 = (base.red()   * (255 - hl.alpha()) + hl.red()   * hl.alpha()) / 255;
             const int g2 = (base.green() * (255 - hl.alpha()) + hl.green() * hl.alpha()) / 255;
             const int b2 = (base.blue()  * (255 - hl.alpha()) + hl.blue()  * hl.alpha()) / 255;
@@ -1137,7 +1118,7 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
         {
             auto pal = last->palette();
             QColor base = palette().color(QPalette::Base);
-            QColor warn(255, 183, 77);  // orange accent
+            QColor warn(255, 183, 77);
             warn.setAlpha(50);
             const int r2 = (base.red()   * (255 - warn.alpha()) + warn.red()   * warn.alpha()) / 255;
             const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
@@ -1288,7 +1269,6 @@ void BrokkrWrapper::startWorkStart_() {
     if (busy_) return;
 
     const QStringList uiDevicesSnapshot = connectedDevices_;
-
     setBusy_(true);
 
     plan_names_.clear();
@@ -1307,8 +1287,6 @@ void BrokkrWrapper::startWorkStart_() {
     setSquaresActiveColor_(false);
 
     worker_ = std::jthread([this, uiDevicesSnapshot](std::stop_token) {
-        const int actionIndex = cmbRebootAction->currentIndex();
-
         auto done_ui = [&] {
             QMetaObject::invokeMethod(this, [this]() {
                 setSquaresText_("PASS");
@@ -1320,13 +1298,13 @@ void BrokkrWrapper::startWorkStart_() {
         auto fail_ui = [&](const QString& msg) {
             QMetaObject::invokeMethod(this, [this, msg]() {
                 const int z = logDevCount_.load(std::memory_order_relaxed);
-                appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>")
-                                   .arg(z)
-                                   .arg(htmlEsc(msg)));
+                appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>").arg(z).arg(htmlEsc(msg)));
                 setSquaresFinal_(false);
                 setBusy_(false);
             }, Qt::QueuedConnection);
         };
+
+        const int actionIndex = cmbRebootAction->currentIndex();
 
         const QString tgt = editTarget->text().trimmed();
         const bool wireless = chkWireless->isChecked();
@@ -1341,8 +1319,7 @@ void BrokkrWrapper::startWorkStart_() {
         brokkr::odin::Ui ui;
 
         ui.on_plan = [&](const std::vector<brokkr::odin::PlanItem>& p, std::uint64_t) {
-            std::vector<QString> parts;
-            std::vector<QString> froms;
+            std::vector<QString> parts, froms;
             parts.reserve(p.size());
             froms.reserve(p.size());
             for (const auto& it : p) {
@@ -1411,26 +1388,19 @@ void BrokkrWrapper::startWorkStart_() {
                             devSquares_[idx]->setFill(1.0);
                         }
                         if (idx < comBoxes.size() && comBoxes[idx]) {
-                            {
-                                auto pal = comBoxes[idx]->palette();
-                                QColor base = palette().color(QPalette::Base);
-                                QColor fail(176, 0, 0);
-                                fail.setAlpha(45);
-                                const int r2 = (base.red()   * (255 - fail.alpha()) + fail.red()   * fail.alpha()) / 255;
-                                const int g2 = (base.green() * (255 - fail.alpha()) + fail.green() * fail.alpha()) / 255;
-                                const int b2 = (base.blue()  * (255 - fail.alpha()) + fail.blue()  * fail.alpha()) / 255;
-                                pal.setColor(QPalette::Base, QColor(r2, g2, b2));
-                                comBoxes[idx]->setPalette(pal);
-                            }
-                            comBoxes[idx]->setStyleSheet(
-                                "font-weight: bold;"
-                                "border: 2px solid #b00000;"
-                                "font-size: 9px;"
-                            );
+                            auto pal = comBoxes[idx]->palette();
+                            QColor base = palette().color(QPalette::Base);
+                            QColor fail(176, 0, 0);
+                            fail.setAlpha(45);
+                            const int r2 = (base.red()   * (255 - fail.alpha()) + fail.red()   * fail.alpha()) / 255;
+                            const int g2 = (base.green() * (255 - fail.alpha()) + fail.green() * fail.alpha()) / 255;
+                            const int b2 = (base.blue()  * (255 - fail.alpha()) + fail.blue()  * fail.alpha()) / 255;
+                            pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+                            comBoxes[idx]->setPalette(pal);
+                            comBoxes[idx]->setStyleSheet("font-weight: bold; border: 2px solid #b00000; font-size: 9px;");
                         }
 
-                        if (reason.isEmpty()) shown = "FAIL!";
-                        else shown = QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
+                        shown = reason.isEmpty() ? "FAIL!" : QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
                     }
                 }
 
@@ -1462,115 +1432,77 @@ void BrokkrWrapper::startWorkStart_() {
         if (editCSC->isEnabled() && !editCSC->text().isEmpty()) inputs.emplace_back(editCSC->text().toStdString());
         if (editUserData->isEnabled() && !editUserData->text().isEmpty()) inputs.emplace_back(editUserData->text().toStdString());
 
-        if (inputs.empty() && !pit_to_upload) {
+        struct Provider {
+            std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> usb; // owns USB transports
+            std::vector<brokkr::odin::Target> owned;                  // owns Targets
+            std::vector<brokkr::odin::Target*> ptrs;                  // passed to engine
+        };
+
+        auto make_provider = [&]() -> std::optional<Provider> {
+            Provider p;
+
             if (wireless) {
                 brokkr::platform::TcpConnection* connp = nullptr;
                 {
                     std::lock_guard lk(wireless_mtx_);
                     if (wireless_conn_) connp = &*wireless_conn_;
                 }
-                if (!connp || !connp->connected()) { fail_ui("No wireless device connected."); return; }
+                if (!connp || !connp->connected()) { fail_ui("No wireless device connected."); return std::nullopt; }
 
-                brokkr::odin::Target t{.id = wireless_sysname_.toStdString(), .link = connp};
-                std::vector<brokkr::odin::Target*> devs{&t};
-
-                auto st = brokkr::odin::flash(devs, {}, {}, cfg, ui, brokkr::odin::Mode::RebootOnly);
-                if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
-                done_ui();
-                requestUsbRefresh_();
-                return;
+                p.owned.push_back(brokkr::odin::Target{.id = wireless_sysname_.toStdString(), .link = connp});
+                p.ptrs.push_back(&p.owned.back());
+                return p;
             }
 
             std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
             if (!tgt.isEmpty()) {
                 auto one = select_target(tgt);
-                if (!one) { fail_ui("Target sysname not found or not supported."); return; }
+                if (!one) { fail_ui("Target sysname not found or not supported."); return std::nullopt; }
                 targets.push_back(*one);
             } else {
-                for (const auto& sys : uiDevicesSnapshot) {
-                    auto one = select_target(sys);
-                    if (one) targets.push_back(*one);
-                }
+                for (const auto& sys : uiDevicesSnapshot) if (auto one = select_target(sys)) targets.push_back(*one);
                 if (targets.empty()) targets = enumerate_targets();
             }
 
-            if (targets.empty()) { fail_ui("No supported devices found."); return; }
+            if (targets.empty()) { fail_ui("No supported devices found."); return std::nullopt; }
 
-            std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> storage;
-            std::vector<brokkr::odin::UsbTarget*> devs;
-            storage.reserve(targets.size());
-            devs.reserve(targets.size());
-
-            for (const auto& td : targets) {
-                auto ctx = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
-                devs.push_back(ctx.get());
-                storage.push_back(std::move(ctx));
-            }
-
-            auto st = brokkr::odin::flash(devs, {}, {}, cfg, ui, brokkr::odin::Mode::RebootOnly);
-            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
-
-            done_ui();
-            requestUsbRefresh_();
-            return;
-        }
-
-        if (inputs.empty() && pit_to_upload) {
-            if (wireless) {
-                brokkr::platform::TcpConnection* connp = nullptr;
-                {
-                    std::lock_guard lk(wireless_mtx_);
-                    if (wireless_conn_) connp = &*wireless_conn_;
-                }
-                if (!connp || !connp->connected()) { fail_ui("No wireless device connected."); return; }
-
-                brokkr::odin::Target t{.id = wireless_sysname_.toStdString(), .link = connp};
-                std::vector<brokkr::odin::Target*> devs{&t};
-
-                auto st = brokkr::odin::flash(devs, {}, pit_to_upload, cfg, ui, brokkr::odin::Mode::PitSetOnly);
-                if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
-
-                done_ui();
-                requestUsbRefresh_();
-                return;
-            }
-
-            std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
-            if (!tgt.isEmpty()) {
-                auto one = select_target(tgt);
-                if (!one) { fail_ui("Target sysname not found or not supported."); return; }
-                targets.push_back(*one);
-            } else {
-                for (const auto& sys : uiDevicesSnapshot) {
-                    auto one = select_target(sys);
-                    if (one) targets.push_back(*one);
-                }
-                if (targets.empty()) targets = enumerate_targets();
-            }
-
-            if (targets.empty()) { fail_ui("No supported devices found."); return; }
-
-            std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> storage;
-            std::vector<brokkr::odin::UsbTarget*> devs;
-            storage.reserve(targets.size());
-            devs.reserve(targets.size());
+            p.usb.reserve(targets.size());
+            p.owned.reserve(targets.size());
+            p.ptrs.reserve(targets.size());
 
             for (const auto& td : targets) {
-                auto ctx = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
-                devs.push_back(ctx.get());
-                storage.push_back(std::move(ctx));
+                auto ut = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
+
+                auto st = ut->dev.open_and_init();
+                if (!st) { fail_ui(QString::fromStdString(st.error())); return std::nullopt; }
+
+                auto cst = ut->conn.open();
+                if (!cst) { fail_ui(QString::fromStdString(cst.error())); return std::nullopt; }
+
+                ut->conn.set_timeout_ms(cfg.preflash_timeout_ms);
+
+                p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
+                p.ptrs.push_back(&p.owned.back());
+                p.usb.push_back(std::move(ut));
             }
 
-            auto st = brokkr::odin::flash(devs, {}, pit_to_upload, cfg, ui, brokkr::odin::Mode::PitSetOnly);
-            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
+            return p;
+        };
 
+        auto run_engine = [&](std::vector<brokkr::odin::ImageSpec> srcs) {
+            auto prov = make_provider();
+            if (!prov) return;
+
+            auto st = brokkr::odin::flash(prov->ptrs, srcs, pit_to_upload, cfg, ui);
+            (void)st; // UI handles per-device fails via ui.on_error; overall uses setSquaresFinal_(true)
             done_ui();
             requestUsbRefresh_();
-            return;
-        }
+        };
+
+        if (inputs.empty()) { run_engine({}); return; }
 
         auto jobsr = brokkr::app::md5_jobs(inputs);
-        if (!jobsr) { fail_ui(QString::fromStdString(jobsr.st.msg)); return; }
+        if (!jobsr) { fail_ui(QString::fromStdString(jobsr.error())); return; }
 
         std::uint64_t totalBytes = 0;
         for (const auto& p : inputs) {
@@ -1586,75 +1518,26 @@ void BrokkrWrapper::startWorkStart_() {
             setSquaresProgress_(0.0, false);
         }, Qt::QueuedConnection);
 
-        auto vst = brokkr::app::md5_verify(jobsr.value, ui);
-        if (!vst.ok) { fail_ui(QString::fromStdString(vst.msg)); return; }
+        auto vst = brokkr::app::md5_verify(*jobsr, ui);
+        if (!vst) { fail_ui(QString::fromStdString(vst.error())); return; }
 
         auto specs = brokkr::odin::expand_inputs_tar_or_raw(inputs);
-        if (!specs) { fail_ui(QString::fromStdString(specs.st.msg)); return; }
+        if (!specs) { fail_ui(QString::fromStdString(specs.error())); return; }
 
-        const bool dl_mode = std::ranges::any_of(specs.value, [](const brokkr::odin::ImageSpec& s){ return s.download_list_mode; });
+        const bool dl_mode = std::ranges::any_of(*specs, [](const brokkr::odin::ImageSpec& s){ return s.download_list_mode; });
 
         if (!pit_to_upload && !dl_mode) {
-            auto pit = pit_from_specs(specs.value);
+            auto pit = pit_from_specs(*specs);
             if (pit) pit_to_upload = pit;
         }
 
         std::vector<brokkr::odin::ImageSpec> srcs;
-        for (auto& s : specs.value) if (!is_pit_name(s.basename)) srcs.push_back(std::move(s));
+        for (auto& s : *specs) if (!is_pit_name(s.basename)) srcs.push_back(std::move(s));
         if (srcs.empty() && !pit_to_upload) { fail_ui("No valid flashable files."); return; }
 
         QMetaObject::invokeMethod(this, [this]() { setSquaresProgress_(0.0, false); }, Qt::QueuedConnection);
 
-        if (wireless) {
-            brokkr::platform::TcpConnection* connp = nullptr;
-            {
-                std::lock_guard lk(wireless_mtx_);
-                if (wireless_conn_) connp = &*wireless_conn_;
-            }
-            if (!connp || !connp->connected()) { fail_ui("No wireless device connected."); return; }
-
-            brokkr::odin::Target t{.id = wireless_sysname_.toStdString(), .link = connp};
-            std::vector<brokkr::odin::Target*> devs{&t};
-
-            brokkr::core::Status st = brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, ui, brokkr::odin::Mode::Flash);
-            if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
-
-            done_ui();
-            requestUsbRefresh_();
-            return;
-        }
-
-        std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
-        if (!tgt.isEmpty()) {
-            auto one = select_target(tgt);
-            if (!one) { fail_ui("Target sysname not found or not supported."); return; }
-            targets.push_back(*one);
-        } else {
-            for (const auto& sys : uiDevicesSnapshot) {
-                auto one = select_target(sys);
-                if (one) targets.push_back(*one);
-            }
-            if (targets.empty()) targets = enumerate_targets();
-        }
-
-        if (targets.empty()) { fail_ui("No supported devices found."); return; }
-
-        std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> storage;
-        std::vector<brokkr::odin::UsbTarget*> devs;
-        storage.reserve(targets.size());
-        devs.reserve(targets.size());
-
-        for (const auto& td : targets) {
-            auto ctx = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
-            devs.push_back(ctx.get());
-            storage.push_back(std::move(ctx));
-        }
-
-        brokkr::core::Status st = brokkr::odin::flash(devs, srcs, pit_to_upload, cfg, ui, brokkr::odin::Mode::Flash);
-        if (!st.ok) { done_ui(); requestUsbRefresh_(); return; }
-
-        done_ui();
-        requestUsbRefresh_();
+        run_engine(std::move(srcs));
     });
 }
 
@@ -1676,8 +1559,6 @@ void BrokkrWrapper::startWorkPrintPit_() {
     const int actionIndex = cmbRebootAction->currentIndex();
 
     worker_ = std::jthread([this, actionIndex](std::stop_token) {
-        const auto sm = shutdown_mode_from_ui(actionIndex);
-
         auto done_ui = [&] {
             QMetaObject::invokeMethod(this, [this]() {
                 setSquaresText_("PASS");
@@ -1694,9 +1575,23 @@ void BrokkrWrapper::startWorkPrintPit_() {
             }, Qt::QueuedConnection);
         };
 
+        const auto sm = shutdown_mode_from_ui(actionIndex);
+
         const QString tgt = editTarget->text().trimmed();
         const bool wireless = chkWireless->isChecked();
         if (wireless && !tgt.isEmpty()) { fail_ui("Wireless cannot be used together with Target Sysname."); return; }
+
+        brokkr::odin::Cfg cfg;
+
+        auto run_link = [&](brokkr::core::IByteTransport& link) {
+            QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
+
+            auto st = print_pit_over_link(link, cfg, sm);
+            if (!st) { fail_ui(QString::fromStdString(st.error())); return; }
+
+            QMetaObject::invokeMethod(this, [this]() { setSquaresText_("RESET"); }, Qt::QueuedConnection);
+            done_ui();
+        };
 
         if (wireless) {
             brokkr::platform::TcpConnection* connp = nullptr;
@@ -1705,35 +1600,7 @@ void BrokkrWrapper::startWorkPrintPit_() {
                 if (wireless_conn_) connp = &*wireless_conn_;
             }
             if (!connp || !connp->connected()) { fail_ui("No wireless device connected."); return; }
-
-            brokkr::odin::Cfg cfg;
-            brokkr::odin::OdinCommands odin(*connp);
-            connp->set_timeout_ms(cfg.preflash_timeout_ms);
-
-            QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
-
-            auto st = odin.handshake(cfg.preflash_retries);
-            if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
-
-            auto vr = odin.get_version(cfg.preflash_retries);
-            if (!vr) { fail_ui(QString::fromStdString(vr.st.msg)); return; }
-
-            connp->set_timeout_ms(cfg.flash_timeout_ms);
-
-            auto br = brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
-            if (!br) { fail_ui(QString::fromStdString(br.st.msg)); return; }
-
-            auto pr = brokkr::odin::pit::parse({br.value.data(), br.value.size()});
-            if (!pr) { fail_ui(QString::fromStdString(pr.st.msg)); return; }
-
-            print_pit_table_to_log(pr.value);
-
-            QMetaObject::invokeMethod(this, [this]() { setSquaresText_("RESET"); }, Qt::QueuedConnection);
-
-            st = odin.shutdown(sm);
-            if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
-
-            done_ui();
+            run_link(*connp);
             return;
         }
 
@@ -1748,42 +1615,14 @@ void BrokkrWrapper::startWorkPrintPit_() {
 
         if (targets.size() != 1) { fail_ui("Printing PIT requires exactly one device."); return; }
 
-        brokkr::odin::Cfg cfg;
-
         brokkr::platform::UsbFsDevice dev(targets.front().devnode());
         auto dst = dev.open_and_init();
-        if (!dst.ok) { fail_ui(QString::fromStdString(dst.msg)); return; }
+        if (!dst) { fail_ui(QString::fromStdString(dst.error())); return; }
 
         brokkr::platform::UsbFsConnection conn(dev);
         auto cst = conn.open();
-        if (!cst.ok) { fail_ui(QString::fromStdString(cst.msg)); return; }
+        if (!cst) { fail_ui(QString::fromStdString(cst.error())); return; }
 
-        brokkr::odin::OdinCommands odin(conn);
-        conn.set_timeout_ms(cfg.preflash_timeout_ms);
-
-        QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
-
-        auto st = odin.handshake(cfg.preflash_retries);
-        if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
-
-        auto vr = odin.get_version(cfg.preflash_retries);
-        if (!vr) { fail_ui(QString::fromStdString(vr.st.msg)); return; }
-
-        conn.set_timeout_ms(cfg.flash_timeout_ms);
-
-        auto br = brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries);
-        if (!br) { fail_ui(QString::fromStdString(br.st.msg)); return; }
-
-        auto pr = brokkr::odin::pit::parse({br.value.data(), br.value.size()});
-        if (!pr) { fail_ui(QString::fromStdString(pr.st.msg)); return; }
-
-        print_pit_table_to_log(pr.value);
-
-        QMetaObject::invokeMethod(this, [this]() { setSquaresText_("RESET"); }, Qt::QueuedConnection);
-
-        st = odin.shutdown(sm);
-        if (!st.ok) { fail_ui(QString::fromStdString(st.msg)); return; }
-
-        done_ui();
+        run_link(conn);
     });
 }

@@ -17,111 +17,43 @@
 
 #pragma once
 
-#include <fmt/format.h>
-
-#include <new>
+#include <expected>
 #include <string>
-#include <type_traits>
 #include <utility>
+
+#include <fmt/format.h>
 
 namespace brokkr::core {
 
-struct Status {
-  bool ok = true;
-  std::string msg;
-
-  constexpr Status() = default;
-  Status(bool ok_, std::string msg_) : ok(ok_), msg(std::move(msg_)) {}
-
-  static Status Ok() { return {}; }
-
-  static Status Fail(std::string msg) { return Status(false, std::move(msg)); }
-
-  template <class... Args>
-  static Status Failf(fmt::format_string<Args...> f, Args&&... args) {
-    return Fail(fmt::format(f, std::forward<Args>(args)...));
-  }
-
-  explicit operator bool() const noexcept { return ok; }
-};
+using Error  = std::string;
+using Status = std::expected<void, Error>;
 
 template <class T>
-struct Result {
-  // NOTE: default construct = failure-without-value. This avoids requiring T{}.
-  Status st{false, {}};
-  bool has_value = false;
+using Result = std::expected<T, Error>;
 
-  struct Empty { };
-  union {
-    Empty empty;
-    T value;
-  };
+inline std::unexpected<Error> fail(Error msg) { return std::unexpected<Error>(std::move(msg)); }
 
-  Result() noexcept : empty{} {}
-
-  ~Result() { reset_(); }
-
-  Result(const Result&) = delete;
-  Result& operator=(const Result&) = delete;
-
-  Result(Result&& o) noexcept(std::is_nothrow_move_constructible_v<T>)
-    : st(std::move(o.st))
-    , has_value(o.has_value)
-  {
-    if (has_value) {
-      ::new (static_cast<void*>(std::addressof(value))) T(std::move(o.value));
-      o.reset_();
-    } else {
-      empty = Empty{};
-    }
-  }
-
-  Result& operator=(Result&& o) noexcept(std::is_nothrow_move_constructible_v<T>) {
-    if (this == &o) return *this;
-    reset_();
-
-    st = std::move(o.st);
-    has_value = o.has_value;
-
-    if (has_value) {
-      ::new (static_cast<void*>(std::addressof(value))) T(std::move(o.value));
-      o.reset_();
-    } else {
-      empty = Empty{};
-    }
-    return *this;
-  }
-
-  static Result Ok(T v) {
-    Result r;
-    r.st = Status::Ok();
-    ::new (static_cast<void*>(std::addressof(r.value))) T(std::move(v));
-    r.has_value = true;
-    return r;
-  }
-
-  static Result Fail(std::string msg) {
-    Result r;
-    r.st = Status::Fail(std::move(msg));
-    return r;
-  }
-
-  template <class... Args>
-  static Result Failf(fmt::format_string<Args...> f, Args&&... args) {
-    return Fail(fmt::format(f, std::forward<Args>(args)...));
-  }
-
-  explicit operator bool() const noexcept { return st.ok; }
-
-private:
-  void reset_() noexcept {
-    if (has_value) {
-      value.~T();
-      has_value = false;
-    }
-  }
-};
+template <class... Args>
+inline std::unexpected<Error> failf(fmt::format_string<Args...> f, Args&&... args) {
+  return fail(fmt::format(f, std::forward<Args>(args)...));
+}
 
 } // namespace brokkr::core
 
-#define BRK_TRY(expr) do { auto _st = (expr); if (!_st.ok) return _st; } while (0)
+#define BRK_CAT2(a, b) a##b
+#define BRK_CAT(a, b) BRK_CAT2(a, b)
+
+#define BRK_TRY_IMPL(n, expr) \
+  do { \
+    auto BRK_CAT(_brk_r_, n) = (expr); \
+    if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error())); \
+  } while (0)
+
+#define BRK_TRY(expr) BRK_TRY_IMPL(__COUNTER__, expr)
+
+#define BRK_TRYV_IMPL(n, lhs, expr) \
+  auto BRK_CAT(_brk_r_, n) = (expr); \
+  if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error())); \
+  auto lhs = std::move(*BRK_CAT(_brk_r_, n))
+
+#define BRK_TRYV(lhs, expr) BRK_TRYV_IMPL(__COUNTER__, lhs, expr)

@@ -44,7 +44,7 @@ namespace {
 
 static brokkr::core::Status fail_errno(const char* what) noexcept {
   const int e = errno;
-  return brokkr::core::Status::Failf("{}: {}", what, std::strerror(e));
+  return brokkr::core::failf("{}: {}", what, std::strerror(e));
 }
 
 } // namespace
@@ -85,8 +85,8 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   }
 
   auto st = parse_descriptors_();
-  if (!st.ok) {
-    spdlog::error("UsbFsDevice: descriptor parse failed for {}: {}", devnode_, st.msg);
+  if (!st) {
+    spdlog::error("UsbFsDevice: descriptor parse failed for {}: {}", devnode_, st.error());
     close();
     return st;
   }
@@ -95,15 +95,12 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   if (!writable_) {
     close();
-    return brokkr::core::Status::Fail("UsbFsDevice: opened read-only");
+    return brokkr::core::fail("UsbFsDevice: opened read-only");
   }
 
   if (kernel_driver_active_()) {
     st = detach_kernel_driver_();
-    if (!st.ok) {
-      close();
-      return st;
-    }
+    if (!st) { close(); return st; }
     driver_detached_ = true;
   } else {
     driver_detached_ = false;
@@ -111,7 +108,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   if (ifc_num_ >= 0) {
     st = claim_interface_();
-    if (!st.ok) {
+    if (!st) {
       if (driver_detached_) attach_kernel_driver_();
       driver_detached_ = false;
       close();
@@ -121,28 +118,19 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   }
 
   spdlog::debug("UsbFsDevice: open/init OK: {}", devnode_);
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsDevice::close() noexcept {
   if (!fd_.valid()) return;
 
-  if (claimed_) {
-    release_interface_();
-    claimed_ = false;
-  }
-
-  if (driver_detached_) {
-    attach_kernel_driver_();
-    driver_detached_ = false;
-  }
+  if (claimed_) { release_interface_(); claimed_ = false; }
+  if (driver_detached_) { attach_kernel_driver_(); driver_detached_ = false; }
 
   fd_.close();
 }
 
-bool UsbFsDevice::has_packet_size_limit() const noexcept {
-  return !(caps_ & USBFS_CAP_NO_PACKET_SIZE_LIM);
-}
+bool UsbFsDevice::has_packet_size_limit() const noexcept { return !(caps_ & USBFS_CAP_NO_PACKET_SIZE_LIM); }
 
 void UsbFsDevice::reset_device() noexcept {
   if (!fd_.valid()) return;
@@ -157,8 +145,8 @@ bool UsbFsDevice::kernel_driver_active_() const noexcept {
 }
 
 brokkr::core::Status UsbFsDevice::detach_kernel_driver_() noexcept {
-  if (!fd_.valid() || ifc_num_ < 0) return brokkr::core::Status::Ok();
-  if (!kernel_driver_active_()) return brokkr::core::Status::Ok();
+  if (!fd_.valid() || ifc_num_ < 0) return {};
+  if (!kernel_driver_active_()) return {};
 
   usbdevfs_ioctl cmd{};
   cmd.ifno = ifc_num_;
@@ -166,7 +154,7 @@ brokkr::core::Status UsbFsDevice::detach_kernel_driver_() noexcept {
   cmd.data = nullptr;
 
   if (do_ioctl(fd_, USBDEVFS_IOCTL, &cmd) != 0) return fail_errno("USBDEVFS_DISCONNECT");
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsDevice::attach_kernel_driver_() noexcept {
@@ -181,10 +169,10 @@ void UsbFsDevice::attach_kernel_driver_() noexcept {
 }
 
 brokkr::core::Status UsbFsDevice::claim_interface_() noexcept {
-  if (!fd_.valid() || ifc_num_ < 0) return brokkr::core::Status::Fail("UsbFsDevice: no interface to claim");
+  if (!fd_.valid() || ifc_num_ < 0) return brokkr::core::fail("UsbFsDevice: no interface to claim");
   int ifc = ifc_num_;
   if (do_ioctl(fd_, USBDEVFS_CLAIMINTERFACE, &ifc) != 0) return fail_errno("USBDEVFS_CLAIMINTERFACE");
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsDevice::release_interface_() noexcept {
@@ -201,34 +189,30 @@ void UsbFsDevice::query_caps_() noexcept {
 }
 
 brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
-  if (!fd_.valid()) return brokkr::core::Status::Fail("UsbFsDevice: fd invalid");
+  if (!fd_.valid()) return brokkr::core::fail("UsbFsDevice: fd invalid");
 
   std::vector<std::uint8_t> buf(64 * 1024);
   const int n = do_read(fd_, buf.data(), buf.size());
   if (n <= 0) return fail_errno("read descriptors");
   buf.resize(static_cast<std::size_t>(n));
 
-  if (buf.size() < USB_DT_DEVICE_SIZE) return brokkr::core::Status::Fail("UsbFsDevice: missing device descriptor");
+  if (buf.size() < USB_DT_DEVICE_SIZE) return brokkr::core::fail("UsbFsDevice: missing device descriptor");
   const auto* dev = reinterpret_cast<const usb_device_descriptor*>(buf.data());
-  if (dev->bLength < USB_DT_DEVICE_SIZE || dev->bDescriptorType != USB_DT_DEVICE) {
-    return brokkr::core::Status::Fail("UsbFsDevice: invalid device descriptor");
-  }
+  if (dev->bLength < USB_DT_DEVICE_SIZE || dev->bDescriptorType != USB_DT_DEVICE) return brokkr::core::fail("UsbFsDevice: invalid device descriptor");
 
   ids_.vendor  = dev->idVendor;
   ids_.product = dev->idProduct;
 
   std::size_t off = dev->bLength;
-  if (off + USB_DT_CONFIG_SIZE > buf.size()) return brokkr::core::Status::Fail("UsbFsDevice: missing config descriptor");
+  if (off + USB_DT_CONFIG_SIZE > buf.size()) return brokkr::core::fail("UsbFsDevice: missing config descriptor");
 
   const auto* cfg = reinterpret_cast<const usb_config_descriptor*>(buf.data() + off);
-  if (cfg->bLength < USB_DT_CONFIG_SIZE || cfg->bDescriptorType != USB_DT_CONFIG) {
-    return brokkr::core::Status::Fail("UsbFsDevice: invalid config descriptor");
-  }
+  if (cfg->bLength < USB_DT_CONFIG_SIZE || cfg->bDescriptorType != USB_DT_CONFIG) return brokkr::core::fail("UsbFsDevice: invalid config descriptor");
 
   const std::size_t cfg_off = off;
   const std::size_t cfg_total = cfg->wTotalLength;
-  if (cfg_total < cfg->bLength) return brokkr::core::Status::Fail("UsbFsDevice: invalid wTotalLength");
-  if (cfg_off + cfg_total > buf.size()) return brokkr::core::Status::Fail("UsbFsDevice: config exceeds read data");
+  if (cfg_total < cfg->bLength) return brokkr::core::fail("UsbFsDevice: invalid wTotalLength");
+  if (cfg_off + cfg_total > buf.size()) return brokkr::core::fail("UsbFsDevice: config exceeds read data");
 
   eps_ = {};
   ifc_num_ = -1;
@@ -260,7 +244,7 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
     if (bType == USB_DT_INTERFACE) {
       commit_ifc();
 
-      if (bLength < USB_DT_INTERFACE_SIZE) return brokkr::core::Status::Fail("UsbFsDevice: short interface descriptor");
+      if (bLength < USB_DT_INTERFACE_SIZE) return brokkr::core::fail("UsbFsDevice: short interface descriptor");
       const auto* ifc = reinterpret_cast<const usb_interface_descriptor*>(buf.data() + off);
       cur_ifc_num = ifc->bInterfaceNumber;
       cur_alt = ifc->bAlternateSetting;
@@ -268,7 +252,7 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
 
       if (ifc->bInterfaceClass == 10 && ifc_num_ < 0) ifc_num_ = ifc->bInterfaceNumber;
     } else if (bType == USB_DT_ENDPOINT) {
-      if (bLength < USB_DT_ENDPOINT_SIZE) return brokkr::core::Status::Fail("UsbFsDevice: short endpoint descriptor");
+      if (bLength < USB_DT_ENDPOINT_SIZE) return brokkr::core::fail("UsbFsDevice: short endpoint descriptor");
       const auto* ep = reinterpret_cast<const usb_endpoint_descriptor*>(buf.data() + off);
 
       const bool is_bulk = ((ep->bmAttributes & 0x03) == 0x02);
@@ -292,8 +276,8 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
   spdlog::info("UsbFsDevice: {} vendor=0x{:04X} product=0x{:04X} ifc={} bulk_in=0x{:02X} bulk_out=0x{:02X}",
                devnode_, ids_.vendor, ids_.product, ifc_num_, eps_.bulk_in, eps_.bulk_out);
 
-  if (eps_.bulk_in == 0 || eps_.bulk_out == 0) return brokkr::core::Status::Fail("UsbFsDevice: missing bulk endpoints");
-  return brokkr::core::Status::Ok();
+  if (eps_.bulk_in == 0 || eps_.bulk_out == 0) return brokkr::core::fail("UsbFsDevice: missing bulk endpoints");
+  return {};
 }
 
 } // namespace brokkr::linux

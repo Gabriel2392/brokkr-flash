@@ -21,75 +21,22 @@
 
 #include <condition_variable>
 #include <exception>
-#include <functional>
-#include <memory>
+#include <functional> // std::move_only_function
 #include <mutex>
 #include <optional>
 #include <stop_token>
 #include <thread>
-#include <type_traits>
 #include <utility>
 
 #include <spdlog/spdlog.h>
 
 namespace brokkr::core {
 
-namespace detail {
-
-template <class>
-class MoveOnlyFunction;
-
-template <class R, class... Args>
-class MoveOnlyFunction<R(Args...)> {
-public:
-  MoveOnlyFunction() = default;
-
-  MoveOnlyFunction(const MoveOnlyFunction&) = delete;
-  MoveOnlyFunction& operator=(const MoveOnlyFunction&) = delete;
-
-  MoveOnlyFunction(MoveOnlyFunction&&) noexcept = default;
-  MoveOnlyFunction& operator=(MoveOnlyFunction&&) noexcept = default;
-
-  template <class F>
-    requires (!std::is_same_v<std::remove_cvref_t<F>, MoveOnlyFunction>)
-  MoveOnlyFunction(F&& f) {
-    using Fn = std::remove_cvref_t<F>;
-    struct Model final : Concept {
-      Fn fn;
-      explicit Model(Fn&& x) : fn(std::move(x)) {}
-      explicit Model(const Fn& x) : fn(x) {}
-      R call(Args&&... a) override { return std::invoke(fn, std::forward<Args>(a)...); }
-    };
-
-    if constexpr (std::is_move_constructible_v<Fn>) {
-      impl_ = std::make_unique<Model>(Fn(std::forward<F>(f)));
-    } else {
-      static_assert(std::is_copy_constructible_v<Fn>,
-                    "MoveOnlyFunction target must be move-constructible or copy-constructible");
-      impl_ = std::make_unique<Model>(Fn(f));
-    }
-  }
-
-  explicit operator bool() const noexcept { return static_cast<bool>(impl_); }
-
-  R operator()(Args... args) { return impl_->call(std::forward<Args>(args)...); }
-
-private:
-  struct Concept {
-    virtual ~Concept() = default;
-    virtual R call(Args&&... a) = 0;
-  };
-
-  std::unique_ptr<Concept> impl_{};
-};
-
-} // namespace detail
-
 template <class Slot>
 class TwoSlotPrefetcher {
 public:
-  using InitFn = detail::MoveOnlyFunction<void(Slot&)>;
-  using FillFn = detail::MoveOnlyFunction<Result<bool>(Slot&, std::stop_token)>;
+  using InitFn = std::move_only_function<void(Slot&)>;
+  using FillFn = std::move_only_function<Result<bool>(Slot&, std::stop_token)>;
 
   class Lease {
   public:
@@ -131,13 +78,9 @@ public:
 
 public:
   explicit TwoSlotPrefetcher(FillFn fill, InitFn init = {})
-    : init_(std::move(init))
-    , fill_(std::move(fill))
+    : init_(std::move(init)), fill_(std::move(fill))
   {
-    if (init_) {
-      init_(slots_[0]);
-      init_(slots_[1]);
-    }
+    if (init_) { init_(slots_[0]); init_(slots_[1]); }
     reader_ = std::jthread([this](std::stop_token st) { reader_loop_(st); });
   }
 
@@ -151,7 +94,6 @@ public:
       std::lock_guard lk(m_);
       stopping_ = true;
     }
-
     cv_can_fill_.notify_all();
     cv_can_take_.notify_all();
 
@@ -165,8 +107,7 @@ public:
       return stopping_ || error_.has_value() || filled_[read_idx_] || (done_ && !filled_[read_idx_]);
     });
 
-    if (stopping_ || error_.has_value()) return std::nullopt;
-    if (!filled_[read_idx_]) return std::nullopt;
+    if (stopping_ || error_.has_value() || !filled_[read_idx_]) return std::nullopt;
 
     const int idx = read_idx_;
     read_idx_ ^= 1;
@@ -175,7 +116,7 @@ public:
 
   Status status() const noexcept {
     std::lock_guard lk(m_);
-    return error_.has_value() ? *error_ : Status::Ok();
+    return error_ ? Status{std::unexpect, *error_} : Status{};
   }
 
 private:
@@ -193,35 +134,17 @@ private:
         {
           std::unique_lock lk(m_);
           cv_can_fill_.wait(lk, [&] { return stopping_ || !filled_[write_idx_]; });
-          if (stopping_ || st.stop_requested()) {
-            done_ = true;
-            cv_can_take_.notify_all();
-            return;
-          }
+          if (stopping_ || st.stop_requested()) { done_ = true; cv_can_take_.notify_all(); return; }
         }
 
-        Result<bool> r = fill_(slots_[write_idx_], st);
+        auto r = fill_(slots_[write_idx_], st);
 
         {
           std::lock_guard lk(m_);
-          if (stopping_ || st.stop_requested()) {
-            done_ = true;
-            cv_can_take_.notify_all();
-            return;
-          }
+          if (stopping_ || st.stop_requested()) { done_ = true; cv_can_take_.notify_all(); return; }
 
-          if (!r.st.ok) {
-            error_ = std::move(r.st);
-            done_ = true;
-            cv_can_take_.notify_all();
-            return;
-          }
-
-          if (!r.value) {
-            done_ = true;
-            cv_can_take_.notify_all();
-            return;
-          }
+          if (!r) { error_ = std::move(r.error()); done_ = true; cv_can_take_.notify_all(); return; }
+          if (!*r) { done_ = true; cv_can_take_.notify_all(); return; }
 
           filled_[write_idx_] = true;
           write_idx_ ^= 1;
@@ -233,7 +156,7 @@ private:
       spdlog::debug("TwoSlotPrefetcher reader threw: {}", e.what());
       {
         std::lock_guard lk(m_);
-        error_ = Status::Fail(e.what());
+        error_ = e.what();
         done_ = true;
       }
       cv_can_take_.notify_all();
@@ -242,7 +165,7 @@ private:
       spdlog::debug("TwoSlotPrefetcher reader threw unknown exception");
       {
         std::lock_guard lk(m_);
-        error_ = Status::Fail("Unknown exception in TwoSlotPrefetcher reader thread");
+        error_ = "Unknown exception in TwoSlotPrefetcher reader thread";
         done_ = true;
       }
       cv_can_take_.notify_all();
@@ -264,7 +187,7 @@ private:
   int write_idx_ = 0;
   int read_idx_ = 0;
 
-  std::optional<Status> error_{};
+  std::optional<Error> error_{};
 
   std::jthread reader_{};
 

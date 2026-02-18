@@ -41,7 +41,6 @@ public:
   int send(std::span<const std::uint8_t> data, unsigned retries = 8) override;
   int recv(std::span<std::uint8_t> data, unsigned retries = 8) override;
 
-  // Important: Hack reversed from original odin: If len==0, try receive ZLP and return 0.
   int recv_zlp(unsigned retries = 0) override;
 
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }

@@ -50,16 +50,16 @@ static std::string_view trim_ws(std::string_view s) {
 
 static brokkr::core::Result<std::string> read_text(io::ByteSource& src, std::size_t max_bytes, std::string_view what) noexcept {
   const std::uint64_t n64 = src.size();
-  if (n64 > max_bytes) return brokkr::core::Result<std::string>::Fail("read_text: too large: " + std::string(what));
+  if (n64 > max_bytes) return brokkr::core::fail("read_text: too large: " + std::string(what));
   const std::size_t n = static_cast<std::size_t>(n64);
 
   std::string s(n, '\0');
   for (std::size_t off = 0; off < n;) {
     const std::size_t got = src.read(std::as_writable_bytes(std::span<char>(s.data() + off, n - off)));
-    if (!got) return brokkr::core::Result<std::string>::Fail("Short read: " + std::string(what));
+    if (!got) return brokkr::core::fail("Short read: " + std::string(what));
     off += got;
   }
-  return brokkr::core::Result<std::string>::Ok(std::move(s));
+  return s;
 }
 
 static brokkr::core::Result<std::vector<std::string>> parse_download_list(std::string_view txt) noexcept {
@@ -74,12 +74,12 @@ static brokkr::core::Result<std::vector<std::string>> parse_download_list(std::s
 
     if (line.empty()) continue;
     std::string name(line);
-    if (!seen.insert(name).second) return brokkr::core::Result<std::vector<std::string>>::Fail("download-list.txt contains duplicate entry: " + name);
+    if (!seen.insert(name).second) return brokkr::core::fail("download-list.txt contains duplicate entry: " + name);
     names.push_back(std::move(name));
   }
 
-  if (names.empty()) return brokkr::core::Result<std::vector<std::string>>::Fail("download-list.txt is empty");
-  return brokkr::core::Result<std::vector<std::string>>::Ok(std::move(names));
+  if (names.empty()) return brokkr::core::fail("download-list.txt is empty");
+  return names;
 }
 
 static bool is_download_list_name(std::string_view name) noexcept {
@@ -98,13 +98,9 @@ static bool lists_equal(const std::vector<std::string>& a, const std::vector<std
 }
 
 static brokkr::core::Result<std::uint64_t> lz4_content_size(const ImageSpec& spec) noexcept {
-  auto sr = spec.open();
-  if (!sr) return brokkr::core::Result<std::uint64_t>::Fail(std::move(sr.st.msg));
-
-  auto hr = io::parse_lz4_frame_header(*sr.value);
-  if (!hr) return brokkr::core::Result<std::uint64_t>::Fail(std::move(hr.st.msg));
-
-  return brokkr::core::Result<std::uint64_t>::Ok(hr.value.content_size);
+  BRK_TRYV(src, spec.open());
+  BRK_TRYV(h, io::parse_lz4_frame_header(*src));
+  return h.content_size;
 }
 
 static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind,
@@ -129,14 +125,13 @@ static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind,
   spec.download_list_mode = dl_mode;
 
   if (spec.lz4) {
-    auto cr = lz4_content_size(spec);
-    if (!cr) return brokkr::core::Result<ImageSpec>::Fail(std::move(cr.st.msg));
-    spec.size = cr.value;
+    BRK_TRYV(sz, lz4_content_size(spec));
+    spec.size = sz;
   } else {
     spec.size = spec.disk_size;
   }
 
-  return brokkr::core::Result<ImageSpec>::Ok(std::move(spec));
+  return spec;
 }
 
 struct SourceCandidate {
@@ -162,7 +157,7 @@ brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const no
     case Kind::RawFile:  return io::open_raw_file(path);
     case Kind::TarEntry: return io::open_tar_entry(path, entry);
   }
-  return brokkr::core::Result<std::unique_ptr<io::ByteSource>>::Fail("ImageSpec::open: invalid kind");
+  return brokkr::core::fail("ImageSpec::open: invalid kind");
 }
 
 brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std::vector<std::filesystem::path>& inputs) noexcept {
@@ -172,22 +167,15 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
   for (const auto& p : inputs) {
     if (!io::TarArchive::is_tar_file(p.string())) continue;
 
-    auto tr = io::TarArchive::open(p.string(), true);
-    if (!tr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(tr.st.msg));
-    auto& tar = tr.value;
+    BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
 
     if (auto e = find_download_list_entry(tar)) {
-      auto sr = io::open_tar_entry(p, *e);
-      if (!sr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(sr.st.msg));
+      BRK_TRYV(src, io::open_tar_entry(p, *e));
+      BRK_TRYV(txt, read_text(*src, 128 * 1024, "download-list.txt"));
+      BRK_TRYV(names, parse_download_list(txt));
 
-      auto tx = read_text(*sr.value, 128 * 1024, "download-list.txt");
-      if (!tx) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(tx.st.msg));
-
-      auto names = parse_download_list(tx.value);
-      if (!names) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(names.st.msg));
-
-      if (!dl) dl = std::move(names.value);
-      else if (!lists_equal(*dl, names.value)) return brokkr::core::Result<std::vector<ImageSpec>>::Fail("Multiple download-list.txt files found with different contents");
+      if (!dl) dl = std::move(names);
+      else if (!lists_equal(*dl, names)) return brokkr::core::fail("Multiple download-list.txt files found with different contents");
     }
   }
 
@@ -196,9 +184,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
 
     for (const auto& p : inputs) {
       if (io::TarArchive::is_tar_file(p.string())) {
-        auto tr = io::TarArchive::open(p.string(), true);
-        if (!tr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(tr.st.msg));
-        auto& tar = tr.value;
+        BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
 
         for (const auto& e : tar.entries()) {
           if (is_download_list_name(e.name)) continue;
@@ -222,9 +208,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
         continue;
       }
 
-      auto sr = io::open_raw_file(p);
-      if (!sr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(sr.st.msg));
-
+      BRK_TRYV(src, io::open_raw_file(p));
       const std::string sb = io::basename(p.string());
       const bool lz4 = is_lz4_name(sb);
 
@@ -235,63 +219,43 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
         .basename = lz4 ? strip_lz4_suffix(sb) : sb,
         .source_basename = sb,
         .display = p.string(),
-        .disk_size = sr.value->size()
+        .disk_size = src->size()
       });
     }
 
     out.reserve(dl->size());
     for (const auto& name : *dl) {
       auto it = cands.find(name);
-      if (it == cands.end()) return brokkr::core::Result<std::vector<ImageSpec>>::Fail("download-list.txt references missing file: " + name);
+      if (it == cands.end()) return brokkr::core::fail("download-list.txt references missing file: " + name);
 
-      auto fr = finalize(it->second, true);
-      if (!fr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(fr.st.msg));
-
-      out.push_back(std::move(fr.value));
+      BRK_TRYV(spec, finalize(it->second, true));
+      out.push_back(std::move(spec));
     }
 
-    return brokkr::core::Result<std::vector<ImageSpec>>::Ok(std::move(out));
+    return out;
   }
 
   for (const auto& p : inputs) {
     if (io::TarArchive::is_tar_file(p.string())) {
-      auto tr = io::TarArchive::open(p.string(), true);
-      if (!tr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(tr.st.msg));
-      auto& tar = tr.value;
+      BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
 
       for (const auto& e : tar.entries()) {
         if (is_download_list_name(e.name)) continue;
         const auto sb = io::basename(e.name);
         if (sb.empty()) continue;
 
-        auto sr = make_spec(ImageSpec::Kind::TarEntry,
-                            p,
-                            e,
-                            p.string() + ":" + e.name,
-                            io::basename(e.name),
-                            e.size,
-                            false);
-        if (!sr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(sr.st.msg));
-        out.push_back(std::move(sr.value));
+        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, io::basename(e.name), e.size, false));
+        out.push_back(std::move(spec));
       }
       continue;
     }
 
-    auto sr = io::open_raw_file(p);
-    if (!sr) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(sr.st.msg));
-
-    auto ms = make_spec(ImageSpec::Kind::RawFile,
-                        p,
-                        {},
-                        p.string(),
-                        io::basename(p.string()),
-                        sr.value->size(),
-                        false);
-    if (!ms) return brokkr::core::Result<std::vector<ImageSpec>>::Fail(std::move(ms.st.msg));
-    out.push_back(std::move(ms.value));
+    BRK_TRYV(src, io::open_raw_file(p));
+    BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), io::basename(p.string()), src->size(), false));
+    out.push_back(std::move(spec));
   }
 
-  return brokkr::core::Result<std::vector<ImageSpec>>::Ok(std::move(out));
+  return out;
 }
 
 brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table, const std::vector<ImageSpec>& sources) noexcept {
@@ -310,9 +274,9 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
     else items[it->second] = FlashItem{.part = *part, .spec = s};
   }
 
-  if (items.empty()) return brokkr::core::Result<std::vector<FlashItem>>::Fail("No flashable items after PIT mapping");
+  if (items.empty()) return brokkr::core::fail("No flashable items after PIT mapping");
   spdlog::debug("PIT mapping: {} items", items.size());
-  return brokkr::core::Result<std::vector<FlashItem>>::Ok(std::move(items));
+  return items;
 }
 
 } // namespace brokkr::odin

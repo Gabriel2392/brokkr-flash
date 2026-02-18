@@ -35,18 +35,15 @@ constexpr std::size_t BULK_BUFFER_LENGTH_NO_LIMIT = 128 * 1024;
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
 brokkr::core::Status UsbFsConnection::open() noexcept {
-  if (connected_) return brokkr::core::Status::Ok();
-
-  if (!dev_.is_open()) {
-    return brokkr::core::Status::Fail("UsbFsConnection::open: device not open");
-  }
+  if (connected_) return {};
+  if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");
 
   max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT
                                                 : BULK_BUFFER_LENGTH_NO_LIMIT;
 
   connected_ = true;
   zlp_needed_ = true;
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsConnection::close() noexcept { connected_ = false; }
@@ -66,9 +63,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
   bulk.timeout = timeout_ms_;
 
   while (p < end) {
-    const int want = static_cast<int>(
-      std::min<std::size_t>(std::size_t(end - p), max_pack_size_)
-    );
+    const int want = static_cast<int>(std::min<std::size_t>(std::size_t(end - p), max_pack_size_));
     bulk.len = want;
     bulk.data = const_cast<std::uint8_t*>(p);
 
@@ -129,9 +124,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   usbdevfs_bulktransfer bulk{};
 
   while (p < end) {
-    const auto xfer = static_cast<int>(
-      std::min<std::size_t>(std::size_t(end - p), max_pack_size_)
-    );
+    const auto xfer = static_cast<int>(std::min<std::size_t>(std::size_t(end - p), max_pack_size_));
     bulk.ep = eps.bulk_in;
     bulk.len = xfer;
     bulk.data = p;

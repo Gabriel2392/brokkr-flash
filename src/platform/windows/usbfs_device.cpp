@@ -37,9 +37,7 @@ static std::string win32_err(DWORD e) {
   if (n && buf) out.assign(buf, buf + n);
   if (buf) ::LocalFree(buf);
 
-  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) {
-    out.pop_back();
-  }
+  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) out.pop_back();
   if (out.empty()) out = "error " + std::to_string(static_cast<unsigned>(e));
   return out;
 }
@@ -71,16 +69,13 @@ UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
 brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   close();
 
-  // Format the COM port path correctly: \\.\COM10 and above require the prefix.
   std::string port_path = devnode_;
-  if (port_path.rfind("\\\\.\\", 0) != 0 && port_path.find("COM") != std::string::npos) {
-    port_path = "\\\\.\\" + port_path;
-  }
+  if (port_path.rfind("\\\\.\\", 0) != 0 && port_path.find("COM") != std::string::npos) port_path = "\\\\.\\" + port_path;
 
   handle_ = ::CreateFileA(
     port_path.c_str(),
     GENERIC_READ | GENERIC_WRITE,
-    0, // COM ports generally require exclusive access
+    0,
     nullptr,
     OPEN_EXISTING,
     FILE_ATTRIBUTE_NORMAL,
@@ -89,7 +84,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   if (handle_ == INVALID_HANDLE_VALUE) {
     const DWORD e = ::GetLastError();
-    return brokkr::core::Status::Fail("Failed to open COM port '" + port_path + "': " + win32_err(e));
+    return brokkr::core::fail("Failed to open COM port '" + port_path + "': " + win32_err(e));
   }
 
   DCB dcb{};
@@ -98,7 +93,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   if (!::GetCommState(handle_, &dcb)) {
     const DWORD e = ::GetLastError();
     close();
-    return brokkr::core::Status::Fail("GetCommState failed: " + win32_err(e));
+    return brokkr::core::fail("GetCommState failed: " + win32_err(e));
   }
 
   dcb.BaudRate = CBR_115200;
@@ -109,11 +104,10 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   if (!::SetCommState(handle_, &dcb)) {
     const DWORD e = ::GetLastError();
     close();
-    return brokkr::core::Status::Fail("SetCommState failed: " + win32_err(e));
+    return brokkr::core::fail("SetCommState failed: " + win32_err(e));
   }
 
-  // Serial stream: endpoints are irrelevant; keep eps_ zeroed.
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsDevice::close() noexcept {

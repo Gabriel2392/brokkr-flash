@@ -19,7 +19,7 @@
 
 #include <charconv>
 #include <cstdint>
-#include <string>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -42,7 +42,7 @@ extern io_service_t find_device_by_location(std::uint32_t locationID);
 namespace {
 
 static brokkr::core::Status fail_iokit(const char* what, kern_return_t kr) noexcept {
-  return brokkr::core::Status::Failf("{}: IOKit error 0x{:08x}", what, static_cast<unsigned>(kr));
+  return brokkr::core::failf("{}: IOKit error 0x{:08x}", what, static_cast<unsigned>(kr));
 }
 
 static std::optional<std::uint32_t> parse_location_id(std::string_view s) noexcept {
@@ -50,10 +50,7 @@ static std::optional<std::uint32_t> parse_location_id(std::string_view s) noexce
   while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
 
   int base = 10;
-  if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-    base = 16;
-    s.remove_prefix(2);
-  }
+  if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s.remove_prefix(2); }
 
   std::uint32_t v = 0;
   auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, base);
@@ -73,22 +70,15 @@ UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
   close();
 
   devnode_ = std::move(o.devnode_);
-  dev_intf_ = o.dev_intf_;
-  o.dev_intf_ = nullptr;
-
-  ifc_intf_ = o.ifc_intf_;
-  o.ifc_intf_ = nullptr;
+  dev_intf_ = o.dev_intf_; o.dev_intf_ = nullptr;
+  ifc_intf_ = o.ifc_intf_; o.ifc_intf_ = nullptr;
 
   ids_ = o.ids_;
   eps_ = o.eps_;
-  ifc_num_ = o.ifc_num_;
-  o.ifc_num_ = -1;
+  ifc_num_ = o.ifc_num_; o.ifc_num_ = -1;
 
-  pipe_in_ = o.pipe_in_;
-  o.pipe_in_ = 0;
-
-  pipe_out_ = o.pipe_out_;
-  o.pipe_out_ = 0;
+  pipe_in_ = o.pipe_in_; o.pipe_in_ = 0;
+  pipe_out_ = o.pipe_out_; o.pipe_out_ = 0;
 
   return *this;
 }
@@ -97,10 +87,10 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   close();
 
   const auto loc = parse_location_id(devnode_);
-  if (!loc) return brokkr::core::Status::Failf("Invalid macOS USB locationID sysname: '{}'", devnode_);
+  if (!loc) return brokkr::core::failf("Invalid macOS USB locationID sysname: '{}'", devnode_);
 
   io_service_t service = find_device_by_location(*loc);
-  if (!service) return brokkr::core::Status::Failf("USB device not found at location: {}", devnode_);
+  if (!service) return brokkr::core::failf("USB device not found at location: {}", devnode_);
 
   IOCFPlugInInterface** plugIn = nullptr;
   SInt32 score = 0;
@@ -115,8 +105,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
       plugIn, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID320), reinterpret_cast<LPVOID*>(&devIntf));
   (*plugIn)->Release(plugIn);
 
-  if (res != S_OK || !devIntf) return brokkr::core::Status::Fail("Failed to get IOUSBDeviceInterface320");
-
+  if (res != S_OK || !devIntf) return brokkr::core::fail("Failed to get IOUSBDeviceInterface320");
   dev_intf_ = devIntf;
 
   kr = (*devIntf)->USBDeviceOpen(devIntf);
@@ -139,9 +128,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   if ((*devIntf)->GetConfiguration(devIntf, &curCfg) == kIOReturnSuccess && curCfg == 0) {
     IOUSBConfigurationDescriptorPtr configDesc = nullptr;
     kr = (*devIntf)->GetConfigurationDescriptorPtr(devIntf, 0, &configDesc);
-    if (kr == kIOReturnSuccess && configDesc) {
-      (void)(*devIntf)->SetConfiguration(devIntf, configDesc->bConfigurationValue);
-    }
+    if (kr == kIOReturnSuccess && configDesc) (void)(*devIntf)->SetConfiguration(devIntf, configDesc->bConfigurationValue);
   }
 
   IOUSBFindInterfaceRequest ifcRequest;
@@ -152,10 +139,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   io_iterator_t ifcIter = 0;
   kr = (*devIntf)->CreateInterfaceIterator(devIntf, &ifcRequest, &ifcIter);
-  if (kr != kIOReturnSuccess) {
-    close();
-    return fail_iokit("CreateInterfaceIterator", kr);
-  }
+  if (kr != kIOReturnSuccess) { close(); return fail_iokit("CreateInterfaceIterator", kr); }
 
   io_service_t usbIfc = 0;
   while ((usbIfc = IOIteratorNext(ifcIter)) != 0) {
@@ -175,21 +159,14 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
     if (ires != S_OK || !ifcIntf) continue;
 
     kr = (*ifcIntf)->USBInterfaceOpen(ifcIntf);
-    if (kr != kIOReturnSuccess) {
-      (*ifcIntf)->Release(ifcIntf);
-      continue;
-    }
+    if (kr != kIOReturnSuccess) { (*ifcIntf)->Release(ifcIntf); continue; }
 
     UInt8 alt = 0;
     if ((*ifcIntf)->GetAlternateSetting(ifcIntf, &alt) == kIOReturnSuccess && alt != 0) {
       (void)(*ifcIntf)->SetAlternateInterface(ifcIntf, 0);
       (void)(*ifcIntf)->GetAlternateSetting(ifcIntf, &alt);
     }
-    if (alt != 0) {
-      (*ifcIntf)->USBInterfaceClose(ifcIntf);
-      (*ifcIntf)->Release(ifcIntf);
-      continue;
-    }
+    if (alt != 0) { (*ifcIntf)->USBInterfaceClose(ifcIntf); (*ifcIntf)->Release(ifcIntf); continue; }
 
     UInt8 numEndpoints = 0;
     (void)(*ifcIntf)->GetNumEndpoints(ifcIntf, &numEndpoints);
@@ -234,15 +211,12 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   IOObjectRelease(ifcIter);
 
-  if (!ifc_intf_) {
-    close();
-    return brokkr::core::Status::Fail("No interface with bulk endpoints found");
-  }
+  if (!ifc_intf_) { close(); return brokkr::core::fail("No interface with bulk endpoints found"); }
 
   spdlog::info("Opened USB device at {} (VID: 0x{:04x}, PID: 0x{:04x}, bulk_in: 0x{:02x}, bulk_out: 0x{:02x})",
                devnode_, ids_.vendor, ids_.product, eps_.bulk_in, eps_.bulk_out);
 
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsDevice::close() noexcept {

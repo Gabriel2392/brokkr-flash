@@ -71,11 +71,9 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
 namespace detail {
 
 inline brokkr::core::Status checked_add_u64(std::uint64_t& acc, std::uint64_t v, std::string_view what) noexcept {
-  if (std::numeric_limits<std::uint64_t>::max() - acc < v) {
-    return brokkr::core::Status::Fail("Overflow while computing " + std::string(what));
-  }
+  if (std::numeric_limits<std::uint64_t>::max() - acc < v) return brokkr::core::fail("Overflow while computing " + std::string(what));
   acc += v;
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 constexpr std::uint64_t round_up64(std::uint64_t n, std::uint64_t base) noexcept {

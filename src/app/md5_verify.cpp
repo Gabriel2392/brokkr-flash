@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -77,20 +78,20 @@ static std::string md5_hex32(const std::array<unsigned char, 16>& d) {
 static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::filesystem::path& p) noexcept {
   std::error_code ec;
   const std::uint64_t file_size = std::filesystem::file_size(p, ec);
-  if (ec) return brokkr::core::Result<std::optional<Md5Job>>::Failf("Cannot stat file: {}", p.string());
-  if (file_size < (kMd5HexChars + 2)) return brokkr::core::Result<std::optional<Md5Job>>::Ok(std::nullopt);
+  if (ec) return brokkr::core::failf("Cannot stat file: {}", p.string());
+  if (file_size < (kMd5HexChars + 2)) return std::nullopt;
 
   const std::uint64_t tail_off = (file_size > kTrailerMaxBytes) ? (file_size - kTrailerMaxBytes) : 0;
   const std::size_t tail_len = static_cast<std::size_t>(file_size - tail_off);
 
   std::ifstream in(p, std::ios::binary);
-  if (!in.is_open()) return brokkr::core::Result<std::optional<Md5Job>>::Failf("Cannot open for MD5: {}", p.string());
+  if (!in.is_open()) return brokkr::core::failf("Cannot open for MD5: {}", p.string());
 
   std::string tail(tail_len, '\0');
   in.seekg(static_cast<std::streamoff>(tail_off), std::ios::beg);
-  if (!in.good()) return brokkr::core::Result<std::optional<Md5Job>>::Failf("Seek failed: {}", p.string());
+  if (!in.good()) return brokkr::core::failf("Seek failed: {}", p.string());
   in.read(tail.data(), static_cast<std::streamsize>(tail.size()));
-  if (!in.good()) return brokkr::core::Result<std::optional<Md5Job>>::Failf("Read failed: {}", p.string());
+  if (!in.good()) return brokkr::core::failf("Read failed: {}", p.string());
 
   std::int64_t delim = -1;
   for (std::int64_t i = static_cast<std::int64_t>(tail.size()) - 2; i >= 0; --i) {
@@ -104,27 +105,25 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::fil
     }
     if (ok) { delim = i; break; }
   }
-  if (delim < 0) return brokkr::core::Result<std::optional<Md5Job>>::Ok(std::nullopt);
+  if (delim < 0) return std::nullopt;
 
   std::array<unsigned char, 16> expected{};
   if (!parse_md5_hex(
         {tail.data() + static_cast<std::size_t>(delim - static_cast<std::int64_t>(kMd5HexChars)), kMd5HexChars},
         expected)) {
-    return brokkr::core::Result<std::optional<Md5Job>>::Ok(std::nullopt);
+    return std::nullopt;
   }
 
   const std::uint64_t bytes_to_hash =
       tail_off + static_cast<std::uint64_t>(delim - static_cast<std::int64_t>(kMd5HexChars));
 
-  if (file_size - bytes_to_hash > kTrailerMaxBytes) {
-    return brokkr::core::Result<std::optional<Md5Job>>::Failf("MD5 trailer too large: {}", p.string());
-  }
+  if (file_size - bytes_to_hash > kTrailerMaxBytes) return brokkr::core::failf("MD5 trailer too large: {}", p.string());
 
   Md5Job j;
   j.path = p;
   j.bytes_to_hash = bytes_to_hash;
   j.expected = expected;
-  return brokkr::core::Result<std::optional<Md5Job>>::Ok(std::optional<Md5Job>(std::move(j)));
+  return std::optional<Md5Job>(std::move(j));
 }
 
 static brokkr::core::Result<std::array<unsigned char, 16>>
@@ -138,22 +137,22 @@ md5_hash_prefetch(const std::filesystem::path& path,
   struct Slot { std::vector<unsigned char> buf; std::size_t n = 0; };
 
   std::FILE* f = std::fopen(path.string().c_str(), "rb");
-  if (!f) return brokkr::core::Result<std::array<unsigned char, 16>>::Failf("Cannot open for MD5: {}", path.string());
+  if (!f) return brokkr::core::failf("Cannot open for MD5: {}", path.string());
   std::unique_ptr<std::FILE, int(*)(std::FILE*)> g(f, &std::fclose);
 
   std::uint64_t remaining = bytes_to_hash;
 
   brokkr::core::TwoSlotPrefetcher<Slot> pf(
     [&](Slot& s, std::stop_token st) -> brokkr::core::Result<bool> {
-      if (st.stop_requested() || !remaining) return brokkr::core::Result<bool>::Ok(false);
+      if (st.stop_requested() || !remaining) return false;
 
       const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, kBuf));
       const std::size_t got = std::fread(s.buf.data(), 1, want, f);
-      if (got != want) return brokkr::core::Result<bool>::Failf("Short read while hashing: {}", path.string());
+      if (got != want) return brokkr::core::failf("Short read while hashing: {}", path.string());
 
       s.n = got;
       remaining -= static_cast<std::uint64_t>(got);
-      return brokkr::core::Result<bool>::Ok(true);
+      return true;
     },
     [&](Slot& s) { s.buf.resize(kBuf); }
   );
@@ -178,11 +177,11 @@ md5_hash_prefetch(const std::filesystem::path& path,
     if (ui.on_progress) ui.on_progress(new_done, total, new_done, total);
   }
 
-  const auto pst = pf.status();
-  if (!pst.ok) return brokkr::core::Result<std::array<unsigned char, 16>>::Fail(pst.msg);
+  auto pst = pf.status();
+  if (!pst) return brokkr::core::fail(std::move(pst.error()));
 
   if (processed != bytes_to_hash) {
-    return brokkr::core::Result<std::array<unsigned char, 16>>::Failf(
+    return brokkr::core::failf(
       "MD5 hashing terminated early: {} (processed {}, expected {})",
       path.string(), processed, bytes_to_hash
     );
@@ -190,7 +189,7 @@ md5_hash_prefetch(const std::filesystem::path& path,
 
   std::array<unsigned char, 16> out{};
   md5_final(&ctx, out.data());
-  return brokkr::core::Result<std::array<unsigned char, 16>>::Ok(out);
+  return out;
 }
 
 } // namespace
@@ -202,15 +201,15 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesy
     if (!brokkr::io::TarArchive::is_tar_file(p.string())) continue;
 
     auto r = detect_md5_job(p);
-    if (!r) return brokkr::core::Result<std::vector<Md5Job>>::Fail(std::move(r.st.msg));
-    if (r.value) jobs.push_back(std::move(*r.value));
+    if (!r) return brokkr::core::fail(std::move(r.error()));
+    if (*r) jobs.push_back(std::move(**r));
   }
 
-  return brokkr::core::Result<std::vector<Md5Job>>::Ok(std::move(jobs));
+  return jobs;
 }
 
 brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui) noexcept {
-  if (jobs.empty()) return brokkr::core::Status::Ok();
+  if (jobs.empty()) return {};
 
   std::uint64_t total = 0;
   for (const auto& j : jobs) total += j.bytes_to_hash;
@@ -241,32 +240,32 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
   for (const auto& j : jobs) {
     auto st = pool.submit([&, j]() -> brokkr::core::Status {
-      if (pool.cancelled()) return brokkr::core::Status::Ok();
+      if (pool.cancelled()) return {};
 
       auto r = md5_hash_prefetch(j.path, j.bytes_to_hash, done, total, ui);
-      if (!r) return brokkr::core::Status::Fail(std::move(r.st.msg));
+      if (!r) return brokkr::core::fail(std::move(r.error()));
 
-      const auto& digest = r.value;
+      const auto& digest = *r;
       if (std::memcmp(digest.data(), j.expected.data(), j.expected.size()) != 0) {
-        return brokkr::core::Status::Fail(
+        return brokkr::core::fail(
           "MD5 mismatch: " + j.path.string() +
           "\n  expected:   " + md5_hex32(j.expected) +
           "\n  calculated: " + md5_hex32(digest) +
           "\n  byte count: " + std::to_string(j.bytes_to_hash)
         );
       }
-      return brokkr::core::Status::Ok();
+      return {};
     });
 
-    if (!st.ok) return st;
+    if (!st) return st;
   }
 
   auto wst = pool.wait();
-  if (!wst.ok) return wst;
+  if (!wst) return wst;
 
   if (ui.on_item_done) ui.on_item_done(0);
   spdlog::info("MD5 OK");
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 } // namespace brokkr::app

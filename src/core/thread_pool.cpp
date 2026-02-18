@@ -36,14 +36,14 @@ ThreadPool::~ThreadPool() {
 }
 
 Status ThreadPool::submit(Task t) noexcept {
-  if (!t) return Status::Ok();
+  if (!t) return {};
   {
     std::lock_guard lk(mtx_);
-    if (stopping_) return Status::Fail("ThreadPool: submit on stopping pool");
+    if (stopping_) return fail("ThreadPool: submit on stopping pool");
     q_.push(std::move(t));
   }
   cv_.notify_one();
-  return Status::Ok();
+  return {};
 }
 
 void ThreadPool::stop() noexcept {
@@ -63,11 +63,11 @@ Status ThreadPool::wait() noexcept {
   }
 
   std::lock_guard elk(err_mtx_);
-  return has_error_ ? first_error_ : Status::Ok();
+  return has_error_ ? first_error_ : Status{};
 }
 
 void ThreadPool::set_error_(Status st) noexcept {
-  if (st.ok) return;
+  if (st) return;
 
   cancel_.store(true, std::memory_order_relaxed);
 
@@ -98,16 +98,16 @@ void ThreadPool::worker_loop_() noexcept {
     if (!cancel_.load(std::memory_order_relaxed)) {
       try {
         Status st = task();
-        if (!st.ok) {
-          spdlog::debug("ThreadPool task failed: {}", st.msg);
+        if (!st) {
+          spdlog::debug("ThreadPool task failed: {}", st.error());
           set_error_(std::move(st));
         }
       } catch (const std::exception& e) {
         spdlog::debug("ThreadPool task threw: {}", e.what());
-        set_error_(Status::Fail(e.what()));
+        set_error_(fail(e.what()));
       } catch (...) {
         spdlog::debug("ThreadPool task threw unknown exception");
-        set_error_(Status::Fail("Unknown exception in ThreadPool task"));
+        set_error_(fail("Unknown exception in ThreadPool task"));
       }
     }
 

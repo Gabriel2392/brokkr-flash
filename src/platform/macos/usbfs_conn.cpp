@@ -37,15 +37,15 @@ inline bool ok_or_underrun(IOReturn kr) noexcept {
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
 brokkr::core::Status UsbFsConnection::open() noexcept {
-  if (connected_) return brokkr::core::Status::Ok();
-  if (!dev_.is_open()) return brokkr::core::Status::Fail("UsbFsConnection::open: device not open");
+  if (connected_) return {};
+  if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");
 
   max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT
                                                 : BULK_BUFFER_LENGTH_NO_LIMIT;
 
   connected_ = true;
   zlp_needed_ = true;
-  return brokkr::core::Status::Ok();
+  return {};
 }
 
 void UsbFsConnection::close() noexcept { connected_ = false; }
@@ -61,9 +61,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
   const std::uint8_t* begin = p;
 
   while (p < end) {
-    UInt32 want = static_cast<UInt32>(
-      std::min<std::size_t>(static_cast<std::size_t>(end - p), max_pack_size_)
-    );
+    UInt32 want = static_cast<UInt32>(std::min<std::size_t>(static_cast<std::size_t>(end - p), max_pack_size_));
 
     unsigned attempt = 0;
     for (;;) {
@@ -73,11 +71,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
         static_cast<UInt32>(timeout_ms_), static_cast<UInt32>(timeout_ms_)
       );
 
-      if (ok_or_underrun(kr)) {
-        p += want;
-        break;
-      }
-
+      if (ok_or_underrun(kr)) { p += want; break; }
       if (++attempt > retries) return -1;
       ::usleep(10'000);
     }
@@ -114,9 +108,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   std::uint8_t* begin = p;
 
   while (p < end) {
-    auto xfer = static_cast<UInt32>(
-      std::min<std::size_t>(static_cast<std::size_t>(end - p), max_pack_size_)
-    );
+    auto xfer = static_cast<UInt32>(std::min<std::size_t>(static_cast<std::size_t>(end - p), max_pack_size_));
 
     UInt32 bytesRead = xfer;
     unsigned attempt = 0;

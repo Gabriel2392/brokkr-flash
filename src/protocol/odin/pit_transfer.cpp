@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
@@ -22,30 +22,22 @@
 namespace brokkr::odin {
 
 brokkr::core::Result<std::vector<std::byte>> download_pit_bytes(OdinCommands& odin, unsigned retries) noexcept {
-  auto szr = odin.get_pit_size(retries);
-  if (!szr) return brokkr::core::Result<std::vector<std::byte>>::Fail(std::move(szr.st.msg));
+  BRK_TRYV(sz, odin.get_pit_size(retries));
 
-  const auto pit_size = szr.value;
-  if (pit_size <= 0) {
-    return brokkr::core::Result<std::vector<std::byte>>::Fail("Device returned invalid PIT size");
-  }
+  if (sz <= 0) return brokkr::core::fail("Device returned invalid PIT size");
 
-  std::vector<std::byte> buf(static_cast<std::size_t>(pit_size));
+  std::vector<std::byte> buf(static_cast<std::size_t>(sz));
   auto st = odin.get_pit(std::span<std::byte>(buf.data(), buf.size()), retries);
-  if (!st.ok) return brokkr::core::Result<std::vector<std::byte>>::Fail(std::move(st.msg));
+  if (!st) return brokkr::core::fail(std::move(st.error()));
 
   spdlog::debug("Downloaded PIT bytes: {}", buf.size());
-  return brokkr::core::Result<std::vector<std::byte>>::Ok(std::move(buf));
+  return buf;
 }
 
 brokkr::core::Result<pit::PitTable> download_pit_table(OdinCommands& odin, unsigned retries) noexcept {
-  auto br = download_pit_bytes(odin, retries);
-  if (!br) return brokkr::core::Result<pit::PitTable>::Fail(std::move(br.st.msg));
-
-  auto pr = pit::parse(std::span<const std::byte>(br.value.data(), br.value.size()));
-  if (!pr) return brokkr::core::Result<pit::PitTable>::Fail(std::move(pr.st.msg));
-
-  return brokkr::core::Result<pit::PitTable>::Ok(std::move(pr.value));
+  BRK_TRYV(bytes, download_pit_bytes(odin, retries));
+  BRK_TRYV(t, pit::parse(std::span<const std::byte>(bytes.data(), bytes.size())));
+  return t;
 }
 
 } // namespace brokkr::odin

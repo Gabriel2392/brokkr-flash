@@ -41,16 +41,15 @@ inline void backoff_10ms() noexcept { ::Sleep(10); }
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
 brokkr::core::Status UsbFsConnection::open() noexcept {
-  if (connected_ && dev_.is_open()) return brokkr::core::Status::Ok();
+  if (connected_ && dev_.is_open()) return {};
 
   if (!dev_.is_open()) {
     auto st = dev_.open_and_init();
-    if (!st.ok) return st;
+    if (!st) return st;
   }
 
   connected_ = dev_.is_open();
-  return connected_ ? brokkr::core::Status::Ok()
-                    : brokkr::core::Status::Fail("UsbFsConnection: device not open after init");
+  return connected_ ? brokkr::core::Status{} : brokkr::core::fail("UsbFsConnection: device not open after init");
 }
 
 void UsbFsConnection::close() noexcept {
@@ -70,34 +69,21 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
   std::size_t total = 0;
 
   while (left) {
-    const DWORD want = static_cast<DWORD>(
-      std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu))
-    );
+    const DWORD want = static_cast<DWORD>(std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
 
     DWORD bytes_written = 0;
 
     unsigned attempt = 0;
     for (;;) {
       if (::WriteFile(dev_.handle(), p, want, &bytes_written, nullptr)) {
-        if (bytes_written == 0) {
-          if (attempt++ >= retries) return -1;
-          backoff_10ms();
-          continue;
-        }
+        if (bytes_written == 0) { if (attempt++ >= retries) return -1; backoff_10ms(); continue; }
         break;
       }
 
       const DWORD err = ::GetLastError();
-      if (is_disconnect_error(err)) {
-        connected_ = false;
-        return -1;
-      }
+      if (is_disconnect_error(err)) { connected_ = false; return -1; }
 
-      if (err == ERROR_TIMEOUT) {
-        if (attempt++ >= retries) return -1;
-        backoff_10ms();
-        continue;
-      }
+      if (err == ERROR_TIMEOUT) { if (attempt++ >= retries) return -1; backoff_10ms(); continue; }
 
       if (attempt++ >= retries) return -1;
       backoff_10ms();
@@ -126,9 +112,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   std::size_t total = 0;
 
   while (left) {
-    const DWORD want = static_cast<DWORD>(
-      std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu))
-    );
+    const DWORD want = static_cast<DWORD>(std::min<std::size_t>(left, std::min<std::size_t>(max_pack_size_, 0xFFFFFFFFu)));
 
     DWORD bytes_read = 0;
 
@@ -145,10 +129,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
       }
 
       const DWORD err = ::GetLastError();
-      if (is_disconnect_error(err)) {
-        connected_ = false;
-        return -1;
-      }
+      if (is_disconnect_error(err)) { connected_ = false; return -1; }
 
       if (err == ERROR_TIMEOUT) {
         if (total > 0) return static_cast<int>(total);
@@ -171,8 +152,6 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   return static_cast<int>(total);
 }
 
-int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
-  return 0;
-}
+int UsbFsConnection::recv_zlp(unsigned /*retries*/) { return 0; }
 
 } // namespace brokkr::windows
