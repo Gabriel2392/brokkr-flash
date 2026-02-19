@@ -174,189 +174,184 @@ target_sources(brokkr-lib INTERFACE
 # ---------------------------
 find_package(Qt6 6.3 COMPONENTS Core Gui Widgets)
 
-if (Qt6_FOUND)
-    message(STATUS "Qt6 found, enabling GUI target 'brokkr'")
-
-    # ── macOS: strip frameworks the SDK no longer ships ───────────────
-    # macOS 14+/15+ SDK removed AGL.framework.  Qt's imported targets
-    # and .prl files may still reference it.  Walk EVERY imported
-    # target and surgically remove entries that mention a missing
-    # framework.  Uses string(REPLACE) to catch both single-element
-    # ("-framework AGL") and two-element ("-framework" ; "AGL") forms.
-    # ------------------------------------------------------------------
-    if (APPLE)
-        set(_BROKKR_MISSING_FW "")
-        foreach(_fw IN ITEMS AGL)
-            find_library(_brokkr_probe_${_fw} ${_fw})
-            if (NOT _brokkr_probe_${_fw})
-                list(APPEND _BROKKR_MISSING_FW ${_fw})
-                message(STATUS "${_fw}.framework not in SDK – stripping from all imported targets")
-            endif()
-            unset(_brokkr_probe_${_fw} CACHE)
-        endforeach()
-
-        if (_BROKKR_MISSING_FW)
-            function(_brokkr_strip_fw tgt)
-                if (NOT TARGET ${tgt})
-                    return()
-                endif()
-                foreach(prop IN ITEMS INTERFACE_LINK_LIBRARIES INTERFACE_LINK_OPTIONS)
-                    get_target_property(_val ${tgt} ${prop})
-                    if (NOT _val)
-                        continue()
-                    endif()
-                    set(_orig "${_val}")
-                    foreach(_fw IN LISTS _BROKKR_MISSING_FW)
-                        # Single-element: "-framework AGL"
-                        string(REPLACE ";-framework ${_fw}" "" _val "${_val}")
-                        string(REPLACE "-framework ${_fw};" "" _val "${_val}")
-                        string(REPLACE "-framework ${_fw}"  "" _val "${_val}")
-                        # Two-element: "-framework" ; "AGL"  (semicolon-separated)
-                        string(REPLACE ";-framework;${_fw}" "" _val "${_val}")
-                        string(REPLACE "-framework;${_fw};" "" _val "${_val}")
-                        string(REPLACE "-framework;${_fw}"  "" _val "${_val}")
-                    endforeach()
-                    if (NOT "${_val}" STREQUAL "${_orig}")
-                        message(STATUS "  stripped missing framework(s) from ${tgt}::${prop}")
-                    endif()
-                    set_target_properties(${tgt} PROPERTIES ${prop} "${_val}")
-                endforeach()
-            endfunction()
-
-            # Walk every imported target (catches Qt6::GuiPrivate, Qt6::Platform, etc.)
-            get_property(_all_imported DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY IMPORTED_TARGETS)
-            foreach(_tgt IN LISTS _all_imported)
-                _brokkr_strip_fw(${_tgt})
-            endforeach()
-        endif()
-    endif()
-    # ── end macOS framework fixup ─────────────────────────────────────
-
-    if (WIN32)
-        add_executable(brokkr WIN32
-            src-gui/main_gui.cpp
-            src-gui/brokkr_wrapper.hpp
-            src-gui/brokkr_wrapper.cpp
-            assets/icon.rc
-        )
-    elseif (APPLE)
-        add_executable(brokkr MACOSX_BUNDLE
-            src-gui/main_gui.cpp
-            src-gui/brokkr_wrapper.hpp
-            src-gui/brokkr_wrapper.cpp
-        )
-    else()
-        add_executable(brokkr
-            src-gui/main_gui.cpp
-            src-gui/brokkr_wrapper.hpp
-            src-gui/brokkr_wrapper.cpp
-        )
-    endif()
-
-    find_package(Threads REQUIRED)
-    target_include_directories(brokkr PRIVATE src src-gui src/lz4)
-
-    if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
-        target_include_directories(brokkr PRIVATE "${function2_SOURCE_DIR}/include")
-        if (MSVC)
-            target_compile_options(brokkr PRIVATE
-                $<$<COMPILE_LANGUAGE:CXX>:/FI${BROKKR_MOF_SHIM}>
-            )
-        else()
-            target_compile_options(brokkr PRIVATE
-                $<$<COMPILE_LANGUAGE:CXX>:-include>
-                $<$<COMPILE_LANGUAGE:CXX>:${BROKKR_MOF_SHIM}>
-            )
-        endif()
-    endif()
-
-    target_link_libraries(brokkr PRIVATE
-        Threads::Threads
-        spdlog::spdlog_header_only
-        fmt::fmt-header-only
-        brokkr-platform
-        brokkr-lib
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Widgets
-    )
-
-    set_target_properties(brokkr PROPERTIES AUTOMOC ON)
-
-    if (MSVC)
-        target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
-    endif()
-
-    if(WIN32)
-        get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
-        get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
-        find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
-        if(WINDEPLOYQT_EXEC)
-            add_custom_command(TARGET brokkr POST_BUILD
-                COMMAND "${WINDEPLOYQT_EXEC}"
-                ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr>"
-                COMMENT "Running windeployqt to deploy Qt libraries..."
-            )
-        else()
-            message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
-        endif()
-    endif()
-
-    if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_definitions(brokkr PRIVATE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
-        target_compile_options(brokkr PRIVATE
-            $<$<CONFIG:Release,RelWithDebInfo>:-O3 -ffunction-sections -fdata-sections>
-        )
-    endif()
-
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT LTO_SUPPORTED)
-    if (LTO_SUPPORTED)
-        message(STATUS "Enabling LTO (Link time optimization)")
-        set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endif()
-
-    # Versioning
-    execute_process(
-      COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-      OUTPUT_VARIABLE BROKKR_COMMIT_COUNT
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
-    if(NOT BROKKR_COMMIT_COUNT)
-      set(BROKKR_COMMIT_COUNT "0")
-    endif()
-
-    if (CMAKE_BUILD_TYPE)
-      message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${CMAKE_BUILD_TYPE}")
-    else()
-      message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}")
-    endif()
-
-    target_compile_definitions(brokkr PRIVATE
-      BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
-      BROKKR_BUILD_TYPE=\"$<IF:$<CONFIG:Debug>,dbg,rel>\"
-      BROKKR_VERSION=\"${PROJECT_VERSION}\"
-    )
-
-    qt_generate_deploy_app_script(
-        TARGET brokkr
-        OUTPUT_SCRIPT deploy_script
-        NO_UNSUPPORTED_PLATFORM_ERROR
-    )
-    install(SCRIPT ${deploy_script})
-    install(TARGETS brokkr
-        RUNTIME DESTINATION bin
-        BUNDLE  DESTINATION .
-    )
-
-else()
-    message(WARNING "Qt6 NOT FOUND. The 'brokkr' target (now GUI-based) cannot be built.")
-    message(NOTICE "To fix this, ensure Qt6 is installed and CMAKE_PREFIX_PATH is set correctly.")
+if (NOT Qt6_FOUND)
     message(FATAL_ERROR "Qt6 is required for the GUI target. Please install Qt6 and try again.")
 endif()
+message(STATUS "Qt6 found, enabling GUI target 'brokkr'")
 
+# ── macOS: strip frameworks the SDK no longer ships ───────────────
+# macOS 14+/15+ SDK removed AGL.framework.  Qt's imported targets
+# and .prl files may still reference it.  Walk EVERY imported
+# target and surgically remove entries that mention a missing
+# framework.  Uses string(REPLACE) to catch both single-element
+# ("-framework AGL") and two-element ("-framework" ; "AGL") forms.
+# ------------------------------------------------------------------
+if (APPLE)
+    set(_BROKKR_MISSING_FW "")
+    foreach(_fw IN ITEMS AGL)
+        find_library(_brokkr_probe_${_fw} ${_fw})
+        if (NOT _brokkr_probe_${_fw})
+            list(APPEND _BROKKR_MISSING_FW ${_fw})
+            message(STATUS "${_fw}.framework not in SDK – stripping from all imported targets")
+        endif()
+        unset(_brokkr_probe_${_fw} CACHE)
+    endforeach()
+
+    if (_BROKKR_MISSING_FW)
+        function(_brokkr_strip_fw tgt)
+            if (NOT TARGET ${tgt})
+                return()
+            endif()
+            foreach(prop IN ITEMS INTERFACE_LINK_LIBRARIES INTERFACE_LINK_OPTIONS)
+                get_target_property(_val ${tgt} ${prop})
+                if (NOT _val)
+                    continue()
+                endif()
+                set(_orig "${_val}")
+                foreach(_fw IN LISTS _BROKKR_MISSING_FW)
+                    # Single-element: "-framework AGL"
+                    string(REPLACE ";-framework ${_fw}" "" _val "${_val}")
+                    string(REPLACE "-framework ${_fw};" "" _val "${_val}")
+                    string(REPLACE "-framework ${_fw}"  "" _val "${_val}")
+                    # Two-element: "-framework" ; "AGL"  (semicolon-separated)
+                    string(REPLACE ";-framework;${_fw}" "" _val "${_val}")
+                    string(REPLACE "-framework;${_fw};" "" _val "${_val}")
+                    string(REPLACE "-framework;${_fw}"  "" _val "${_val}")
+                endforeach()
+                if (NOT "${_val}" STREQUAL "${_orig}")
+                    message(STATUS "  stripped missing framework(s) from ${tgt}::${prop}")
+                endif()
+                set_target_properties(${tgt} PROPERTIES ${prop} "${_val}")
+            endforeach()
+        endfunction()
+
+        # Walk every imported target (catches Qt6::GuiPrivate, Qt6::Platform, etc.)
+        get_property(_all_imported DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY IMPORTED_TARGETS)
+        foreach(_tgt IN LISTS _all_imported)
+            _brokkr_strip_fw(${_tgt})
+        endforeach()
+    endif()
+endif()
+# ── end macOS framework fixup ─────────────────────────────────────
+
+if (WIN32)
+    add_executable(brokkr WIN32
+        src-gui/main_gui.cpp
+        src-gui/brokkr_wrapper.hpp
+        src-gui/brokkr_wrapper.cpp
+        assets/icon.rc
+    )
+elseif (APPLE)
+    add_executable(brokkr MACOSX_BUNDLE
+        src-gui/main_gui.cpp
+        src-gui/brokkr_wrapper.hpp
+        src-gui/brokkr_wrapper.cpp
+    )
+else()
+    add_executable(brokkr
+        src-gui/main_gui.cpp
+        src-gui/brokkr_wrapper.hpp
+        src-gui/brokkr_wrapper.cpp
+    )
+endif()
+
+find_package(Threads REQUIRED)
+target_include_directories(brokkr PRIVATE src src-gui src/lz4)
+
+if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
+    target_include_directories(brokkr PRIVATE "${function2_SOURCE_DIR}/include")
+    if (MSVC)
+        target_compile_options(brokkr PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:/FI${BROKKR_MOF_SHIM}>
+        )
+    else()
+        target_compile_options(brokkr PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:-include>
+            $<$<COMPILE_LANGUAGE:CXX>:${BROKKR_MOF_SHIM}>
+        )
+    endif()
+endif()
+
+target_link_libraries(brokkr PRIVATE
+    Threads::Threads
+    spdlog::spdlog_header_only
+    fmt::fmt-header-only
+    brokkr-platform
+    brokkr-lib
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+)
+
+set_target_properties(brokkr PROPERTIES AUTOMOC ON)
+
+if (MSVC)
+    target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
+endif()
+
+if(WIN32)
+    get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXEC windeployqt HINTS "${_qt_bin_dir}")
+    if(WINDEPLOYQT_EXEC)
+        add_custom_command(TARGET brokkr POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXEC}"
+            ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr>"
+            COMMENT "Running windeployqt to deploy Qt libraries..."
+        )
+    else()
+        message(WARNING "windeployqt not found! You will need to copy DLLs manually.")
+    endif()
+endif()
+
+if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(brokkr PRIVATE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
+    target_compile_options(brokkr PRIVATE
+        $<$<CONFIG:Release,RelWithDebInfo>:-O3 -ffunction-sections -fdata-sections>
+    )
+endif()
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT LTO_SUPPORTED)
+if (LTO_SUPPORTED)
+    message(STATUS "Enabling LTO (Link time optimization)")
+    set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
+# Versioning
+execute_process(
+    COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE BROKKR_COMMIT_COUNT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT BROKKR_COMMIT_COUNT)
+    set(BROKKR_COMMIT_COUNT "0")
+endif()
+
+if (CMAKE_BUILD_TYPE)
+    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${CMAKE_BUILD_TYPE}")
+else()
+    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}")
+endif()
+
+target_compile_definitions(brokkr PRIVATE
+    BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
+    BROKKR_BUILD_TYPE=\"$<IF:$<CONFIG:Debug>,dbg,rel>\"
+    BROKKR_VERSION=\"${PROJECT_VERSION}\"
+)
+
+qt_generate_deploy_app_script(
+    TARGET brokkr
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT ${deploy_script})
+install(TARGETS brokkr
+    RUNTIME DESTINATION bin
+    BUNDLE  DESTINATION .
+)
 
 # ── CPack ─────────────────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
