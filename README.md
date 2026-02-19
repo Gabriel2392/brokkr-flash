@@ -14,7 +14,7 @@ A modern, cross-platform Samsung device flashing utility written in C++23. Brokk
 - **Cross-platform**: Native support for Windows and Linux
 - **USB and TCP transport**: Direct USB and TCP connectivity options
 - **MD5 verification**: Built-in MD5 verification for data integrity
-- **Compressed download support**; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compresssed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
+- **Compressed download support**; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compressed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
 
 ## Requirements
 
