@@ -307,32 +307,53 @@ brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries)
   auto st = require_connected(conn_);
   if (!st) return st;
 
-  auto close_cmd = [&](RqtCommandParam p) -> brokkr::core::Status {
+  auto _close_cmd = [&](RqtCommandParam p, const char* name) -> brokkr::core::Status {
     auto r = rpc_(RqtCommandType::RQT_CLOSE, p, {}, {}, nullptr, retries);
+    if (!r) {
+      spdlog::error("Failed to send shutdown command {}: {}", name, r.error());
+    } else {
+      spdlog::debug("Sent shutdown command {}", name);
+    }
     return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
   };
+  #define close_cmd(param) _close_cmd(param, #param)
 
-  if (mode == ShutdownMode::NoReboot) return close_cmd(RqtCommandParam::RQT_CLOSE_END);
+  if (mode == ShutdownMode::NoReboot) {
+    return close_cmd(RqtCommandParam::RQT_CLOSE_END);
+  }
   if (mode == ShutdownMode::Reboot) {
     st = close_cmd(RqtCommandParam::RQT_CLOSE_END);
     if (!st) return st;
-    return close_cmd(RqtCommandParam::RQT_CLOSE_REBOOT);
+    auto reboot_st = close_cmd(RqtCommandParam::RQT_CLOSE_REBOOT);
+    if (!reboot_st)
+      spdlog::warn("Reboot command failed (device likely already rebooting): {}", reboot_st.error());
+    return {};
   }
 
   st = close_cmd(RqtCommandParam::RQT_CLOSE_REDOWNLOAD);
   if (!st) return st;
 
-  static constexpr std::string_view kAutoTest = "@#AuToTEstRst@#";
+  static constexpr std::string_view kAutoTest = "@#AuToTEstRst@#";  
   std::array<std::byte, kAutoTest.size()> msg{};
   for (std::size_t i = 0; i < kAutoTest.size(); ++i) msg[i] = static_cast<std::byte>(kAutoTest[i]);
 
   st = send_raw({msg.data(), msg.size()}, retries);
-  if (!st) return st;
+  if (!st) {
+    spdlog::error("Failed to send re-download trigger message: {}", st.error());
+    return st;
+  }
 
   const int old_to = conn_.timeout_ms();
   conn_.set_timeout_ms(500);
   std::array<std::uint8_t, 64> tmp{};
-  (void)conn_.recv({tmp.data(), tmp.size()}, 0);
+  if (conn_.recv({tmp.data(), tmp.size()}, 0) < 0) {
+    spdlog::debug("No data received after re-download trigger, as expected");
+  } else {
+    spdlog::error("Received unexpected data after re-download trigger, something may have gone wrong");
+#ifndef NDEBUG
+    spdlog::error("Data ({} bytes): {}", tmp.size(), fmt::join(tmp.begin(), tmp.end(), " "));
+#endif
+  }
   conn_.set_timeout_ms(old_to);
   return {};
 }
