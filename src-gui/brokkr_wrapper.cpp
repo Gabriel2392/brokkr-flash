@@ -754,6 +754,22 @@ void BrokkrWrapper::closeEvent(QCloseEvent* e) {
   e->accept();
 }
 
+void BrokkrWrapper::changeEvent(QEvent* e) {
+  QWidget::changeEvent(e);
+  if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
+    {
+      auto pal = palette();
+      QColor bg = pal.color(QPalette::Window).darker(110);
+      pal.setColor(QPalette::Window, bg);
+      idComGroup_->setPalette(pal);
+    }
+
+    consoleOutput->setPalette(palette());
+
+    refreshDeviceBoxes_();
+  }
+}
+
 #if defined(Q_OS_WIN)
 bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
   (void)eventType;
