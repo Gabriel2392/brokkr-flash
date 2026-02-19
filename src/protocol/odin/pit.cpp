@@ -71,7 +71,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   hdr.lu_count = brokkr::core::le_to_host(hdr.lu_count);
   hdr.reserved = brokkr::core::le_to_host(hdr.reserved);
 
-  if (hdr.magic != PIT_MAGIC)
+  if (hdr.magic != PIT_MAGIC) return brokkr::core::fail("PIT parse: bad magic");
   if (hdr.count < 0) return brokkr::core::fail("PIT parse: negative partition count");
 
   const std::size_t count = static_cast<std::size_t>(hdr.count);
