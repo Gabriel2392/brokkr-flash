@@ -316,21 +316,21 @@ brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries)
     }
     return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
   };
-  #define close_cmd(param) _close_cmd(param, #param)
+#define close_cmd(param) _close_cmd(RqtCommandParam::param, #param)
 
   if (mode == ShutdownMode::NoReboot) {
-    return close_cmd(RqtCommandParam::RQT_CLOSE_END);
+    return close_cmd(RQT_CLOSE_END);
   }
   if (mode == ShutdownMode::Reboot) {
-    st = close_cmd(RqtCommandParam::RQT_CLOSE_END);
+    st = close_cmd(RQT_CLOSE_END);
     if (!st) return st;
-    auto reboot_st = close_cmd(RqtCommandParam::RQT_CLOSE_REBOOT);
+    auto reboot_st = close_cmd(RQT_CLOSE_REBOOT);
     if (!reboot_st)
       spdlog::warn("Reboot command failed (device likely already rebooting): {}", reboot_st.error());
     return {};
   }
 
-  st = close_cmd(RqtCommandParam::RQT_CLOSE_REDOWNLOAD);
+  st = close_cmd(RQT_CLOSE_REDOWNLOAD);
   if (!st) return st;
 
   static constexpr std::string_view kAutoTest = "@#AuToTEstRst@#";  
