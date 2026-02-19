@@ -20,7 +20,7 @@
 #include "core/prefetcher.hpp"
 #include "core/thread_pool.hpp"
 
-#include "crypto/md5.h"
+#include "third_party/md5/md5.h"
 #include "io/tar.hpp"
 
 #include <atomic>

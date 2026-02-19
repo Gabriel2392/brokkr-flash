@@ -11,7 +11,7 @@
 
 /*************************** HEADER FILES ***************************/
 #include <stdlib.h>
-#include <memory.h>
+#include <string.h>
 #include "md5.h"
 
 /****************************** MACROS ******************************/
@@ -133,16 +133,30 @@ void md5_init(MD5_CTX *ctx)
 
 void md5_update(MD5_CTX *ctx, const MD5_BYTE data[], size_t len)
 {
-	size_t i;
+	size_t i = 0;
 
-	for (i = 0; i < len; ++i) {
-		ctx->data[ctx->datalen] = data[i];
-		ctx->datalen++;
-		if (ctx->datalen == 64) {
-			md5_transform(ctx, ctx->data);
-			ctx->bitlen += 512;
-			ctx->datalen = 0;
+	if (ctx->datalen) {
+		size_t fill = 64 - ctx->datalen;
+		if (len < fill) {
+			memcpy(ctx->data + ctx->datalen, data, len);
+			ctx->datalen += (MD5_WORD)len;
+			return;
 		}
+		memcpy(ctx->data + ctx->datalen, data, fill);
+		md5_transform(ctx, ctx->data);
+		ctx->bitlen += 512;
+		ctx->datalen = 0;
+		i = fill;
+	}
+
+	for (; i + 64 <= len; i += 64) {
+		md5_transform(ctx, data + i);
+		ctx->bitlen += 512;
+	}
+
+	if (i < len) {
+		memcpy(ctx->data, data + i, len - i);
+		ctx->datalen = (MD5_WORD)(len - i);
 	}
 }
 

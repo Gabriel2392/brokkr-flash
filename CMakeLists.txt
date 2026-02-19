@@ -159,8 +159,8 @@ target_sources(brokkr-lib INTERFACE
     src/io/tar.cpp
     src/io/source.cpp
     src/io/lz4_frame.cpp
-    src/crypto/md5.c
-    src/lz4/lz4.c
+    src/third_party/md5/md5.c
+    src/third_party/lz4/lz4.c
     src/protocol/odin/odin_cmd.cpp
     src/protocol/odin/pit.cpp
     src/protocol/odin/flash.cpp
@@ -256,7 +256,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-target_include_directories(brokkr PRIVATE src src-gui src/lz4)
+target_include_directories(brokkr PRIVATE src src-gui src/third_party/lz4)
 
 if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
     target_include_directories(brokkr PRIVATE "${function2_SOURCE_DIR}/include")
