@@ -261,7 +261,7 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   pfd.fd = fd_;
   pfd.events = POLLRDNORM;
 
-  const int pr = WSAPoll(&pfd, 1, 1000);
+  const int pr = WSAPoll(&pfd, 1, 100);
   if (pr == 0) return brokkr::core::fail("accept: timeout");
   if (pr == SOCKET_ERROR) {
     const int err = WSAGetLastError();
