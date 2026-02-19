@@ -23,6 +23,8 @@
 #include <IOKit/usb/IOUSBLib.h>
 #include <unistd.h>
 
+#include <spdlog/spdlog.h>
+
 namespace brokkr::macos {
 
 namespace {
@@ -69,7 +71,17 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
         p += want;
         break;
       }
-      if (++attempt > retries) return -1;
+      if (kr == kIOReturnNoDevice || kr == kIOReturnNotResponding) {
+        spdlog::warn("Device disconnected during send (IOReturn=0x{:08x})", static_cast<unsigned>(kr));
+        connected_ = false;
+        return -1;
+      }
+      if (++attempt > retries) {
+        spdlog::error("WritePipeTO failed: IOReturn=0x{:08x}, retries exhausted", static_cast<unsigned>(kr));
+        return -1;
+      }
+      spdlog::warn("WritePipeTO failed: IOReturn=0x{:08x}, retrying (attempt {}/{})", static_cast<unsigned>(kr),
+                    attempt, retries);
       ::usleep(10'000);
     }
   }
@@ -115,7 +127,17 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
                                        static_cast<UInt32>(timeout_ms_));
 
       if (ok_or_underrun(kr)) break;
-      if (++attempt > retries) return -1;
+      if (kr == kIOReturnNoDevice || kr == kIOReturnNotResponding) {
+        spdlog::warn("Device disconnected during recv (IOReturn=0x{:08x})", static_cast<unsigned>(kr));
+        connected_ = false;
+        return -1;
+      }
+      if (++attempt > retries) {
+        spdlog::error("ReadPipeTO failed: IOReturn=0x{:08x}, retries exhausted", static_cast<unsigned>(kr));
+        return -1;
+      }
+      spdlog::warn("ReadPipeTO failed: IOReturn=0x{:08x}, retrying (attempt {}/{})", static_cast<unsigned>(kr),
+                    attempt, retries);
       ::usleep(10'000);
     }
 

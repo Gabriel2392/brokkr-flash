@@ -23,16 +23,18 @@
 
 #include <windows.h>
 
+#include <spdlog/spdlog.h>
+
 namespace brokkr::windows {
 
 namespace {
 
-inline bool is_disconnect_error(DWORD err) noexcept {
+bool is_disconnect_error(DWORD err) noexcept {
   return err == ERROR_GEN_FAILURE || err == ERROR_OPERATION_ABORTED || err == ERROR_NO_SUCH_DEVICE ||
          err == ERROR_FILE_NOT_FOUND;
 }
 
-inline void backoff_10ms() noexcept { ::Sleep(10); }
+void backoff_10ms() noexcept { ::Sleep(10); }
 
 } // namespace
 
@@ -60,7 +62,16 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
 
   COMMTIMEOUTS timeouts{};
   timeouts.WriteTotalTimeoutConstant = static_cast<DWORD>(timeout_ms_);
-  (void)::SetCommTimeouts(dev_.handle(), &timeouts);
+  if (!::SetCommTimeouts(dev_.handle(), &timeouts)) {
+    const DWORD err = ::GetLastError();
+    if (is_disconnect_error(err)) {
+      spdlog::error("SetCommTimeouts failed with disconnect error: {}", err);
+      connected_ = false;
+      return -1;
+    }
+    spdlog::error("SetCommTimeouts failed: {}", err);
+    return -1;
+  }
 
   const std::uint8_t* p = data.data();
   std::size_t left = data.size();
@@ -76,8 +87,12 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
     for (;;) {
       if (::WriteFile(dev_.handle(), p, want, &bytes_written, nullptr)) {
         if (bytes_written == 0) {
-          if (attempt++ >= retries) return -1;
+          if (attempt++ >= retries) {
+            spdlog::error("WriteFile succeeded but wrote 0 bytes");
+            return -1;
+          }
           backoff_10ms();
+          spdlog::warn("WriteFile succeeded but wrote 0 bytes, retrying (attempt {}/{})", attempt, retries);
           continue;
         }
         break;
@@ -85,15 +100,22 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
+        spdlog::warn("Device disconnected");
         connected_ = false;
         return -1;
       }
 
       if (err == ERROR_TIMEOUT) {
-        if (attempt++ >= retries) return -1;
+        if (attempt++ >= retries) {
+          spdlog::error("WriteFile timed out, retries exhausted");
+          return -1;
+        }
+        spdlog::warn("WriteFile timed out, retrying (attempt {}/{})", attempt + 1, retries);
         backoff_10ms();
         continue;
       }
+
+      spdlog::error("UsbFs::WriteFile failed: {}", err);
 
       if (attempt++ >= retries) return -1;
       backoff_10ms();
@@ -115,7 +137,16 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   timeouts.ReadIntervalTimeout = MAXDWORD;
   timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(timeout_ms_);
   timeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
-  (void)::SetCommTimeouts(dev_.handle(), &timeouts);
+  if (!::SetCommTimeouts(dev_.handle(), &timeouts)) {
+    const DWORD err = ::GetLastError();
+    if (is_disconnect_error(err)) {
+      spdlog::error("SetCommTimeouts failed with disconnect error: {}", err);
+      connected_ = false;
+      return -1;
+    }
+    spdlog::error("SetCommTimeouts failed: {}", err);
+    return -1;
+  }
 
   std::uint8_t* p = data.data();
   std::size_t left = data.size();
@@ -132,7 +163,11 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
       if (::ReadFile(dev_.handle(), p, want, &bytes_read, nullptr)) {
         if (bytes_read == 0) {
           if (total > 0) return static_cast<int>(total);
-          if (attempt++ >= retries) return -1;
+          if (attempt++ >= retries) {
+            spdlog::error("ReadFile succeeded but read 0 bytes, retries exhausted");
+            return -1;
+          }
+          spdlog::warn("ReadFile succeeded but read 0 bytes, retrying (attempt {}/{})", attempt, retries);
           backoff_10ms();
           continue;
         }
@@ -141,17 +176,23 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
+        spdlog::warn("Device disconnected");
         connected_ = false;
         return -1;
       }
 
       if (err == ERROR_TIMEOUT) {
         if (total > 0) return static_cast<int>(total);
-        if (attempt++ >= retries) return -1;
+        if (attempt++ >= retries) {
+          spdlog::error("ReadFile timed out, no data read, retries exhausted");
+          return -1;
+        }
+        spdlog::warn("ReadFile timed out, retrying (attempt {}/{})", attempt + 1, retries);
         backoff_10ms();
         continue;
       }
 
+      spdlog::error("UsbFs::ReadFile failed: {}", err);
       if (attempt++ >= retries) return -1;
       backoff_10ms();
     }

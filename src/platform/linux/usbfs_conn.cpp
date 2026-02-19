@@ -18,12 +18,15 @@
 #include "platform/linux/usbfs_conn.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 
 #include <linux/usbdevice_fs.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+
+#include <spdlog/spdlog.h>
 
 namespace brokkr::linux {
 
@@ -70,11 +73,24 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
     for (;;) {
       const int rc = ::ioctl(dev_.fd(), USBDEVFS_BULK, &bulk);
       if (rc >= 0) {
-        if (rc == 0 && want != 0) return -1;
+        if (rc == 0 && want != 0) {
+          spdlog::error("bulk OUT returned 0 for {} byte request", want);
+          return -1;
+        }
         p += rc;
         break;
       }
-      if (++attempt > retries) return -1;
+      const int e = errno;
+      if (e == ENODEV || e == ESHUTDOWN || e == ENOENT) {
+        spdlog::warn("Device disconnected during send (errno={})", e);
+        connected_ = false;
+        return -1;
+      }
+      if (++attempt > retries) {
+        spdlog::error("bulk OUT failed: {} ({}), retries exhausted", std::strerror(e), e);
+        return -1;
+      }
+      spdlog::warn("bulk OUT failed: {} ({}), retrying (attempt {}/{})", std::strerror(e), e, attempt, retries);
       ::usleep(10'000);
     }
   }
@@ -134,7 +150,17 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
     for (;;) {
       retBytes = ::ioctl(dev_.fd(), USBDEVFS_BULK, &bulk);
       if (retBytes >= 0) break;
-      if (++attempt > retries) return -1;
+      const int e = errno;
+      if (e == ENODEV || e == ESHUTDOWN || e == ENOENT) {
+        spdlog::warn("Device disconnected during recv (errno={})", e);
+        connected_ = false;
+        return -1;
+      }
+      if (++attempt > retries) {
+        spdlog::error("bulk IN failed: {} ({}), retries exhausted", std::strerror(e), e);
+        return -1;
+      }
+      spdlog::warn("bulk IN failed: {} ({}), retrying (attempt {}/{})", std::strerror(e), e, attempt, retries);
       ::usleep(10'000);
     }
 
