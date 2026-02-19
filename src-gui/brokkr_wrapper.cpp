@@ -1621,16 +1621,14 @@ void BrokkrWrapper::startWorkStart_() {
                   devSquares_[idx]->setFill(1.0);
                 }
                 if (idx < comBoxes.size() && comBoxes[idx]) {
-                  auto pal = comBoxes[idx]->palette();
-                  QColor base = palette().color(QPalette::Base);
-                  QColor fail(176, 0, 0);
-                  fail.setAlpha(45);
-                  const int r2 = (base.red() * (255 - fail.alpha()) + fail.red() * fail.alpha()) / 255;
-                  const int g2 = (base.green() * (255 - fail.alpha()) + fail.green() * fail.alpha()) / 255;
-                  const int b2 = (base.blue() * (255 - fail.alpha()) + fail.blue() * fail.alpha()) / 255;
-                  pal.setColor(QPalette::Base, QColor(r2, g2, b2));
-                  comBoxes[idx]->setPalette(pal);
-                  comBoxes[idx]->setStyleSheet("font-weight: bold; border: 2px solid #b00000; font-size: 9px;");
+                  comBoxes[idx]->setStyleSheet(
+                      "font-weight: bold;"
+                      "font-size: 9px;"
+                      "color: white;"
+                      "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+                      "  stop:0 #c04040, stop:0.5 #a02020, stop:1 #801010);"
+                      "border: 1px solid #600000;"
+                      "border-radius: 2px;");
                 }
 
                 shown = reason.isEmpty() ? "FAIL!" : QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
