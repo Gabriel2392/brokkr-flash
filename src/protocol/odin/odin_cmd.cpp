@@ -26,6 +26,7 @@
 #include <string>
 
 #include <spdlog/spdlog.h>
+#include <fmt/ranges.h>
 
 namespace brokkr::odin {
 
@@ -140,8 +141,19 @@ brokkr::core::Status OdinCommands::handshake(unsigned retries) noexcept {
     have += static_cast<std::size_t>(got);
   }
 
-  if (std::memcmp(resp.data(), expected.data(), expected.size()) != 0)
+  if (std::memcmp(resp.data(), expected.data(), expected.size()) != 0) {
+    spdlog::error("Dump of handshake response ({} bytes):", have);
+    spdlog::error("{}", fmt::join(resp.begin(), resp.begin() + have, " "));
+#ifndef NDEBUG
+    std::array<char, 65> as_str{};
+    for (std::size_t i = 0; i < have && i < as_str.size() - 1; ++i) {
+      const std::byte b = resp[i];
+      as_str[i] = (b >= std::byte{32} && b <= std::byte{126}) ? static_cast<char>(b) : '.';
+    }
+    spdlog::error("Trying it as a string: {}", as_str.data());
+#endif
     return brokkr::core::fail("Handshake failed (expected LOKE)");
+  }
 
   spdlog::debug("ODIN handshake OK");
   return {};
@@ -156,6 +168,8 @@ brokkr::core::Result<InitTargetInfo> OdinCommands::get_version(unsigned retries)
 
   InitTargetInfo out;
   out.ack_word = static_cast<std::uint32_t>(ack_i32);
+  spdlog::debug("ODIN target ack word: 0x{:08X} (protocol v{}, compressed download {})", out.ack_word,
+                static_cast<int>(out.protocol()), out.supports_compressed_download());
   return out;
 }
 
