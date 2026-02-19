@@ -25,7 +25,7 @@
 namespace brokkr::windows {
 
 class SingleInstanceLock {
-public:
+ public:
   SingleInstanceLock() = default;
   ~SingleInstanceLock();
 
@@ -39,9 +39,8 @@ public:
 
   bool acquired() const noexcept { return handle_ != nullptr; }
 
-private:
-  explicit SingleInstanceLock(HANDLE h, std::string name)
-    : handle_(h), name_(std::move(name)) {}
+ private:
+  explicit SingleInstanceLock(HANDLE h, std::string name) : handle_(h), name_(std::move(name)) {}
 
   HANDLE handle_ = nullptr;
   std::string name_;

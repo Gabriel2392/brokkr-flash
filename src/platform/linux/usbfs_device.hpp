@@ -31,15 +31,15 @@ struct UsbIds {
 };
 
 struct UsbEndpoints {
-  std::uint8_t  bulk_in  = 0;
-  std::uint8_t  bulk_out = 0;
+  std::uint8_t bulk_in = 0;
+  std::uint8_t bulk_out = 0;
 
-  std::uint16_t bulk_in_max_packet  = 0;
+  std::uint16_t bulk_in_max_packet = 0;
   std::uint16_t bulk_out_max_packet = 0;
 };
 
 class UsbFsDevice {
-public:
+ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
@@ -68,7 +68,7 @@ public:
 
   void reset_device() noexcept;
 
-private:
+ private:
   brokkr::core::Status parse_descriptors_() noexcept;
   void query_caps_() noexcept;
 
@@ -78,7 +78,7 @@ private:
   brokkr::core::Status claim_interface_() noexcept;
   void release_interface_() noexcept;
 
-private:
+ private:
   std::string devnode_;
   brokkr::FileHandle fd_;
 

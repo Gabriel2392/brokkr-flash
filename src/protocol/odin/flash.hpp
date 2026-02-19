@@ -65,13 +65,16 @@ struct FlashItem {
   ImageSpec spec;
 };
 
-brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std::vector<std::filesystem::path>& inputs) noexcept;
-brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table, const std::vector<ImageSpec>& sources) noexcept;
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
+    const std::vector<std::filesystem::path>& inputs) noexcept;
+brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table,
+                                                        const std::vector<ImageSpec>& sources) noexcept;
 
 namespace detail {
 
 inline brokkr::core::Status checked_add_u64(std::uint64_t& acc, std::uint64_t v, std::string_view what) noexcept {
-  if (std::numeric_limits<std::uint64_t>::max() - acc < v) return brokkr::core::fail("Overflow while computing " + std::string(what));
+  if (std::numeric_limits<std::uint64_t>::max() - acc < v)
+    return brokkr::core::fail("Overflow while computing " + std::string(what));
   acc += v;
   return {};
 }

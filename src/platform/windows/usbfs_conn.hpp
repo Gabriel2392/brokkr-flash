@@ -27,7 +27,7 @@
 namespace brokkr::windows {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
-public:
+ public:
   explicit UsbFsConnection(UsbFsDevice& dev);
 
   Kind kind() const noexcept override { return Kind::TcpStream; }
@@ -44,7 +44,7 @@ public:
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
   int timeout_ms() const noexcept override { return timeout_ms_; }
 
-private:
+ private:
   UsbFsDevice& dev_;
   bool connected_ = false;
   int timeout_ms_ = 1000;

@@ -36,7 +36,7 @@ struct TarEntry {
 };
 
 class TarArchive {
-public:
+ public:
   static brokkr::core::Result<TarArchive> open(std::string path, bool validate_header_checksums = true) noexcept;
 
   const std::string& path() const noexcept { return path_; }
@@ -48,7 +48,7 @@ public:
 
   std::optional<std::uint64_t> payload_size_bytes() const noexcept { return payload_size_bytes_; }
 
-private:
+ private:
   TarArchive() = default;
 
   static bool validate_header_checksum(std::span<const std::byte, 512> header) noexcept;
@@ -63,15 +63,21 @@ private:
   struct PaxKV {
     std::optional<std::string> path;
     std::optional<std::uint64_t> size;
-    void clear() { path.reset(); size.reset(); }
-    void merge_from(const PaxKV& o) { if (o.path) path = *o.path; if (o.size) size = *o.size; }
+    void clear() {
+      path.reset();
+      size.reset();
+    }
+    void merge_from(const PaxKV& o) {
+      if (o.path) path = *o.path;
+      if (o.size) size = *o.size;
+    }
   };
 
   static brokkr::core::Result<PaxKV> parse_pax_payload(std::string_view payload) noexcept;
 
   brokkr::core::Status scan_() noexcept;
 
-private:
+ private:
   std::string path_;
   bool validate_ = true;
   std::vector<TarEntry> entries_;

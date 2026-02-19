@@ -38,7 +38,7 @@ struct UsbEndpoints {
 };
 
 class UsbFsDevice {
-public:
+ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
@@ -67,7 +67,7 @@ public:
   std::uint8_t pipe_in_ref() const noexcept { return pipe_in_; }
   std::uint8_t pipe_out_ref() const noexcept { return pipe_out_; }
 
-private:
+ private:
   std::string devnode_;
 
   void* dev_intf_ = nullptr; // IOUSBDeviceInterface320**

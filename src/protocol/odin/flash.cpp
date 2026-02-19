@@ -43,12 +43,15 @@ static std::string strip_lz4_suffix(std::string s) {
 }
 
 static std::string_view trim_ws(std::string_view s) {
-  while (!s.empty() && (s.front()==' '||s.front()=='\t'||s.front()=='\r'||s.front()=='\n')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() ==' '||s.back() =='\t'||s.back() =='\r'||s.back() =='\n')) s.remove_suffix(1);
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n'))
+    s.remove_prefix(1);
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n'))
+    s.remove_suffix(1);
   return s;
 }
 
-static brokkr::core::Result<std::string> read_text(io::ByteSource& src, std::size_t max_bytes, std::string_view what) noexcept {
+static brokkr::core::Result<std::string> read_text(io::ByteSource& src, std::size_t max_bytes,
+                                                   std::string_view what) noexcept {
   const std::uint64_t n64 = src.size();
   if (n64 > max_bytes) return brokkr::core::fail("read_text: too large: " + std::string(what));
   const std::size_t n = static_cast<std::size_t>(n64);
@@ -87,13 +90,15 @@ static bool is_download_list_name(std::string_view name) noexcept {
 }
 
 static std::optional<io::TarEntry> find_download_list_entry(const io::TarArchive& tar) {
-  for (const auto& e : tar.entries()) if (is_download_list_name(e.name)) return e;
+  for (const auto& e : tar.entries())
+    if (is_download_list_name(e.name)) return e;
   return std::nullopt;
 }
 
 static bool lists_equal(const std::vector<std::string>& a, const std::vector<std::string>& b) noexcept {
   if (a.size() != b.size()) return false;
-  for (std::size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (a[i] != b[i]) return false;
   return true;
 }
 
@@ -103,14 +108,9 @@ static brokkr::core::Result<std::uint64_t> lz4_content_size(const ImageSpec& spe
   return h.content_size;
 }
 
-static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind,
-                                                 std::filesystem::path path,
-                                                 io::TarEntry entry,
-                                                 std::string display,
-                                                 std::string source_basename,
-                                                 std::uint64_t disk_size,
-                                                 bool dl_mode) noexcept
-{
+static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::filesystem::path path, io::TarEntry entry,
+                                                 std::string display, std::string source_basename,
+                                                 std::uint64_t disk_size, bool dl_mode) noexcept {
   ImageSpec spec;
   spec.kind = kind;
   spec.path = std::move(path);
@@ -154,13 +154,14 @@ static brokkr::core::Result<ImageSpec> finalize(const SourceCandidate& c, bool d
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
   switch (kind) {
-    case Kind::RawFile:  return io::open_raw_file(path);
+    case Kind::RawFile: return io::open_raw_file(path);
     case Kind::TarEntry: return io::open_tar_entry(path, entry);
   }
   return brokkr::core::fail("ImageSpec::open: invalid kind");
 }
 
-brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std::vector<std::filesystem::path>& inputs) noexcept {
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
+    const std::vector<std::filesystem::path>& inputs) noexcept {
   std::vector<ImageSpec> out;
   std::optional<std::vector<std::string>> dl;
 
@@ -174,8 +175,10 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
       BRK_TRYV(txt, read_text(*src, 128 * 1024, "download-list.txt"));
       BRK_TRYV(names, parse_download_list(txt));
 
-      if (!dl) dl = std::move(names);
-      else if (!lists_equal(*dl, names)) return brokkr::core::fail("Multiple download-list.txt files found with different contents");
+      if (!dl)
+        dl = std::move(names);
+      else if (!lists_equal(*dl, names))
+        return brokkr::core::fail("Multiple download-list.txt files found with different contents");
     }
   }
 
@@ -195,15 +198,13 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
           const bool lz4 = is_lz4_name(sb);
           const std::string base = lz4 ? strip_lz4_suffix(sb) : sb;
 
-          merge(cands, SourceCandidate{
-            .kind = ImageSpec::Kind::TarEntry,
-            .path = p,
-            .entry = e,
-            .basename = base,
-            .source_basename = sb,
-            .display = p.string() + ":" + e.name,
-            .disk_size = e.size
-          });
+          merge(cands, SourceCandidate{.kind = ImageSpec::Kind::TarEntry,
+                                       .path = p,
+                                       .entry = e,
+                                       .basename = base,
+                                       .source_basename = sb,
+                                       .display = p.string() + ":" + e.name,
+                                       .disk_size = e.size});
         }
         continue;
       }
@@ -212,15 +213,13 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
       const std::string sb = io::basename(p.string());
       const bool lz4 = is_lz4_name(sb);
 
-      merge(cands, SourceCandidate{
-        .kind = ImageSpec::Kind::RawFile,
-        .path = p,
-        .entry = {},
-        .basename = lz4 ? strip_lz4_suffix(sb) : sb,
-        .source_basename = sb,
-        .display = p.string(),
-        .disk_size = src->size()
-      });
+      merge(cands, SourceCandidate{.kind = ImageSpec::Kind::RawFile,
+                                   .path = p,
+                                   .entry = {},
+                                   .basename = lz4 ? strip_lz4_suffix(sb) : sb,
+                                   .source_basename = sb,
+                                   .display = p.string(),
+                                   .disk_size = src->size()});
     }
 
     out.reserve(dl->size());
@@ -244,7 +243,8 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
         const auto sb = io::basename(e.name);
         if (sb.empty()) continue;
 
-        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, io::basename(e.name), e.size, false));
+        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, io::basename(e.name),
+                                 e.size, false));
         out.push_back(std::move(spec));
       }
       continue;
@@ -258,7 +258,8 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(const std:
   return out;
 }
 
-brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table, const std::vector<ImageSpec>& sources) noexcept {
+brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table,
+                                                        const std::vector<ImageSpec>& sources) noexcept {
   std::vector<FlashItem> items;
   items.reserve(sources.size());
 
@@ -270,8 +271,10 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
     if (!part) continue;
 
     const auto [it, inserted] = by_part.emplace(part->id, items.size());
-    if (inserted) items.push_back(FlashItem{.part = *part, .spec = s});
-    else items[it->second] = FlashItem{.part = *part, .spec = s};
+    if (inserted)
+      items.push_back(FlashItem{.part = *part, .spec = s});
+    else
+      items[it->second] = FlashItem{.part = *part, .spec = s};
   }
 
   if (items.empty()) return brokkr::core::fail("No flashable items after PIT mapping");

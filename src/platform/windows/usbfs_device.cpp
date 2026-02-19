@@ -28,16 +28,15 @@ static std::string win32_err(DWORD e) {
   char* buf = nullptr;
   const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
 
-  const DWORD n = ::FormatMessageA(
-    flags, nullptr, e, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-    reinterpret_cast<LPSTR>(&buf), 0, nullptr
-  );
+  const DWORD n = ::FormatMessageA(flags, nullptr, e, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                   reinterpret_cast<LPSTR>(&buf), 0, nullptr);
 
   std::string out;
   if (n && buf) out.assign(buf, buf + n);
   if (buf) ::LocalFree(buf);
 
-  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t')) out.pop_back();
+  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t'))
+    out.pop_back();
   if (out.empty()) out = "error " + std::to_string(static_cast<unsigned>(e));
   return out;
 }
@@ -70,17 +69,11 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   close();
 
   std::string port_path = devnode_;
-  if (port_path.rfind("\\\\.\\", 0) != 0 && port_path.find("COM") != std::string::npos) port_path = "\\\\.\\" + port_path;
+  if (port_path.rfind("\\\\.\\", 0) != 0 && port_path.find("COM") != std::string::npos)
+    port_path = "\\\\.\\" + port_path;
 
-  handle_ = ::CreateFileA(
-    port_path.c_str(),
-    GENERIC_READ | GENERIC_WRITE,
-    0,
-    nullptr,
-    OPEN_EXISTING,
-    FILE_ATTRIBUTE_NORMAL,
-    nullptr
-  );
+  handle_ = ::CreateFileA(port_path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                          FILE_ATTRIBUTE_NORMAL, nullptr);
 
   if (handle_ == INVALID_HANDLE_VALUE) {
     const DWORD e = ::GetLastError();
@@ -99,7 +92,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   dcb.BaudRate = CBR_115200;
   dcb.ByteSize = 8;
   dcb.StopBits = ONESTOPBIT;
-  dcb.Parity   = NOPARITY;
+  dcb.Parity = NOPARITY;
 
   if (!::SetCommState(handle_, &dcb)) {
     const DWORD e = ::GetLastError();

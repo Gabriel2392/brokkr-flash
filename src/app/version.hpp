@@ -23,7 +23,7 @@
 
 namespace brokkr::app {
 
-inline const std::string &version_string() {
+inline const std::string& version_string() {
   static const std::string v = [] {
 #ifdef NDEBUG
     return fmt::format("{}-{}", BROKKR_VERSION, BROKKR_BUILD_TYPE);

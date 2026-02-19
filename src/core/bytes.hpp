@@ -22,18 +22,14 @@
 
 namespace brokkr::core {
 
-inline std::span<const std::byte> bytes(const std::byte *p, std::size_t n) {
-  return {p, n};
-}
-inline std::span<std::byte> bytes(std::byte *p, std::size_t n) {
-  return {p, n};
-}
+inline std::span<const std::byte> bytes(const std::byte* p, std::size_t n) { return {p, n}; }
+inline std::span<std::byte> bytes(std::byte* p, std::size_t n) { return {p, n}; }
 
 inline std::span<const std::uint8_t> u8(std::span<const std::byte> s) {
-  return {reinterpret_cast<const std::uint8_t *>(s.data()), s.size()};
+  return {reinterpret_cast<const std::uint8_t*>(s.data()), s.size()};
 }
 inline std::span<std::uint8_t> u8(std::span<std::byte> s) {
-  return {reinterpret_cast<std::uint8_t *>(s.data()), s.size()};
+  return {reinterpret_cast<std::uint8_t*>(s.data()), s.size()};
 }
 
 } // namespace brokkr::core

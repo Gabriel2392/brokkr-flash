@@ -42,8 +42,7 @@ struct EnumerateFilter {
   std::vector<std::uint16_t> products;
 };
 
-std::vector<UsbDeviceSysfsInfo>
-enumerate_usb_devices_sysfs(const EnumerateFilter &filter);
+std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter);
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname);
 
 } // namespace brokkr::linux

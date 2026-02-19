@@ -25,7 +25,7 @@
 
 namespace brokkr::core {
 
-using Error  = std::string;
+using Error = std::string;
 using Status = std::expected<void, Error>;
 
 template <class T>
@@ -43,17 +43,17 @@ inline std::unexpected<Error> failf(fmt::format_string<Args...> f, Args&&... arg
 #define BRK_CAT2(a, b) a##b
 #define BRK_CAT(a, b) BRK_CAT2(a, b)
 
-#define BRK_TRY_IMPL(n, expr) \
-  do { \
-    auto BRK_CAT(_brk_r_, n) = (expr); \
-    if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error())); \
+#define BRK_TRY_IMPL(n, expr)                                                                                          \
+  do {                                                                                                                 \
+    auto BRK_CAT(_brk_r_, n) = (expr);                                                                                 \
+    if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error()));                       \
   } while (0)
 
 #define BRK_TRY(expr) BRK_TRY_IMPL(__COUNTER__, expr)
 
-#define BRK_TRYV_IMPL(n, lhs, expr) \
-  auto BRK_CAT(_brk_r_, n) = (expr); \
-  if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error())); \
+#define BRK_TRYV_IMPL(n, lhs, expr)                                                                                    \
+  auto BRK_CAT(_brk_r_, n) = (expr);                                                                                   \
+  if (!BRK_CAT(_brk_r_, n)) return brokkr::core::fail(std::move(BRK_CAT(_brk_r_, n).error()));                         \
   auto lhs = std::move(*BRK_CAT(_brk_r_, n))
 
 #define BRK_TRYV(lhs, expr) BRK_TRYV_IMPL(__COUNTER__, lhs, expr)

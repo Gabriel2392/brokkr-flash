@@ -32,7 +32,8 @@ ThreadPool::ThreadPool(std::size_t thread_count) {
 
 ThreadPool::~ThreadPool() {
   stop();
-  for (auto& t : workers_) if (t.joinable()) t.join();
+  for (auto& t : workers_)
+    if (t.joinable()) t.join();
 }
 
 Status ThreadPool::submit(Task t) noexcept {
@@ -57,9 +58,7 @@ void ThreadPool::stop() noexcept {
 Status ThreadPool::wait() noexcept {
   {
     std::unique_lock lk(mtx_);
-    cv_done_.wait(lk, [&] {
-      return q_.empty() && active_.load(std::memory_order_relaxed) == 0;
-    });
+    cv_done_.wait(lk, [&] { return q_.empty() && active_.load(std::memory_order_relaxed) == 0; });
   }
 
   std::lock_guard elk(err_mtx_);

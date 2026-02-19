@@ -34,14 +34,13 @@
 #include <spdlog/spdlog.h>
 
 #ifndef SOCK_CLOEXEC
-#define SOCK_CLOEXEC 0
+  #define SOCK_CLOEXEC 0
 #endif
 
 namespace brokkr::posix_common {
 
 TcpConnection::TcpConnection(int fd, std::string peer_ip, std::uint16_t peer_port)
-  : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port)
-{
+    : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port) {
   set_sock_timeouts_();
 
   int one = 1;
@@ -87,7 +86,7 @@ void TcpConnection::set_sock_timeouts_() noexcept {
   if (!fd_.valid()) return;
 
   timeval tv{};
-  tv.tv_sec  = timeout_ms_ / 1000;
+  tv.tv_sec = timeout_ms_ / 1000;
   tv.tv_usec = (timeout_ms_ % 1000) * 1000;
 
   (void)do_setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -132,8 +131,7 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/
 
   while (left) {
     int ms_left = static_cast<int>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
-    );
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
     if (ms_left <= 0) {
       spdlog::warn("TcpConnection::send: timeout (giving up)");
       return -1;
@@ -194,8 +192,7 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
 
   for (;;) {
     int ms_left = static_cast<int>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()
-    );
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
     if (ms_left <= 0) {
       spdlog::warn("TcpConnection::recv: timeout (giving up)");
       return -1;

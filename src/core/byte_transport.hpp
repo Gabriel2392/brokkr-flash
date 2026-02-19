@@ -23,7 +23,7 @@
 namespace brokkr::core {
 
 class IByteTransport {
-public:
+ public:
   enum class Kind { UsbBulk, TcpStream };
 
   virtual ~IByteTransport() = default;
@@ -35,8 +35,7 @@ public:
   virtual void set_timeout_ms(int ms) noexcept = 0;
   virtual int timeout_ms() const noexcept = 0;
 
-  virtual int send(std::span<const std::uint8_t> data,
-                   unsigned retries = 8) = 0;
+  virtual int send(std::span<const std::uint8_t> data, unsigned retries = 8) = 0;
   virtual int recv(std::span<std::uint8_t> data, unsigned retries = 8) = 0;
 
   // Ghost func when operating over tcp.

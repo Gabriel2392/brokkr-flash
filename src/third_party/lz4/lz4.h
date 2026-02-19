@@ -56,62 +56,62 @@
 
 #if defined(__cplusplus)
 extern "C" {
-  #endif
+#endif
 
-  #ifndef LZ4LIB_VISIBILITY
-  #  if defined(__GNUC__) && (__GNUC__ >= 4)
-  #    define LZ4LIB_VISIBILITY __attribute__ ((visibility ("default")))
-  #  else
-  #    define LZ4LIB_VISIBILITY
-  #  endif
-  #endif
-
-  #if defined(_WIN32) && defined(LZ4_DLL_EXPORT) && (LZ4_DLL_EXPORT==1)
-  #  define LZ4LIB_API __declspec(dllexport) LZ4LIB_VISIBILITY
-  #elif defined(_WIN32) && defined(LZ4_DLL_IMPORT) && (LZ4_DLL_IMPORT==1)
-  #  define LZ4LIB_API __declspec(dllimport) LZ4LIB_VISIBILITY
+#ifndef LZ4LIB_VISIBILITY
+  #if defined(__GNUC__) && (__GNUC__ >= 4)
+    #define LZ4LIB_VISIBILITY __attribute__((visibility("default")))
   #else
-  #  define LZ4LIB_API LZ4LIB_VISIBILITY
+    #define LZ4LIB_VISIBILITY
   #endif
+#endif
 
-  #if defined(LZ4_FREESTANDING) && (LZ4_FREESTANDING == 1)
-  #  define LZ4_HEAPMODE 0
-  #  define LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION 1
-  #  if !defined(LZ4_memcpy) || !defined(LZ4_memset) || !defined(LZ4_memmove)
-  #    error "LZ4_FREESTANDING requires LZ4_memcpy/LZ4_memset/LZ4_memmove."
-  #  endif
-  #elif !defined(LZ4_FREESTANDING)
-  #  define LZ4_FREESTANDING 0
+#if defined(_WIN32) && defined(LZ4_DLL_EXPORT) && (LZ4_DLL_EXPORT == 1)
+  #define LZ4LIB_API __declspec(dllexport) LZ4LIB_VISIBILITY
+#elif defined(_WIN32) && defined(LZ4_DLL_IMPORT) && (LZ4_DLL_IMPORT == 1)
+  #define LZ4LIB_API __declspec(dllimport) LZ4LIB_VISIBILITY
+#else
+  #define LZ4LIB_API LZ4LIB_VISIBILITY
+#endif
+
+#if defined(LZ4_FREESTANDING) && (LZ4_FREESTANDING == 1)
+  #define LZ4_HEAPMODE 0
+  #define LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION 1
+  #if !defined(LZ4_memcpy) || !defined(LZ4_memset) || !defined(LZ4_memmove)
+    #error "LZ4_FREESTANDING requires LZ4_memcpy/LZ4_memset/LZ4_memmove."
   #endif
+#elif !defined(LZ4_FREESTANDING)
+  #define LZ4_FREESTANDING 0
+#endif
 
-  #define LZ4_VERSION_MAJOR 1
-  #define LZ4_VERSION_MINOR 10
-  #define LZ4_VERSION_RELEASE 0
-  #define LZ4_VERSION_NUMBER (LZ4_VERSION_MAJOR*100*100 + LZ4_VERSION_MINOR*100 + LZ4_VERSION_RELEASE)
+#define LZ4_VERSION_MAJOR 1
+#define LZ4_VERSION_MINOR 10
+#define LZ4_VERSION_RELEASE 0
+#define LZ4_VERSION_NUMBER (LZ4_VERSION_MAJOR * 100 * 100 + LZ4_VERSION_MINOR * 100 + LZ4_VERSION_RELEASE)
 
-  #ifndef LZ4_MEMORY_USAGE_DEFAULT
-  #  define LZ4_MEMORY_USAGE_DEFAULT 14
-  #endif
-  #ifndef LZ4_MEMORY_USAGE
-  #  define LZ4_MEMORY_USAGE LZ4_MEMORY_USAGE_DEFAULT
-  #endif
-  #define LZ4_MEMORY_USAGE_MIN 10
-  #define LZ4_MEMORY_USAGE_MAX 20
-  #if (LZ4_MEMORY_USAGE < LZ4_MEMORY_USAGE_MIN)
-  #  error "LZ4_MEMORY_USAGE too small"
-  #endif
-  #if (LZ4_MEMORY_USAGE > LZ4_MEMORY_USAGE_MAX)
-  #  error "LZ4_MEMORY_USAGE too large"
-  #endif
+#ifndef LZ4_MEMORY_USAGE_DEFAULT
+  #define LZ4_MEMORY_USAGE_DEFAULT 14
+#endif
+#ifndef LZ4_MEMORY_USAGE
+  #define LZ4_MEMORY_USAGE LZ4_MEMORY_USAGE_DEFAULT
+#endif
+#define LZ4_MEMORY_USAGE_MIN 10
+#define LZ4_MEMORY_USAGE_MAX 20
+#if (LZ4_MEMORY_USAGE < LZ4_MEMORY_USAGE_MIN)
+  #error "LZ4_MEMORY_USAGE too small"
+#endif
+#if (LZ4_MEMORY_USAGE > LZ4_MEMORY_USAGE_MAX)
+  #error "LZ4_MEMORY_USAGE too large"
+#endif
 
-  #define LZ4_MAX_INPUT_SIZE 0x7E000000
+#define LZ4_MAX_INPUT_SIZE 0x7E000000
 
-  typedef struct LZ4_stream_t_internal LZ4_stream_t;
-  typedef struct LZ4_streamDecode_t_internal LZ4_streamDecode_t;
+typedef struct LZ4_stream_t_internal LZ4_stream_t;
+typedef struct LZ4_streamDecode_t_internal LZ4_streamDecode_t;
 
-  LZ4LIB_API int LZ4_decompress_safe(const char* src, char* dst, int compressedSize, int dstCapacity);
+LZ4LIB_API int LZ4_decompress_safe(const char* src, char* dst, int compressedSize, int dstCapacity);
 
-  #if defined(__cplusplus)
+#if defined(__cplusplus)
 }
 #endif
 

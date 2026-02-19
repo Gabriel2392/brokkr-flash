@@ -28,7 +28,7 @@
 namespace brokkr::macos {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
-public:
+ public:
   Kind kind() const noexcept override { return Kind::UsbBulk; }
 
   explicit UsbFsConnection(UsbFsDevice& dev);
@@ -47,7 +47,7 @@ public:
 
   std::size_t max_packet_size() const noexcept { return max_pack_size_; }
 
-private:
+ private:
   UsbFsDevice& dev_;
   bool connected_ = false;
 

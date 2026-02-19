@@ -35,11 +35,11 @@ namespace brokkr::linux {
 namespace {
 
 #ifndef IOCTL_USBDEVFS_GET_CAPABILITIES
-#  define IOCTL_USBDEVFS_GET_CAPABILITIES  _IOR('U', 26, __u32)
+  #define IOCTL_USBDEVFS_GET_CAPABILITIES _IOR('U', 26, __u32)
 #endif
 
 #ifndef USBFS_CAP_NO_PACKET_SIZE_LIM
-#  define USBFS_CAP_NO_PACKET_SIZE_LIM    0x04
+  #define USBFS_CAP_NO_PACKET_SIZE_LIM 0x04
 #endif
 
 static brokkr::core::Status fail_errno(const char* what) noexcept {
@@ -62,8 +62,10 @@ UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
   fd_ = std::move(o.fd_);
   writable_ = o.writable_;
 
-  claimed_ = o.claimed_; o.claimed_ = false;
-  driver_detached_ = o.driver_detached_; o.driver_detached_ = false;
+  claimed_ = o.claimed_;
+  o.claimed_ = false;
+  driver_detached_ = o.driver_detached_;
+  o.driver_detached_ = false;
 
   ids_ = o.ids_;
   eps_ = o.eps_;
@@ -100,7 +102,10 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 
   if (kernel_driver_active_()) {
     st = detach_kernel_driver_();
-    if (!st) { close(); return st; }
+    if (!st) {
+      close();
+      return st;
+    }
     driver_detached_ = true;
   } else {
     driver_detached_ = false;
@@ -124,8 +129,14 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
 void UsbFsDevice::close() noexcept {
   if (!fd_.valid()) return;
 
-  if (claimed_) { release_interface_(); claimed_ = false; }
-  if (driver_detached_) { attach_kernel_driver_(); driver_detached_ = false; }
+  if (claimed_) {
+    release_interface_();
+    claimed_ = false;
+  }
+  if (driver_detached_) {
+    attach_kernel_driver_();
+    driver_detached_ = false;
+  }
 
   fd_.close();
 }
@@ -182,7 +193,10 @@ void UsbFsDevice::release_interface_() noexcept {
 }
 
 void UsbFsDevice::query_caps_() noexcept {
-  if (!fd_.valid()) { caps_ = 0; return; }
+  if (!fd_.valid()) {
+    caps_ = 0;
+    return;
+  }
   std::uint32_t caps{};
   const int r = do_ioctl(fd_, IOCTL_USBDEVFS_GET_CAPABILITIES, &caps);
   caps_ = (r < 0) ? 0u : caps;
@@ -198,16 +212,18 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
 
   if (buf.size() < USB_DT_DEVICE_SIZE) return brokkr::core::fail("UsbFsDevice: missing device descriptor");
   const auto* dev = reinterpret_cast<const usb_device_descriptor*>(buf.data());
-  if (dev->bLength < USB_DT_DEVICE_SIZE || dev->bDescriptorType != USB_DT_DEVICE) return brokkr::core::fail("UsbFsDevice: invalid device descriptor");
+  if (dev->bLength < USB_DT_DEVICE_SIZE || dev->bDescriptorType != USB_DT_DEVICE)
+    return brokkr::core::fail("UsbFsDevice: invalid device descriptor");
 
-  ids_.vendor  = dev->idVendor;
+  ids_.vendor = dev->idVendor;
   ids_.product = dev->idProduct;
 
   std::size_t off = dev->bLength;
   if (off + USB_DT_CONFIG_SIZE > buf.size()) return brokkr::core::fail("UsbFsDevice: missing config descriptor");
 
   const auto* cfg = reinterpret_cast<const usb_config_descriptor*>(buf.data() + off);
-  if (cfg->bLength < USB_DT_CONFIG_SIZE || cfg->bDescriptorType != USB_DT_CONFIG) return brokkr::core::fail("UsbFsDevice: invalid config descriptor");
+  if (cfg->bLength < USB_DT_CONFIG_SIZE || cfg->bDescriptorType != USB_DT_CONFIG)
+    return brokkr::core::fail("UsbFsDevice: invalid config descriptor");
 
   const std::size_t cfg_off = off;
   const std::size_t cfg_total = cfg->wTotalLength;
@@ -237,7 +253,7 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
 
   while (off + 2 <= end) {
     const std::uint8_t bLength = buf[off + 0];
-    const std::uint8_t bType   = buf[off + 1];
+    const std::uint8_t bType = buf[off + 1];
     if (bLength == 0) break;
     if (off + bLength > end) break;
 
@@ -273,8 +289,8 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
 
   commit_ifc();
 
-  spdlog::info("UsbFsDevice: {} vendor=0x{:04X} product=0x{:04X} ifc={} bulk_in=0x{:02X} bulk_out=0x{:02X}",
-               devnode_, ids_.vendor, ids_.product, ifc_num_, eps_.bulk_in, eps_.bulk_out);
+  spdlog::info("UsbFsDevice: {} vendor=0x{:04X} product=0x{:04X} ifc={} bulk_in=0x{:02X} bulk_out=0x{:02X}", devnode_,
+               ids_.vendor, ids_.product, ifc_num_, eps_.bulk_in, eps_.bulk_out);
 
   if (eps_.bulk_in == 0 || eps_.bulk_out == 0) return brokkr::core::fail("UsbFsDevice: missing bulk endpoints");
   return {};

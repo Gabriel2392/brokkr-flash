@@ -34,12 +34,12 @@ namespace brokkr::core {
 
 template <class Slot>
 class TwoSlotPrefetcher {
-public:
+ public:
   using InitFn = std::move_only_function<void(Slot&)>;
   using FillFn = std::move_only_function<Result<bool>(Slot&, std::stop_token)>;
 
   class Lease {
-  public:
+   public:
     Lease() = default;
 
     Lease(const Lease&) = delete;
@@ -61,7 +61,7 @@ public:
     Slot* operator->() const noexcept { return &get(); }
     Slot& operator*() const noexcept { return get(); }
 
-  private:
+   private:
     friend class TwoSlotPrefetcher;
 
     Lease(TwoSlotPrefetcher* owner, int idx) : owner_(owner), idx_(idx) {}
@@ -76,11 +76,12 @@ public:
     int idx_ = 0;
   };
 
-public:
-  explicit TwoSlotPrefetcher(FillFn fill, InitFn init = {})
-    : init_(std::move(init)), fill_(std::move(fill))
-  {
-    if (init_) { init_(slots_[0]); init_(slots_[1]); }
+ public:
+  explicit TwoSlotPrefetcher(FillFn fill, InitFn init = {}) : init_(std::move(init)), fill_(std::move(fill)) {
+    if (init_) {
+      init_(slots_[0]);
+      init_(slots_[1]);
+    }
     reader_ = std::jthread([this](std::stop_token st) { reader_loop_(st); });
   }
 
@@ -119,7 +120,7 @@ public:
     return error_ ? Status{std::unexpect, *error_} : Status{};
   }
 
-private:
+ private:
   void release_(int idx) noexcept {
     {
       std::lock_guard lk(m_);
@@ -134,17 +135,34 @@ private:
         {
           std::unique_lock lk(m_);
           cv_can_fill_.wait(lk, [&] { return stopping_ || !filled_[write_idx_]; });
-          if (stopping_ || st.stop_requested()) { done_ = true; cv_can_take_.notify_all(); return; }
+          if (stopping_ || st.stop_requested()) {
+            done_ = true;
+            cv_can_take_.notify_all();
+            return;
+          }
         }
 
         auto r = fill_(slots_[write_idx_], st);
 
         {
           std::lock_guard lk(m_);
-          if (stopping_ || st.stop_requested()) { done_ = true; cv_can_take_.notify_all(); return; }
+          if (stopping_ || st.stop_requested()) {
+            done_ = true;
+            cv_can_take_.notify_all();
+            return;
+          }
 
-          if (!r) { error_ = std::move(r.error()); done_ = true; cv_can_take_.notify_all(); return; }
-          if (!*r) { done_ = true; cv_can_take_.notify_all(); return; }
+          if (!r) {
+            error_ = std::move(r.error());
+            done_ = true;
+            cv_can_take_.notify_all();
+            return;
+          }
+          if (!*r) {
+            done_ = true;
+            cv_can_take_.notify_all();
+            return;
+          }
 
           filled_[write_idx_] = true;
           write_idx_ ^= 1;
@@ -173,7 +191,7 @@ private:
     }
   }
 
-private:
+ private:
   Slot slots_[2]{};
 
   mutable std::mutex m_;

@@ -29,7 +29,7 @@
 namespace brokkr::posix_common {
 
 class TcpConnection final : public brokkr::core::IByteTransport {
-public:
+ public:
   Kind kind() const noexcept override { return Kind::TcpStream; }
 
   TcpConnection() = default;
@@ -55,11 +55,11 @@ public:
 
   std::string peer_label() const;
 
-private:
+ private:
   void close_() noexcept;
   void set_sock_timeouts_() noexcept;
 
-private:
+ private:
   brokkr::FileHandle fd_;
   int timeout_ms_ = 1000;
 
@@ -68,7 +68,7 @@ private:
 };
 
 class TcpListener {
-public:
+ public:
   TcpListener() = default;
   ~TcpListener();
 
@@ -80,7 +80,7 @@ public:
 
   void close() noexcept { fd_.close(); }
 
-private:
+ private:
   brokkr::FileHandle fd_;
   std::string bind_ip_;
   std::uint16_t port_ = 0;

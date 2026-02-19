@@ -44,8 +44,7 @@ struct UsbTarget {
   std::vector<std::byte> pit_bytes{};
   pit::PitTable pit_table{};
 
-  explicit UsbTarget(std::string devnode_path)
-    : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
+  explicit UsbTarget(std::string devnode_path) : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
 };
 
 struct Target {
@@ -73,7 +72,7 @@ struct PlanItem {
 struct Cfg {
   std::size_t buffer_bytes = 30ull * 1024 * 1024;
   std::size_t pkt_all_v2plus = 1ull * 1024 * 1024;
-  std::size_t pkt_any_old    = 128ull * 1024;
+  std::size_t pkt_any_old = 128ull * 1024;
 
   int preflash_timeout_ms = 1000;
   unsigned preflash_retries = 2;
@@ -99,10 +98,7 @@ struct Ui {
   std::function<void()> on_done;
 };
 
-brokkr::core::Status flash(std::vector<Target*>& devs,
-                           const std::vector<ImageSpec>& sources,
-                           std::shared_ptr<const std::vector<std::byte>> pit_to_upload,
-                           const Cfg& cfg,
-                           Ui ui) noexcept;
+brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSpec>& sources,
+                           std::shared_ptr<const std::vector<std::byte>> pit_to_upload, const Cfg& cfg, Ui ui) noexcept;
 
 } // namespace brokkr::odin

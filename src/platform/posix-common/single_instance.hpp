@@ -24,23 +24,22 @@
 namespace brokkr::posix_common {
 
 class SingleInstanceLock {
-public:
+ public:
   SingleInstanceLock() = default;
   ~SingleInstanceLock();
 
-  SingleInstanceLock(const SingleInstanceLock &) = delete;
-  SingleInstanceLock &operator=(const SingleInstanceLock &) = delete;
+  SingleInstanceLock(const SingleInstanceLock&) = delete;
+  SingleInstanceLock& operator=(const SingleInstanceLock&) = delete;
 
-  SingleInstanceLock(SingleInstanceLock &&) noexcept;
-  SingleInstanceLock &operator=(SingleInstanceLock &&) noexcept;
+  SingleInstanceLock(SingleInstanceLock&&) noexcept;
+  SingleInstanceLock& operator=(SingleInstanceLock&&) noexcept;
 
   static std::optional<SingleInstanceLock> try_acquire(std::string name);
 
   bool acquired() const noexcept { return fd_.valid(); }
 
-private:
-  explicit SingleInstanceLock(FileHandle fd, std::string name)
-      : fd_(std::move(fd)), name_(std::move(name)) {}
+ private:
+  explicit SingleInstanceLock(FileHandle fd, std::string name) : fd_(std::move(fd)), name_(std::move(name)) {}
 
   FileHandle fd_;
   std::string name_;

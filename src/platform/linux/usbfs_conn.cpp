@@ -38,8 +38,7 @@ brokkr::core::Status UsbFsConnection::open() noexcept {
   if (connected_) return {};
   if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");
 
-  max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT
-                                                : BULK_BUFFER_LENGTH_NO_LIMIT;
+  max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT : BULK_BUFFER_LENGTH_NO_LIMIT;
 
   connected_ = true;
   zlp_needed_ = true;

@@ -34,7 +34,7 @@
 #include <spdlog/spdlog.h>
 
 #if !defined(kIOMainPortDefault)
-#define kIOMainPortDefault kIOMasterPortDefault
+  #define kIOMainPortDefault kIOMasterPortDefault
 #endif
 
 namespace brokkr::macos {
@@ -60,7 +60,7 @@ std::optional<std::uint64_t> get_registry_entry_id(io_service_t service) {
   return id;
 }
 
-bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t> &allowed) {
+bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t>& allowed) {
   if (allowed.empty()) return true;
   return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
 }
@@ -70,7 +70,7 @@ struct Match {
   std::uint64_t registry_id = 0;
 };
 
-void enumerate_class(const char *className, const EnumerateFilter &filter, std::vector<Match> &out) {
+void enumerate_class(const char* className, const EnumerateFilter& filter, std::vector<Match>& out) {
   CFMutableDictionaryRef dict = IOServiceMatching(className);
   if (!dict) return;
 
@@ -93,8 +93,7 @@ void enumerate_class(const char *className, const EnumerateFilter &filter, std::
     const auto product = static_cast<std::uint16_t>(*pid_opt);
     const auto locationID = *loc_opt;
 
-    spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})",
-                  locationID, vendor, product);
+    spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})", locationID, vendor, product);
 
     if (vendor != filter.vendor || !product_allowed(product, filter.products)) {
       IOObjectRelease(service);
@@ -121,7 +120,9 @@ void enumerate_class(const char *className, const EnumerateFilter &filter, std::
 
 static std::optional<std::uint32_t> parse_u32_sysname(std::string_view sysname) {
   while (!sysname.empty() && (sysname.front() == ' ' || sysname.front() == '\t')) sysname.remove_prefix(1);
-  while (!sysname.empty() && (sysname.back() == ' ' || sysname.back() == '\t' || sysname.back() == '\r' || sysname.back() == '\n')) sysname.remove_suffix(1);
+  while (!sysname.empty() &&
+         (sysname.back() == ' ' || sysname.back() == '\t' || sysname.back() == '\r' || sysname.back() == '\n'))
+    sysname.remove_suffix(1);
 
   int base = 10;
   if (sysname.size() >= 2 && sysname[0] == '0' && (sysname[1] == 'x' || sysname[1] == 'X')) {
@@ -138,9 +139,9 @@ static std::optional<std::uint32_t> parse_u32_sysname(std::string_view sysname) 
 } // namespace
 
 io_service_t find_device_by_location(std::uint32_t locationID) {
-  const char *classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
+  const char* classNames[] = {"IOUSBHostDevice", "IOUSBDevice"};
 
-  for (const char *cls : classNames) {
+  for (const char* cls : classNames) {
     CFMutableDictionaryRef dict = IOServiceMatching(cls);
     if (!dict) continue;
 
@@ -168,19 +169,17 @@ std::string UsbDeviceSysfsInfo::describe() const {
   return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor, product);
 }
 
-std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
+std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter) {
   std::vector<Match> matches;
 
   enumerate_class("IOUSBHostDevice", filter, matches);
   if (matches.empty()) enumerate_class("IOUSBDevice", filter, matches);
 
-  std::ranges::sort(matches, [](const Match &a, const Match &b) {
-    return a.registry_id > b.registry_id;
-  });
+  std::ranges::sort(matches, [](const Match& a, const Match& b) { return a.registry_id > b.registry_id; });
 
   std::vector<UsbDeviceSysfsInfo> out;
   out.reserve(matches.size());
-  for (auto &m : matches) out.emplace_back(std::move(m.info));
+  for (auto& m : matches) out.emplace_back(std::move(m.info));
   return out;
 }
 

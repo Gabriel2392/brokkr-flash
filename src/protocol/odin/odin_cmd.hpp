@@ -43,7 +43,7 @@ struct InitTargetInfo {
 };
 
 class OdinCommands {
-public:
+ public:
   enum class ShutdownMode { NoReboot, Reboot, ReDownload };
 
   explicit OdinCommands(brokkr::core::IByteTransport& c) : conn_(c) {}
@@ -62,22 +62,13 @@ public:
   brokkr::core::Status begin_download(std::int32_t rounded_total_size, unsigned retries = 8) noexcept;
   brokkr::core::Status begin_download_compressed(std::int32_t comp_size, unsigned retries = 8) noexcept;
 
-  brokkr::core::Status end_download(std::int32_t size_to_flash,
-                                    std::int32_t part_id,
-                                    std::int32_t dev_type,
-                                    bool is_last,
-                                    std::int32_t bin_type = 0,
-                                    bool efs_clear = false,
-                                    bool boot_update = false,
-                                    unsigned retries = 8) noexcept;
+  brokkr::core::Status end_download(std::int32_t size_to_flash, std::int32_t part_id, std::int32_t dev_type,
+                                    bool is_last, std::int32_t bin_type = 0, bool efs_clear = false,
+                                    bool boot_update = false, unsigned retries = 8) noexcept;
 
-  brokkr::core::Status end_download_compressed(std::int32_t decomp_size_to_flash,
-                                               std::int32_t part_id,
-                                               std::int32_t dev_type,
-                                               bool is_last,
-                                               std::int32_t bin_type = 0,
-                                               bool efs_clear = false,
-                                               bool boot_update = false,
+  brokkr::core::Status end_download_compressed(std::int32_t decomp_size_to_flash, std::int32_t part_id,
+                                               std::int32_t dev_type, bool is_last, std::int32_t bin_type = 0,
+                                               bool efs_clear = false, bool boot_update = false,
                                                unsigned retries = 8) noexcept;
 
   brokkr::core::Status shutdown(ShutdownMode mode, unsigned retries = 8) noexcept;
@@ -88,31 +79,23 @@ public:
   brokkr::core::Status send_raw(std::span<const std::byte> data, unsigned retries = 8) noexcept;
   brokkr::core::Status recv_raw(std::span<std::byte> data, unsigned retries = 8) noexcept;
 
-  brokkr::core::Result<ResponseBox> recv_checked_response(std::int32_t expected_id,
-                                                          std::int32_t* out_ack = nullptr,
+  brokkr::core::Result<ResponseBox> recv_checked_response(std::int32_t expected_id, std::int32_t* out_ack = nullptr,
                                                           unsigned retries = 8) noexcept;
 
   brokkr::core::Status send_request(const RequestBox& rq, unsigned retries = 8) noexcept;
 
-private:
-  brokkr::core::Result<ResponseBox> rpc_(RqtCommandType type,
-                                        RqtCommandParam param,
-                                        std::span<const std::int32_t> ints = {},
-                                        std::span<const std::int8_t> chars = {},
-                                        std::int32_t* out_ack = nullptr,
-                                        unsigned retries = 8) noexcept;
+ private:
+  brokkr::core::Result<ResponseBox> rpc_(RqtCommandType type, RqtCommandParam param,
+                                         std::span<const std::int32_t> ints = {},
+                                         std::span<const std::int8_t> chars = {}, std::int32_t* out_ack = nullptr,
+                                         unsigned retries = 8) noexcept;
 
-  brokkr::core::Status end_download_impl_(RqtCommandParam complete_param,
-                                         std::int32_t size_to_flash,
-                                         std::int32_t part_id,
-                                         std::int32_t dev_type,
-                                         bool is_last,
-                                         std::int32_t bin_type,
-                                         bool efs_clear,
-                                         bool boot_update,
-                                         unsigned retries) noexcept;
+  brokkr::core::Status end_download_impl_(RqtCommandParam complete_param, std::int32_t size_to_flash,
+                                          std::int32_t part_id, std::int32_t dev_type, bool is_last,
+                                          std::int32_t bin_type, bool efs_clear, bool boot_update,
+                                          unsigned retries) noexcept;
 
-private:
+ private:
   brokkr::core::IByteTransport& conn_;
 };
 

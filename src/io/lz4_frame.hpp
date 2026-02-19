@@ -35,13 +35,13 @@ struct Lz4FrameHeaderInfo {
   std::uint64_t content_size = 0;
 
   std::uint8_t flg = 0;
-  std::uint8_t bd  = 0;
+  std::uint8_t bd = 0;
 
   bool block_independence = false;
-  bool block_checksum     = false;
-  bool content_checksum   = false;
-  bool has_content_size   = false;
-  bool has_dict_id        = false;
+  bool block_checksum = false;
+  bool content_checksum = false;
+  bool has_content_size = false;
+  bool has_dict_id = false;
 
   std::size_t max_block_size = 0;
   std::size_t header_bytes = 0;
@@ -50,7 +50,7 @@ struct Lz4FrameHeaderInfo {
 brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src) noexcept;
 
 class Lz4BlockStreamReader {
-public:
+ public:
   static brokkr::core::Result<Lz4BlockStreamReader> open(std::unique_ptr<ByteSource> src) noexcept;
 
   Lz4BlockStreamReader(const Lz4BlockStreamReader&) = delete;
@@ -69,20 +69,20 @@ public:
 
   brokkr::core::Result<std::size_t> read_n_blocks(std::size_t n, std::vector<std::byte>& out) noexcept;
 
-private:
+ private:
   Lz4BlockStreamReader(std::unique_ptr<ByteSource> src, Lz4FrameHeaderInfo hdr) noexcept
-    : src_(std::move(src)), hdr_(hdr) {}
+      : src_(std::move(src)), hdr_(hdr) {}
 
   brokkr::core::Status read_exact_(std::span<std::byte> out) noexcept;
 
-private:
+ private:
   std::unique_ptr<ByteSource> src_;
   Lz4FrameHeaderInfo hdr_{};
   std::size_t blocks_read_ = 0;
 };
 
 class Lz4DecompressedSource final : public ByteSource {
-public:
+ public:
   static brokkr::core::Result<std::unique_ptr<ByteSource>> open(std::unique_ptr<ByteSource> src) noexcept;
 
   std::string display_name() const override { return display_; }
@@ -91,13 +91,13 @@ public:
 
   brokkr::core::Status status() const noexcept override { return st_; }
 
-private:
+ private:
   Lz4DecompressedSource(std::unique_ptr<ByteSource> src, Lz4FrameHeaderInfo hdr) noexcept;
 
   brokkr::core::Status read_exact_(std::span<std::byte> out) noexcept;
   brokkr::core::Status fill_next_block_() noexcept;
 
-private:
+ private:
   std::unique_ptr<ByteSource> src_;
   std::string display_;
   Lz4FrameHeaderInfo hdr_{};

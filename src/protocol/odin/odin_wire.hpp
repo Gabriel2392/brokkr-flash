@@ -30,47 +30,47 @@
 namespace brokkr::odin {
 
 enum class RqtCommandType : std::int32_t {
-  RQT_INIT  = 100,
-  RQT_PIT   = 101,
-  RQT_XMIT  = 102,
+  RQT_INIT = 100,
+  RQT_PIT = 101,
+  RQT_XMIT = 102,
   RQT_CLOSE = 103,
   RQT_EMPTY = 0
 };
 
 enum class RqtCommandParam : std::int32_t {
   // INIT
-  RQT_INIT_TARGET     = 0,
-  RQT_INIT_RESETTIME  = 1,
-  RQT_INIT_TOTALSIZE  = 2,
-  RQT_INIT_OEMSTATE   = 3,
+  RQT_INIT_TARGET = 0,
+  RQT_INIT_RESETTIME = 1,
+  RQT_INIT_TOTALSIZE = 2,
+  RQT_INIT_OEMSTATE = 3,
   RQT_INIT_NOOEMSTATE = 4,
   RQT_INIT_PACKETSIZE = 5,
-  RQT_INIT_XMIT_SIZE  = 6,
+  RQT_INIT_XMIT_SIZE = 6,
 
   // PIT
-  RQT_PIT_SET      = 0,
-  RQT_PIT_GET      = 1,
-  RQT_PIT_START    = 2,
+  RQT_PIT_SET = 0,
+  RQT_PIT_GET = 1,
+  RQT_PIT_START = 2,
   RQT_PIT_COMPLETE = 3,
 
   // XMIT (uncompressed)
-  RQT_XMIT_DOWNLOAD  = 0,
-  RQT_XMIT_DUMP      = 1,
-  RQT_XMIT_START     = 2,
-  RQT_XMIT_COMPLETE  = 3,
-  RQT_XMIT_SMD       = 4,
+  RQT_XMIT_DOWNLOAD = 0,
+  RQT_XMIT_DUMP = 1,
+  RQT_XMIT_START = 2,
+  RQT_XMIT_COMPLETE = 3,
+  RQT_XMIT_SMD = 4,
 
   // XMIT (compressed)
   RQT_XMIT_COMPRESSED_DOWNLOAD = 5,
-  RQT_XMIT_COMPRESSED_START    = 6,
+  RQT_XMIT_COMPRESSED_START = 6,
   RQT_XMIT_COMPRESSED_COMPLETE = 7,
 
   // CLOSE
-  RQT_CLOSE_END            = 0,
-  RQT_CLOSE_REBOOT         = 1,
-  RQT_CLOSE_DISCONNECT     = 2,
-  RQT_CLOSE_REBOOT_RECOVERY= 3,
-  RQT_CLOSE_REDOWNLOAD     = 4,
+  RQT_CLOSE_END = 0,
+  RQT_CLOSE_REBOOT = 1,
+  RQT_CLOSE_DISCONNECT = 2,
+  RQT_CLOSE_REBOOT_RECOVERY = 3,
+  RQT_CLOSE_REDOWNLOAD = 4,
 };
 
 enum class ProtocolVersion : std::int16_t {
@@ -92,39 +92,35 @@ static_assert(sizeof(ResponseBox) == 8);
 
 #pragma pack(push, 1)
 struct RequestBox {
-  static constexpr std::size_t DATA_INT_SIZE  = 9;
+  static constexpr std::size_t DATA_INT_SIZE = 9;
   static constexpr std::size_t DATA_CHAR_SIZE = 128;
-  static constexpr std::size_t MD5_SIZE       = 32;
+  static constexpr std::size_t MD5_SIZE = 32;
 
   std::int32_t id;
   std::int32_t data;
   std::int32_t intData[DATA_INT_SIZE];
-  std::int8_t  charData[DATA_CHAR_SIZE];
-  std::int8_t  md5[MD5_SIZE];
+  std::int8_t charData[DATA_CHAR_SIZE];
+  std::int8_t md5[MD5_SIZE];
 
-  std::int8_t  dummy[1024 - (2*4 + DATA_INT_SIZE*4 + DATA_CHAR_SIZE + MD5_SIZE)];
+  std::int8_t dummy[1024 - (2 * 4 + DATA_INT_SIZE * 4 + DATA_CHAR_SIZE + MD5_SIZE)];
 };
 #pragma pack(pop)
 static_assert(sizeof(RequestBox) == 1024);
 
 inline void response_from_le(ResponseBox& r) noexcept {
-  r.id  = brokkr::core::le_to_host(r.id);
+  r.id = brokkr::core::le_to_host(r.id);
   r.ack = brokkr::core::le_to_host(r.ack);
 }
 
-inline RequestBox make_request(RqtCommandType type,
-                               RqtCommandParam param,
-                               std::span<const std::int32_t> ints = {},
-                               std::span<const std::int8_t> chars = {})
-{
+inline RequestBox make_request(RqtCommandType type, RqtCommandParam param, std::span<const std::int32_t> ints = {},
+                               std::span<const std::int8_t> chars = {}) {
   RequestBox r{};
-  r.id   = brokkr::core::host_to_le(static_cast<std::int32_t>(type));
+  r.id = brokkr::core::host_to_le(static_cast<std::int32_t>(type));
   r.data = brokkr::core::host_to_le(static_cast<std::int32_t>(param));
 
   if (!ints.empty()) {
     const auto n = (ints.size() > RequestBox::DATA_INT_SIZE) ? RequestBox::DATA_INT_SIZE : ints.size();
-    for (std::size_t i = 0; i < n; ++i)
-      r.intData[i] = brokkr::core::host_to_le(ints[i]);
+    for (std::size_t i = 0; i < n; ++i) r.intData[i] = brokkr::core::host_to_le(ints[i]);
   }
 
   if (!chars.empty()) {

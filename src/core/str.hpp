@@ -26,12 +26,10 @@ constexpr unsigned char ascii_lower(unsigned char c) noexcept {
 }
 
 constexpr bool ends_with_ci(std::string_view s, std::string_view suf) noexcept {
-  if (s.size() < suf.size())
-    return false;
+  if (s.size() < suf.size()) return false;
   const std::size_t off = s.size() - suf.size();
   for (std::size_t i = 0; i < suf.size(); ++i)
-    if (ascii_lower(static_cast<unsigned char>(s[off + i])) !=
-        ascii_lower(static_cast<unsigned char>(suf[i])))
+    if (ascii_lower(static_cast<unsigned char>(s[off + i])) != ascii_lower(static_cast<unsigned char>(suf[i])))
       return false;
   return true;
 }

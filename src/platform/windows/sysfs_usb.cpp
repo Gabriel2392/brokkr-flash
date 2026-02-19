@@ -49,9 +49,9 @@ struct UsbDeviceInfo {
 
 namespace {
 
-uint16_t extract_hex4(const std::string &str, const std::string &key) {
+uint16_t extract_hex4(const std::string& str, const std::string& key) {
   std::string lower_str = str;
-  for (char &c : lower_str) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  for (char& c : lower_str) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
   const size_t pos0 = lower_str.find(key);
   if (pos0 == std::string::npos) return 0;
@@ -67,7 +67,7 @@ uint16_t extract_hex4(const std::string &str, const std::string &key) {
 }
 
 std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
-                                                         const std::vector<uint16_t> &allowed_pids) {
+                                                         const std::vector<uint16_t>& allowed_pids) {
   std::vector<UsbDeviceInfo> result;
 
   HDEVINFO hDevInfo = SetupDiGetClassDevs(nullptr, nullptr, nullptr, DIGCF_PRESENT | DIGCF_ALLCLASSES);
@@ -82,9 +82,8 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
   for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData); ++i) {
     char hwId[1024] = {0};
 
-    if (!SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData,
-                                          SPDRP_HARDWAREID, nullptr,
-                                          (PBYTE)hwId, sizeof(hwId), nullptr)) {
+    if (!SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, nullptr, (PBYTE)hwId, sizeof(hwId),
+                                           nullptr)) {
       continue;
     }
 
@@ -106,13 +105,11 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
     DWORD type = 0;
     DWORD size = sizeof(portName);
 
-    bool found_port =
-        (RegQueryValueExA(hKey, "PortName", nullptr, &type, (LPBYTE)portName, &size) == ERROR_SUCCESS);
+    bool found_port = (RegQueryValueExA(hKey, "PortName", nullptr, &type, (LPBYTE)portName, &size) == ERROR_SUCCESS);
 
     if (!found_port) {
       size = sizeof(portName);
-      found_port =
-          (RegQueryValueExA(hKey, "AttachedTo", nullptr, &type, (LPBYTE)portName, &size) == ERROR_SUCCESS);
+      found_port = (RegQueryValueExA(hKey, "AttachedTo", nullptr, &type, (LPBYTE)portName, &size) == ERROR_SUCCESS);
     }
 
     if (found_port) {
@@ -141,10 +138,10 @@ std::string UsbDeviceSysfsInfo::describe() const {
   return fmt::format("{} (VID: 0x{:04x}, PID: 0x{:04x})", sysname, vendor, product);
 }
 
-std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter &filter) {
+std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter) {
   std::vector<UsbDeviceSysfsInfo> result;
   auto devices = enumerate_usb_devices_windows(filter.vendor, filter.products);
-  for (const auto &dev : devices) {
+  for (const auto& dev : devices) {
     UsbDeviceSysfsInfo info;
     info.sysname = dev.device_path;
     info.vendor = dev.vendor;
@@ -157,7 +154,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
 
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   auto devices = enumerate_usb_devices_sysfs(EnumerateFilter{.vendor = 0, .products = {}});
-  for (const auto &dev : devices) {
+  for (const auto& dev : devices) {
     if (dev.sysname == sysname) return dev;
   }
   return std::nullopt;

@@ -18,19 +18,19 @@
 #include <QApplication>
 #include <QMessageBox>
 
-#include "brokkr_wrapper.hpp"
 #include "platform/platform_all.hpp"
+#include "brokkr_wrapper.hpp"
 
 int main(int argc, char* argv[]) {
-    QApplication app(argc, argv);
+  QApplication app(argc, argv);
 
-    auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
-    if (!lock) {
-        QMessageBox::critical(nullptr, "Brokkr Flasher", "Another instance is already running.");
-        return 2;
-    }
+  auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
+  if (!lock) {
+    QMessageBox::critical(nullptr, "Brokkr Flasher", "Another instance is already running.");
+    return 2;
+  }
 
-    BrokkrWrapper window;
-    window.show();
-    return app.exec();
+  BrokkrWrapper window;
+  window.show();
+  return app.exec();
 }

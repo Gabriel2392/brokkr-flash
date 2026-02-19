@@ -39,7 +39,7 @@ struct UsbEndpoints {
 };
 
 class UsbFsDevice {
-public:
+ public:
   explicit UsbFsDevice(std::string devnode);
   ~UsbFsDevice();
 
@@ -65,7 +65,7 @@ public:
 
   void reset_device() noexcept;
 
-private:
+ private:
   std::string devnode_;
   HANDLE handle_ = INVALID_HANDLE_VALUE;
 

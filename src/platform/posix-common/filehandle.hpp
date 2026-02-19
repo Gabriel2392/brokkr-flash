@@ -63,9 +63,8 @@ struct FileHandle {
 
   bool valid() const noexcept { return fd >= 0; }
 
-  int setsockopt(int level, int optname, const void* optval, socklen_t optlen,
-                 const char* level_name, const char* opt_name) const noexcept
-  {
+  int setsockopt(int level, int optname, const void* optval, socklen_t optlen, const char* level_name,
+                 const char* opt_name) const noexcept {
     const int rc = ::setsockopt(fd, level, optname, optval, optlen);
     if (rc != 0) {
       const int e = errno;
@@ -95,9 +94,8 @@ struct FileHandle {
     return rc;
   }
 
-  static int socket(int domain, int type, int protocol,
-                    const char* domain_name, const char* type_name, const char* proto_name) noexcept
-  {
+  static int socket(int domain, int type, int protocol, const char* domain_name, const char* type_name,
+                    const char* proto_name) noexcept {
     const int rc = ::socket(domain, type, protocol);
     if (rc < 0) {
       const int e = errno;
@@ -134,7 +132,7 @@ struct FileHandle {
     (void)flags;
     const int rc = ::accept(fd, addr, addrlen);
 #else
-#  error "accept with flags not implemented on this platform"
+  #error "accept with flags not implemented on this platform"
 #endif
     if (rc < 0) {
       const int e = errno;
@@ -167,7 +165,7 @@ struct FileHandle {
 
 } // namespace brokkr
 
-#define do_setsockopt(fd, level, optname, optval, optlen) \
+#define do_setsockopt(fd, level, optname, optval, optlen)                                                              \
   ((fd).valid() ? (fd).setsockopt(level, optname, optval, optlen, #level, #optname) : -1)
 
 #define do_send(fd, buf, len, flags) ((fd).valid() ? (fd).send(buf, len, flags, #flags) : -1)

@@ -1,0 +1,113 @@
+# Brokkr clang-format — based on Google, tuned to match existing style.
+# Requires clang-format ≥ 16 (for AllowShortLambdasOnASingleLine, etc.)
+
+Language: Cpp
+BasedOnStyle: Google
+
+# ── Indentation ───────────────────────────────────────────────────────
+IndentWidth: 2
+ContinuationIndentWidth: 4
+AccessModifierOffset: -1
+IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
+NamespaceIndentation: None
+LambdaBodyIndentation: Signature
+
+# ── Column / wrapping ─────────────────────────────────────────────────
+ColumnLimit: 120
+
+# ── Braces ────────────────────────────────────────────────────────────
+BreakBeforeBraces: Attach
+Cpp11BracedListStyle: true
+InsertBraces: false
+
+# ── Short-form allowances (match existing one-liner style) ────────────
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLambdasOnASingleLine: All
+AllowShortLoopsOnASingleLine: true
+
+# ── Alignment ─────────────────────────────────────────────────────────
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignEscapedNewlines: Right
+AlignOperands: Align
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+
+# ── Bin-packing ───────────────────────────────────────────────────────
+BinPackArguments: true
+BinPackParameters: true
+
+# ── Breaking ──────────────────────────────────────────────────────────
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBinaryOperators: None
+BreakBeforeConceptDeclarations: Always
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+PackConstructorInitializers: NextLine
+
+# ── Spaces ────────────────────────────────────────────────────────────
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyBlock: false
+SpacesInAngles: Never
+SpacesBeforeTrailingComments: 1
+SpacesInContainerLiterals: false
+SpacesInParens: Never
+
+# ── Pointer / reference alignment ─────────────────────────────────────
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# ── Includes ──────────────────────────────────────────────────────────
+SortIncludes: CaseInsensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+  # 1 — project headers (quoted, path starts with known prefixes)
+  - Regex: '^"(core|io|protocol|platform|app|third_party)/'
+    Priority: 1
+  # 2 — other quoted headers (local / sibling)
+  - Regex: '^"'
+    Priority: 2
+  # 3 — C++ standard library
+  - Regex: '^<(c(assert|complex|ctype|errno|fenv|float|inttypes|iso646|limits|locale|math|setjmp|signal|stdarg|stdatomic|stdbool|stddef|stdint|stdio|stdlib|stdnoreturn|string|tgmath|threads|time|uchar|wchar|wctype)|algorithm|any|array|atomic|barrier|bit|bitset|charconv|chrono|codecvt|compare|complex|concepts|condition_variable|coroutine|deque|exception|execution|expected|filesystem|format|forward_list|fstream|functional|future|generator|initializer_list|iomanip|ios|iosfwd|iostream|istream|iterator|latch|limits|list|locale|map|mdspan|memory|memory_resource|mutex|new|numbers|numeric|optional|ostream|print|queue|random|ranges|ratio|regex|scoped_allocator|semaphore|set|shared_mutex|source_location|span|spanstream|sstream|stack|stacktrace|stdexcept|stop_token|streambuf|string|string_view|strstream|syncstream|system_error|thread|tuple|type_traits|typeindex|typeinfo|unordered_map|unordered_set|utility|valarray|variant|vector|version)>'
+    Priority: 3
+  # 4 — third-party angle-bracket includes (spdlog, fmt, Qt, etc.)
+  - Regex: '^<'
+    Priority: 4
+
+# ── Penalties (prefer keeping signatures together) ────────────────────
+PenaltyBreakAssignment: 25
+PenaltyBreakBeforeFirstCallParameter: 50
+PenaltyBreakComment: 300
+PenaltyBreakFirstLessLess: 120
+PenaltyBreakOpenParenthesis: 0
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 50
+PenaltyReturnTypeOnItsOwnLine: 200
+
+# ── Misc ──────────────────────────────────────────────────────────────
+FixNamespaceComments: false
+CompactNamespaces: false
+ReflowComments: true
+SortUsingDeclarations: Lexicographic
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: LogicalBlock
+SeparateDefinitionBlocks: Leave
+InsertNewlineAtEOF: true
+RemoveSemicolon: false
+QualifierAlignment: Leave
+Standard: c++20

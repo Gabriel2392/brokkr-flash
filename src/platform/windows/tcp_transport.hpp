@@ -24,13 +24,13 @@
 #include <span>
 #include <string>
 
-#include <WinSock2.h>
 #include <windows.h>
+#include <WinSock2.h>
 
 namespace brokkr::windows {
 
 class TcpConnection final : public brokkr::core::IByteTransport {
-public:
+ public:
   Kind kind() const noexcept override { return Kind::TcpStream; }
 
   TcpConnection() = default;
@@ -56,11 +56,11 @@ public:
 
   std::string peer_label() const;
 
-private:
+ private:
   void close_() noexcept;
   void set_sock_timeouts_() noexcept;
 
-private:
+ private:
   SOCKET fd_ = INVALID_SOCKET;
   int timeout_ms_ = 1000;
 
@@ -69,7 +69,7 @@ private:
 };
 
 class TcpListener {
-public:
+ public:
   TcpListener() = default;
   ~TcpListener();
 
@@ -80,10 +80,13 @@ public:
   brokkr::core::Result<TcpConnection> accept_one() noexcept;
 
   void close() noexcept {
-    if (fd_ != INVALID_SOCKET) { ::closesocket(fd_); fd_ = INVALID_SOCKET; }
+    if (fd_ != INVALID_SOCKET) {
+      ::closesocket(fd_);
+      fd_ = INVALID_SOCKET;
+    }
   }
 
-private:
+ private:
   SOCKET fd_ = INVALID_SOCKET;
   std::string bind_ip_;
   std::uint16_t port_ = 0;

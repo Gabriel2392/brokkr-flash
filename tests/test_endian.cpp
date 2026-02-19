@@ -75,8 +75,7 @@ static void test_host_to_le_bytes_u32() {
   std::memcpy(bytes, &le, 4);
 
   // LE wire bytes must be 01 02 03 04 regardless of host endianness
-  bool ok = bytes[0] == 0x01 && bytes[1] == 0x02 &&
-            bytes[2] == 0x03 && bytes[3] == 0x04;
+  bool ok = bytes[0] == 0x01 && bytes[1] == 0x02 && bytes[2] == 0x03 && bytes[3] == 0x04;
   check_eq("host_to_le_bytes_u32", ok, true);
 }
 

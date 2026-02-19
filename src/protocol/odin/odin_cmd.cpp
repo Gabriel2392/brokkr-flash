@@ -41,13 +41,19 @@ inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseB
   if (r.id == BOOTLOADER_FAIL) return brokkr::core::fail("Bootloader returned FAIL");
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
   if (r.id != expected_id) return brokkr::core::fail("Unexpected response id");
-  if (out_ack) *out_ack = r.ack;
-  else if (r.ack < 0) return brokkr::core::failf("Operation failed ({})", r.ack);
+  if (out_ack)
+    *out_ack = r.ack;
+  else if (r.ack < 0)
+    return brokkr::core::failf("Operation failed ({})", r.ack);
   return {};
 }
 
-static std::int32_t lo32(std::uint64_t v) { return static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0xFFFFFFFFull)); }
-static std::int32_t hi32(std::uint64_t v) { return static_cast<std::int32_t>(static_cast<std::uint32_t>((v >> 32) & 0xFFFFFFFFull)); }
+static std::int32_t lo32(std::uint64_t v) {
+  return static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0xFFFFFFFFull));
+}
+static std::int32_t hi32(std::uint64_t v) {
+  return static_cast<std::int32_t>(static_cast<std::uint32_t>((v >> 32) & 0xFFFFFFFFull));
+}
 
 static brokkr::core::Result<std::int32_t> require_i32_total(std::uint64_t v) noexcept {
   constexpr std::uint64_t max = static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max());
@@ -87,8 +93,8 @@ brokkr::core::Status OdinCommands::send_request(const RequestBox& rq, unsigned r
   return send_raw(std::as_bytes(std::span{&rq, 1}), retries);
 }
 
-brokkr::core::Result<ResponseBox>
-OdinCommands::recv_checked_response(std::int32_t expected_id, std::int32_t* out_ack, unsigned retries) noexcept {
+brokkr::core::Result<ResponseBox> OdinCommands::recv_checked_response(std::int32_t expected_id, std::int32_t* out_ack,
+                                                                      unsigned retries) noexcept {
   ResponseBox r{};
   auto st = recv_raw(std::as_writable_bytes(std::span{&r, 1}), retries);
   if (!st) return brokkr::core::fail(std::move(st.error()));
@@ -101,14 +107,10 @@ OdinCommands::recv_checked_response(std::int32_t expected_id, std::int32_t* out_
   return r;
 }
 
-brokkr::core::Result<ResponseBox>
-OdinCommands::rpc_(RqtCommandType type,
-                   RqtCommandParam param,
-                   std::span<const std::int32_t> ints,
-                   std::span<const std::int8_t> chars,
-                   std::int32_t* out_ack,
-                   unsigned retries) noexcept
-{
+brokkr::core::Result<ResponseBox> OdinCommands::rpc_(RqtCommandType type, RqtCommandParam param,
+                                                     std::span<const std::int32_t> ints,
+                                                     std::span<const std::int8_t> chars, std::int32_t* out_ack,
+                                                     unsigned retries) noexcept {
   auto st = send_request(make_request(type, param, ints, chars), retries);
   if (!st) return brokkr::core::fail(std::move(st.error()));
   return recv_checked_response(static_cast<std::int32_t>(type), out_ack, retries);
@@ -119,10 +121,11 @@ brokkr::core::Status OdinCommands::handshake(unsigned retries) noexcept {
   if (!st) return st;
 
   if (conn_.kind() == brokkr::core::IByteTransport::Kind::UsbBulk) {
-    static constexpr std::array<std::byte, 5> ping{std::byte{'O'},std::byte{'D'},std::byte{'I'},std::byte{'N'},std::byte{0}};
+    static constexpr std::array<std::byte, 5> ping{std::byte{'O'}, std::byte{'D'}, std::byte{'I'}, std::byte{'N'},
+                                                   std::byte{0}};
     st = send_raw(ping, retries);
   } else {
-    static constexpr std::array<std::byte, 4> ping{std::byte{'O'},std::byte{'D'},std::byte{'I'},std::byte{'N'}};
+    static constexpr std::array<std::byte, 4> ping{std::byte{'O'}, std::byte{'D'}, std::byte{'I'}, std::byte{'N'}};
     st = send_raw(ping, retries);
   }
   if (!st) return st;
@@ -137,14 +140,15 @@ brokkr::core::Status OdinCommands::handshake(unsigned retries) noexcept {
     have += static_cast<std::size_t>(got);
   }
 
-  if (std::memcmp(resp.data(), expected.data(), expected.size()) != 0) return brokkr::core::fail("Handshake failed (expected LOKE)");
+  if (std::memcmp(resp.data(), expected.data(), expected.size()) != 0)
+    return brokkr::core::fail("Handshake failed (expected LOKE)");
 
   spdlog::debug("ODIN handshake OK");
   return {};
 }
 
 brokkr::core::Result<InitTargetInfo> OdinCommands::get_version(unsigned retries) noexcept {
-  const std::int32_t ints[] = { static_cast<std::int32_t>(ProtocolVersion::PROTOCOL_VER5) };
+  const std::int32_t ints[] = {static_cast<std::int32_t>(ProtocolVersion::PROTOCOL_VER5)};
 
   std::int32_t ack_i32 = 0;
   auto r = rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_TARGET, ints, {}, &ack_i32, retries);
@@ -156,21 +160,22 @@ brokkr::core::Result<InitTargetInfo> OdinCommands::get_version(unsigned retries)
 }
 
 brokkr::core::Status OdinCommands::setup_transfer_options(std::int32_t packet_size, unsigned retries) noexcept {
-  const std::int32_t ints[] = { packet_size };
+  const std::int32_t ints[] = {packet_size};
   auto r = rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_PACKETSIZE, ints, {}, nullptr, retries);
   return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
 }
 
-brokkr::core::Status OdinCommands::send_total_size(std::uint64_t total_size, ProtocolVersion proto, unsigned retries) noexcept {
+brokkr::core::Status OdinCommands::send_total_size(std::uint64_t total_size, ProtocolVersion proto,
+                                                   unsigned retries) noexcept {
   if (proto <= ProtocolVersion::PROTOCOL_VER1) {
     auto v = require_i32_total(total_size);
     if (!v) return brokkr::core::fail(std::move(v.error()));
-    const std::int32_t ints[] = { *v };
+    const std::int32_t ints[] = {*v};
     auto r = rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_TOTALSIZE, ints, {}, nullptr, retries);
     return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
   }
 
-  const std::int32_t ints[] = { lo32(total_size), hi32(total_size) };
+  const std::int32_t ints[] = {lo32(total_size), hi32(total_size)};
   auto r = rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_TOTALSIZE, ints, {}, nullptr, retries);
   return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
 }
@@ -192,10 +197,8 @@ brokkr::core::Status OdinCommands::get_pit(std::span<std::byte> out, unsigned re
   for (std::size_t idx = 0; idx < parts; ++idx) {
     const std::int32_t pitIndex = static_cast<std::int32_t>(idx);
 
-    auto st = send_request(make_request(RqtCommandType::RQT_PIT,
-                                        RqtCommandParam::RQT_PIT_START,
-                                        std::span{&pitIndex, 1}),
-                           retries);
+    auto st = send_request(
+        make_request(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_START, std::span{&pitIndex, 1}), retries);
     if (!st) return st;
 
     const std::size_t sizeToDownload = std::min<std::size_t>(PIT_TRANSMIT_UNIT, pitSize - (PIT_TRANSMIT_UNIT * idx));
@@ -212,13 +215,15 @@ brokkr::core::Status OdinCommands::get_pit(std::span<std::byte> out, unsigned re
 
 brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsigned retries) noexcept {
   if (pit.empty()) return brokkr::core::fail("PIT buffer empty");
-  if (pit.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) return brokkr::core::fail("PIT too large for ODIN int32");
+  if (pit.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
+    return brokkr::core::fail("PIT too large for ODIN int32");
 
   auto r1 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_SET, {}, {}, nullptr, retries);
   if (!r1) return brokkr::core::fail(std::move(r1.error()));
 
   const auto pitSize32 = static_cast<std::int32_t>(pit.size());
-  auto r2 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_START, std::span{&pitSize32, 1}, {}, nullptr, retries);
+  auto r2 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_START, std::span{&pitSize32, 1}, {}, nullptr,
+                 retries);
   if (!r2) return brokkr::core::fail(std::move(r2.error()));
 
   auto st = send_raw(pit, retries);
@@ -230,34 +235,31 @@ brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsig
 
   response_from_le(ack);
 
-  auto r3 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {}, nullptr, retries);
+  auto r3 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {}, nullptr,
+                 retries);
   return r3 ? brokkr::core::Status{} : brokkr::core::fail(std::move(r3.error()));
 }
 
 brokkr::core::Status OdinCommands::begin_download(std::int32_t rounded_total_size, unsigned retries) noexcept {
   auto r1 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_DOWNLOAD, {}, {}, nullptr, retries);
   if (!r1) return brokkr::core::fail(std::move(r1.error()));
-  auto r2 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_START, std::span{&rounded_total_size, 1}, {}, nullptr, retries);
+  auto r2 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_START, std::span{&rounded_total_size, 1}, {},
+                 nullptr, retries);
   return r2 ? brokkr::core::Status{} : brokkr::core::fail(std::move(r2.error()));
 }
 
 brokkr::core::Status OdinCommands::begin_download_compressed(std::int32_t comp_size, unsigned retries) noexcept {
   auto r1 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_DOWNLOAD, {}, {}, nullptr, retries);
   if (!r1) return brokkr::core::fail(std::move(r1.error()));
-  auto r2 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_START, std::span{&comp_size, 1}, {}, nullptr, retries);
+  auto r2 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_START, std::span{&comp_size, 1}, {},
+                 nullptr, retries);
   return r2 ? brokkr::core::Status{} : brokkr::core::fail(std::move(r2.error()));
 }
 
-brokkr::core::Status OdinCommands::end_download_impl_(RqtCommandParam complete_param,
-                                                      std::int32_t size_to_flash,
-                                                      std::int32_t part_id,
-                                                      std::int32_t dev_type,
-                                                      bool is_last,
-                                                      std::int32_t bin_type,
-                                                      bool efs_clear,
-                                                      bool boot_update,
-                                                      unsigned retries) noexcept
-{
+brokkr::core::Status OdinCommands::end_download_impl_(RqtCommandParam complete_param, std::int32_t size_to_flash,
+                                                      std::int32_t part_id, std::int32_t dev_type, bool is_last,
+                                                      std::int32_t bin_type, bool efs_clear, bool boot_update,
+                                                      unsigned retries) noexcept {
   std::int32_t data[8]{};
   data[0] = 0;
   data[1] = size_to_flash;
@@ -272,30 +274,19 @@ brokkr::core::Status OdinCommands::end_download_impl_(RqtCommandParam complete_p
   return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
 }
 
-brokkr::core::Status OdinCommands::end_download(std::int32_t size_to_flash,
-                                                std::int32_t part_id,
-                                                std::int32_t dev_type,
-                                                bool is_last,
-                                                std::int32_t bin_type,
-                                                bool efs_clear,
-                                                bool boot_update,
-                                                unsigned retries) noexcept
-{
-  return end_download_impl_(RqtCommandParam::RQT_XMIT_COMPLETE, size_to_flash, part_id, dev_type, is_last,
-                            bin_type, efs_clear, boot_update, retries);
+brokkr::core::Status OdinCommands::end_download(std::int32_t size_to_flash, std::int32_t part_id, std::int32_t dev_type,
+                                                bool is_last, std::int32_t bin_type, bool efs_clear, bool boot_update,
+                                                unsigned retries) noexcept {
+  return end_download_impl_(RqtCommandParam::RQT_XMIT_COMPLETE, size_to_flash, part_id, dev_type, is_last, bin_type,
+                            efs_clear, boot_update, retries);
 }
 
-brokkr::core::Status OdinCommands::end_download_compressed(std::int32_t decomp_size_to_flash,
-                                                           std::int32_t part_id,
-                                                           std::int32_t dev_type,
-                                                           bool is_last,
-                                                           std::int32_t bin_type,
-                                                           bool efs_clear,
-                                                           bool boot_update,
-                                                           unsigned retries) noexcept
-{
-  return end_download_impl_(RqtCommandParam::RQT_XMIT_COMPRESSED_COMPLETE, decomp_size_to_flash, part_id, dev_type, is_last,
-                            bin_type, efs_clear, boot_update, retries);
+brokkr::core::Status OdinCommands::end_download_compressed(std::int32_t decomp_size_to_flash, std::int32_t part_id,
+                                                           std::int32_t dev_type, bool is_last, std::int32_t bin_type,
+                                                           bool efs_clear, bool boot_update,
+                                                           unsigned retries) noexcept {
+  return end_download_impl_(RqtCommandParam::RQT_XMIT_COMPRESSED_COMPLETE, decomp_size_to_flash, part_id, dev_type,
+                            is_last, bin_type, efs_clear, boot_update, retries);
 }
 
 brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries) noexcept {

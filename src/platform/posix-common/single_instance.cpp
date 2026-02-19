@@ -30,7 +30,7 @@ namespace brokkr::posix_common {
 // Apple doesn't have SOCK_CLOEXEC, but accept4 is not
 // available either, so this is fine.
 #ifndef SOCK_CLOEXEC
-#define SOCK_CLOEXEC 0
+  #define SOCK_CLOEXEC 0
 #endif
 
 SingleInstanceLock::~SingleInstanceLock() {
@@ -44,24 +44,18 @@ SingleInstanceLock::~SingleInstanceLock() {
   // fd_ closes itself via FileHandle RAII
 }
 
-SingleInstanceLock::SingleInstanceLock(SingleInstanceLock &&o) noexcept {
-  *this = std::move(o);
-}
+SingleInstanceLock::SingleInstanceLock(SingleInstanceLock&& o) noexcept { *this = std::move(o); }
 
-SingleInstanceLock &
-SingleInstanceLock::operator=(SingleInstanceLock &&o) noexcept {
-  if (this == &o)
-    return *this;
+SingleInstanceLock& SingleInstanceLock::operator=(SingleInstanceLock&& o) noexcept {
+  if (this == &o) return *this;
   fd_ = std::move(o.fd_);
   name_ = std::move(o.name_);
   return *this;
 }
 
-std::optional<SingleInstanceLock>
-SingleInstanceLock::try_acquire(std::string name) {
+std::optional<SingleInstanceLock> SingleInstanceLock::try_acquire(std::string name) {
   FileHandle fd{do_socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0)};
-  if (!fd.valid())
-    return std::nullopt;
+  if (!fd.valid()) return std::nullopt;
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
@@ -90,10 +84,10 @@ SingleInstanceLock::try_acquire(std::string name) {
   std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
   len = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() + 1);
 #else
-#error "Unsupported POSIX platform for SingleInstanceLock"
+  #error "Unsupported POSIX platform for SingleInstanceLock"
 #endif
 
-  if (do_bind(fd, reinterpret_cast<const sockaddr *>(&addr), len) != 0) {
+  if (do_bind(fd, reinterpret_cast<const sockaddr*>(&addr), len) != 0) {
     fd.close();
     return std::nullopt;
   }

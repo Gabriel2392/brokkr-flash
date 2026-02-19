@@ -59,16 +59,14 @@ static void check(const char* label, std::string_view input, const char* expecte
 // ----- RFC 1321 § A.5 test vectors -----
 
 static void test_rfc1321_vectors() {
-  check("empty",         "",                             "d41d8cd98f00b204e9800998ecf8427e");
-  check("a",             "a",                            "0cc175b9c0f1b6a831c399e269772661");
-  check("abc",           "abc",                          "900150983cd24fb0d6963f7d28e17f72");
-  check("message digest","message digest",               "f96b697d7cb7938d525a2f31aaf161d0");
-  check("a..z",          "abcdefghijklmnopqrstuvwxyz",   "c3fcd3d76192e4007dfb496cca67e13b");
-  check("A..Za..z0..9",
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+  check("empty", "", "d41d8cd98f00b204e9800998ecf8427e");
+  check("a", "a", "0cc175b9c0f1b6a831c399e269772661");
+  check("abc", "abc", "900150983cd24fb0d6963f7d28e17f72");
+  check("message digest", "message digest", "f96b697d7cb7938d525a2f31aaf161d0");
+  check("a..z", "abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b");
+  check("A..Za..z0..9", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
         "d174ab98d277d9f5a5611c2c9f419d9f");
-  check("numeric_repeat",
-        "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
+  check("numeric_repeat", "12345678901234567890123456789012345678901234567890123456789012345678901234567890",
         "57edf4a22be3c955ac49da2e2107b67a");
 }
 
@@ -78,8 +76,7 @@ static void test_single_byte_feed() {
   const char* msg = "abc";
   MD5_CTX ctx{};
   md5_init(&ctx);
-  for (std::size_t i = 0; i < 3; ++i)
-    md5_update(&ctx, reinterpret_cast<const MD5_BYTE*>(msg + i), 1);
+  for (std::size_t i = 0; i < 3; ++i) md5_update(&ctx, reinterpret_cast<const MD5_BYTE*>(msg + i), 1);
   unsigned char hash[16]{};
   md5_final(&ctx, hash);
   auto got = hex(hash);
@@ -143,7 +140,8 @@ static void test_large_buffer() {
   if (got == "b6d81b360a5672d80c27430f39153e2c") {
     ++g_pass;
   } else {
-    std::fprintf(stderr, "FAIL large_buffer(1MiB zeroes): expected b6d81b360a5672d80c27430f39153e2c, got %s\n", got.c_str());
+    std::fprintf(stderr, "FAIL large_buffer(1MiB zeroes): expected b6d81b360a5672d80c27430f39153e2c, got %s\n",
+                 got.c_str());
     ++g_fail;
   }
 }

@@ -1,20 +1,20 @@
 #pragma once
 
-#include <QWidget>
 #include <QList>
+#include <QPushButton>
 #include <QString>
 #include <QStringList>
-#include <QPushButton>
+#include <QWidget>
 
-#include <QLineEdit>
 #include <QCheckBox>
-#include <QPushButton>
-#include <QObject>
-#include <QTextEdit>
 #include <QComboBox>
 #include <QLabel>
-#include <QTimer>
+#include <QLineEdit>
+#include <QObject>
+#include <QPushButton>
 #include <QSlider>
+#include <QTextEdit>
+#include <QTimer>
 
 #include <atomic>
 #include <cstdint>
@@ -38,134 +38,133 @@ class QSocketNotifier;
 class DeviceSquare;
 
 class BrokkrWrapper : public QWidget {
+ public:
+  explicit BrokkrWrapper(QWidget* parent = nullptr);
+  ~BrokkrWrapper() override;
 
-public:
-    explicit BrokkrWrapper(QWidget* parent = nullptr);
-    ~BrokkrWrapper() override;
+  int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
 
-    int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
+ public slots:
+  void appendLogLineFromEngine(const QString& html);
 
-public slots:
-    void appendLogLineFromEngine(const QString& html);
-
-protected:
-    void closeEvent(QCloseEvent* e) override;
+ protected:
+  void closeEvent(QCloseEvent* e) override;
 
 #if defined(Q_OS_WIN)
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+  bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
 
-private slots:
-    void onRunClicked();
+ private slots:
+  void onRunClicked();
 
-private:
-    void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
+ private:
+  void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
-    void rebuildDeviceBoxes_(int boxCount, bool singleRow);
-    void refreshDeviceBoxes_();
-    void updateActionButtons_();
-    void applyWindowHeightToContents_();
+  void rebuildDeviceBoxes_(int boxCount, bool singleRow);
+  void refreshDeviceBoxes_();
+  void updateActionButtons_();
+  void applyWindowHeightToContents_();
 
-    bool canRunStart_(QString* whyNot = nullptr) const;
-    bool canRunPrintPit_(QString* whyNot = nullptr) const;
+  bool canRunStart_(QString* whyNot = nullptr) const;
+  bool canRunPrintPit_(QString* whyNot = nullptr) const;
 
-    void showBlocked_(const QString& title, const QString& msg) const;
+  void showBlocked_(const QString& title, const QString& msg) const;
 
-    void requestUsbRefresh_() noexcept;
-    void refreshConnectedDevices_();
+  void requestUsbRefresh_() noexcept;
+  void refreshConnectedDevices_();
 
-    void startWirelessListener_();
-    void stopWirelessListener_();
+  void startWirelessListener_();
+  void stopWirelessListener_();
 
-    void startWorkStart_();
-    void startWorkPrintPit_();
+  void startWorkStart_();
+  void startWorkPrintPit_();
 
-    void setBusy_(bool busy);
-    void setControlsEnabled_(bool enabled);
+  void setBusy_(bool busy);
+  void setControlsEnabled_(bool enabled);
 
-    void appendLogLine_(const QString& html);
+  void appendLogLine_(const QString& html);
 
-    void setSquaresProgress_(double frac, bool animate);
-    void setSquaresText_(const QString& s);
-    void setSquaresActiveColor_(bool enhanced);
-    void setSquaresFinal_(bool ok);
+  void setSquaresProgress_(double frac, bool animate);
+  void setSquaresText_(const QString& s);
+  void setSquaresActiveColor_(bool enhanced);
+  void setSquaresFinal_(bool ok);
 
-private:
-    static constexpr int kBoxesNormal    = 8;
-    static constexpr int kMassDlMaxBoxes = 24;
-    static constexpr int kBoxesColsMany  = 8;
+ private:
+  static constexpr int kBoxesNormal = 8;
+  static constexpr int kMassDlMaxBoxes = 24;
+  static constexpr int kBoxesColsMany = 8;
 
-    QStringList connectedDevices_;
-    bool overflowDevices_ = false;
+  QStringList connectedDevices_;
+  bool overflowDevices_ = false;
 
-    int baseWindowHeight_ = 600;
+  int baseWindowHeight_ = 600;
 
-    QGroupBox* idComGroup_ = nullptr;
-    QGridLayout* idComLayout_ = nullptr;
+  QGroupBox* idComGroup_ = nullptr;
+  QGridLayout* idComLayout_ = nullptr;
 
-    QList<DeviceSquare*> devSquares_;
-    QList<QLineEdit*> comBoxes;
+  QList<DeviceSquare*> devSquares_;
+  QList<QLineEdit*> comBoxes;
 
-    std::vector<std::uint8_t> slotFailed_;
-    std::vector<std::uint8_t> slotActive_;
+  std::vector<std::uint8_t> slotFailed_;
+  std::vector<std::uint8_t> slotActive_;
 
-    QTabWidget* tabWidget_ = nullptr;
-    QTextEdit* consoleOutput = nullptr;
+  QTabWidget* tabWidget_ = nullptr;
+  QTextEdit* consoleOutput = nullptr;
 
-    QLineEdit* editTarget = nullptr;
-    QCheckBox* chkWireless = nullptr;
+  QLineEdit* editTarget = nullptr;
+  QCheckBox* chkWireless = nullptr;
 
-    QPushButton* btnManyDevices_ = nullptr;
-    QSlider* sldDeviceBoxes = nullptr;
-    QLabel* lblDeviceBoxes = nullptr;
+  QPushButton* btnManyDevices_ = nullptr;
+  QSlider* sldDeviceBoxes = nullptr;
+  QLabel* lblDeviceBoxes = nullptr;
 
-    QCheckBox* chkAdvanced_ = nullptr;
+  QCheckBox* chkAdvanced_ = nullptr;
 
-    QComboBox* cmbRebootAction = nullptr;
+  QComboBox* cmbRebootAction = nullptr;
 
-    QCheckBox* chkUsePit = nullptr;
-    QLineEdit* editPit = nullptr;
-    QPushButton* btnPitBrowse = nullptr;
+  QCheckBox* chkUsePit = nullptr;
+  QLineEdit* editPit = nullptr;
+  QPushButton* btnPitBrowse = nullptr;
 
-    QLineEdit* editBL = nullptr;
-    QLineEdit* editAP = nullptr;
-    QLineEdit* editCP = nullptr;
-    QLineEdit* editCSC = nullptr;
-    QLineEdit* editUserData = nullptr;
+  QLineEdit* editBL = nullptr;
+  QLineEdit* editAP = nullptr;
+  QLineEdit* editCP = nullptr;
+  QLineEdit* editCSC = nullptr;
+  QLineEdit* editUserData = nullptr;
 
-    QPushButton* btnRun = nullptr;
-    QPushButton* btnPrintPit = nullptr;
-    QPushButton* btnReset_ = nullptr;
+  QPushButton* btnRun = nullptr;
+  QPushButton* btnPrintPit = nullptr;
+  QPushButton* btnReset_ = nullptr;
 
-    QList<QCheckBox*> fileChecks_;
-    QList<QPushButton*> fileButtons_;
+  QList<QCheckBox*> fileChecks_;
+  QList<QPushButton*> fileButtons_;
 
-    QString lastDir;
+  QString lastDir;
 
-    QTimer* deviceTimer = nullptr;
-    std::atomic_bool usbDirty_{true};
-    bool busy_ = false;
+  QTimer* deviceTimer = nullptr;
+  std::atomic_bool usbDirty_{true};
+  bool busy_ = false;
 
 #if defined(BROKKR_PLATFORM_LINUX)
-    int uevent_fd_ = -1;
-    QSocketNotifier* uevent_notifier_ = nullptr;
+  int uevent_fd_ = -1;
+  QSocketNotifier* uevent_notifier_ = nullptr;
 #endif
 
-    std::jthread worker_;
+  std::jthread worker_;
 
-    std::jthread wireless_thread_;
-    mutable std::mutex wireless_mtx_;
-    std::optional<brokkr::platform::TcpListener> wireless_listener_;
-    std::optional<brokkr::platform::TcpConnection> wireless_conn_;
-    QString wireless_sysname_;
+  std::jthread wireless_thread_;
+  mutable std::mutex wireless_mtx_;
+  std::optional<brokkr::platform::TcpListener> wireless_listener_;
+  std::optional<brokkr::platform::TcpConnection> wireless_conn_;
+  QString wireless_sysname_;
 
-    std::atomic_int logDevCount_{0};
+  std::atomic_int logDevCount_{0};
 
-    QStringList physicalUsbPrev_;
-    bool physicalWirelessPrev_ = false;
-    QString physicalWirelessIdPrev_;
+  QStringList physicalUsbPrev_;
+  bool physicalWirelessPrev_ = false;
+  QString physicalWirelessIdPrev_;
 
-    std::vector<QString> plan_names_;
-    std::vector<QString> plan_from_names_;
-    bool enhanced_speed_ = false;
+  std::vector<QString> plan_names_;
+  std::vector<QString> plan_from_names_;
+  bool enhanced_speed_ = false;
 };

@@ -40,20 +40,14 @@ sigset_t make_set() {
   return set;
 }
 
-const char *sig_desc(int signo) {
+const char* sig_desc(int signo) {
   switch (signo) {
-  case SIGINT:
-    return "SIGINT";
-  case SIGTERM:
-    return "SIGTERM";
-  case SIGHUP:
-    return "SIGHUP";
-  case SIGQUIT:
-    return "SIGQUIT";
-  case SIGTSTP:
-    return "SIGTSTP";
-  default:
-    return "SIGNAL";
+    case SIGINT: return "SIGINT";
+    case SIGTERM: return "SIGTERM";
+    case SIGHUP: return "SIGHUP";
+    case SIGQUIT: return "SIGQUIT";
+    case SIGTSTP: return "SIGTSTP";
+    default: return "SIGNAL";
   }
 }
 
@@ -63,11 +57,10 @@ SignalShield::SignalShield(Callback cb) : cb_(std::move(cb)) {}
 
 SignalShield::~SignalShield() { stop_and_restore_(); }
 
-SignalShield::SignalShield(SignalShield &&o) noexcept { *this = std::move(o); }
+SignalShield::SignalShield(SignalShield&& o) noexcept { *this = std::move(o); }
 
-SignalShield &SignalShield::operator=(SignalShield &&o) noexcept {
-  if (this == &o)
-    return *this;
+SignalShield& SignalShield::operator=(SignalShield&& o) noexcept {
+  if (this == &o) return *this;
 
   stop_and_restore_();
 
@@ -88,8 +81,7 @@ void SignalShield::stop_and_restore_() noexcept {
 
     ::kill(::getpid(), SIGTERM);
 
-    if (watcher_.joinable())
-      watcher_.join();
+    if (watcher_.joinable()) watcher_.join();
     active_ = false;
   }
 
@@ -121,15 +113,12 @@ std::optional<SignalShield> SignalShield::enable(Callback cb) {
     for (;;) {
       int signo = 0;
       const int r = ::sigwait(&waitset, &signo);
-      if (r != 0)
-        continue;
+      if (r != 0) continue;
 
-      if (st.stop_requested())
-        break;
+      if (st.stop_requested()) break;
 
       ++count;
-      if (cb2)
-        cb2(sig_desc(signo), count);
+      if (cb2) cb2(sig_desc(signo), count);
     }
   });
 

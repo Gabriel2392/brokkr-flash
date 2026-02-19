@@ -31,7 +31,7 @@
 namespace brokkr::core {
 
 class ThreadPool {
-public:
+ public:
   using Task = std::function<Status()>;
 
   explicit ThreadPool(std::size_t thread_count);
@@ -49,11 +49,11 @@ public:
   bool cancelled() const noexcept { return cancel_.load(std::memory_order_relaxed); }
   std::size_t active() const noexcept { return active_.load(std::memory_order_relaxed); }
 
-private:
+ private:
   void worker_loop_() noexcept;
   void set_error_(Status st) noexcept;
 
-private:
+ private:
   std::vector<std::thread> workers_;
 
   std::mutex mtx_;

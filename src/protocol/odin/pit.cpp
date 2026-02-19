@@ -42,15 +42,15 @@ static std::string trim_fixed_field(const std::int8_t* p, std::size_t n) {
   std::string s = trim_nul_string(p, n);
   while (!s.empty()) {
     const unsigned char c = static_cast<unsigned char>(s.back());
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') s.pop_back();
-    else break;
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+      s.pop_back();
+    else
+      break;
   }
   return s;
 }
 
-static std::int32_t block_bytes_for_dev_type(std::int32_t dev_type) noexcept {
-  return (dev_type == 8) ? 4096 : 512;
-}
+static std::int32_t block_bytes_for_dev_type(std::int32_t dev_type) noexcept { return (dev_type == 8) ? 4096 : 512; }
 
 struct RawEntry {
   PartitionInfoWire w{};
@@ -66,8 +66,8 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   PitHeaderWire hdr{};
   std::memcpy(&hdr, bytes.data(), sizeof(hdr));
 
-  hdr.magic    = brokkr::core::le_to_host(hdr.magic);
-  hdr.count    = brokkr::core::le_to_host(hdr.count);
+  hdr.magic = brokkr::core::le_to_host(hdr.magic);
+  hdr.count = brokkr::core::le_to_host(hdr.count);
   hdr.lu_count = brokkr::core::le_to_host(hdr.lu_count);
   hdr.reserved = brokkr::core::le_to_host(hdr.reserved);
 
@@ -79,9 +79,9 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   if (bytes.size() < required) return brokkr::core::fail("PIT parse: buffer smaller than declared partition table");
 
   PitTable out;
-  out.com_tar2  = trim_fixed_field(hdr.com_tar2, sizeof(hdr.com_tar2));
+  out.com_tar2 = trim_fixed_field(hdr.com_tar2, sizeof(hdr.com_tar2));
   out.cpu_bl_id = trim_fixed_field(hdr.cpu_bl_id, sizeof(hdr.cpu_bl_id));
-  out.lu_count  = hdr.lu_count;
+  out.lu_count = hdr.lu_count;
 
   std::vector<RawEntry> raw;
   raw.reserve(count);
@@ -91,15 +91,15 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
     PartitionInfoWire w{};
     std::memcpy(&w, bytes.data() + off, sizeof(w));
 
-    w.binType         = brokkr::core::le_to_host(w.binType);
-    w.devType         = brokkr::core::le_to_host(w.devType);
-    w.id              = brokkr::core::le_to_host(w.id);
-    w.attribute       = brokkr::core::le_to_host(w.attribute);
+    w.binType = brokkr::core::le_to_host(w.binType);
+    w.devType = brokkr::core::le_to_host(w.devType);
+    w.id = brokkr::core::le_to_host(w.id);
+    w.attribute = brokkr::core::le_to_host(w.attribute);
     w.updateAttribute = brokkr::core::le_to_host(w.updateAttribute);
-    w.blockSize       = brokkr::core::le_to_host(w.blockSize);
-    w.blockLength     = brokkr::core::le_to_host(w.blockLength);
-    w.offset          = brokkr::core::le_to_host(w.offset);
-    w.fileSize        = brokkr::core::le_to_host(w.fileSize);
+    w.blockSize = brokkr::core::le_to_host(w.blockSize);
+    w.blockLength = brokkr::core::le_to_host(w.blockLength);
+    w.offset = brokkr::core::le_to_host(w.offset);
+    w.fileSize = brokkr::core::le_to_host(w.fileSize);
 
     RawEntry r;
     r.w = w;
@@ -116,7 +116,9 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   }
 
   const bool blockSize_is_begin_block = (max_blockSize > 4096) && (max_offset <= 4096);
-  auto begin_block_of = [&](const PartitionInfoWire& w) -> std::int32_t { return blockSize_is_begin_block ? w.blockSize : w.offset; };
+  auto begin_block_of = [&](const PartitionInfoWire& w) -> std::int32_t {
+    return blockSize_is_begin_block ? w.blockSize : w.offset;
+  };
 
   out.partitions.resize(count);
   for (std::size_t i = 0; i < count; ++i) {
@@ -141,7 +143,9 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
 
   for (auto& [dev, idxs] : by_dev) {
     (void)dev;
-    std::ranges::sort(idxs, [&](std::size_t a, std::size_t b) { return out.partitions[a].begin_block < out.partitions[b].begin_block; });
+    std::ranges::sort(idxs, [&](std::size_t a, std::size_t b) {
+      return out.partitions[a].begin_block < out.partitions[b].begin_block;
+    });
 
     for (std::size_t k = 0; k < idxs.size(); ++k) {
       const std::size_t i = idxs[k];
@@ -152,7 +156,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
       if (k + 1 < idxs.size()) {
         const std::size_t j = idxs[k + 1];
         const auto next_begin = out.partitions[j].begin_block;
-        const auto cur_begin  = p.begin_block;
+        const auto cur_begin = p.begin_block;
         if (next_begin > cur_begin) blocks = next_begin - cur_begin;
       } else {
         const auto pit_len = raw[i].w.blockLength;
@@ -162,7 +166,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
       p.block_size = blocks;
 
       const std::uint64_t bb = (p.block_bytes > 0) ? static_cast<std::uint64_t>(p.block_bytes) : 0ull;
-      const std::uint64_t bc = (p.block_size  > 0) ? static_cast<std::uint64_t>(p.block_size)  : 0ull;
+      const std::uint64_t bc = (p.block_size > 0) ? static_cast<std::uint64_t>(p.block_size) : 0ull;
       p.file_size = bb * bc;
     }
   }

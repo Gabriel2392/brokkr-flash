@@ -28,14 +28,12 @@ namespace {
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
   switch (fdwCtrlType) {
-  case CTRL_C_EVENT:
-  case CTRL_CLOSE_EVENT:
-  case CTRL_BREAK_EVENT:
-  case CTRL_LOGOFF_EVENT:
-  case CTRL_SHUTDOWN_EVENT:
-    return TRUE;
-  default:
-    return FALSE;
+    case CTRL_C_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT: return TRUE;
+    default: return FALSE;
   }
 }
 
@@ -45,11 +43,10 @@ SignalShield::SignalShield(Callback cb) : cb_(std::move(cb)) {}
 
 SignalShield::~SignalShield() { stop_and_restore_(); }
 
-SignalShield::SignalShield(SignalShield &&o) noexcept { *this = std::move(o); }
+SignalShield::SignalShield(SignalShield&& o) noexcept { *this = std::move(o); }
 
-SignalShield &SignalShield::operator=(SignalShield &&o) noexcept {
-  if (this == &o)
-    return *this;
+SignalShield& SignalShield::operator=(SignalShield&& o) noexcept {
+  if (this == &o) return *this;
 
   stop_and_restore_();
 
@@ -65,8 +62,7 @@ void SignalShield::stop_and_restore_() noexcept {
   if (active_) {
     watcher_.request_stop();
 
-    if (watcher_.joinable())
-      watcher_.join();
+    if (watcher_.joinable()) watcher_.join();
     active_ = false;
   }
 }

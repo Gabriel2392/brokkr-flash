@@ -42,15 +42,16 @@ inline std::uint64_t round_up_512(std::uint64_t n) noexcept {
 inline std::string basename_of(std::string_view s) {
   const auto pos1 = s.find_last_of('/');
   const auto pos2 = s.find_last_of('\\');
-  const auto pos = (pos1 == std::string_view::npos) ? pos2
-                 : (pos2 == std::string_view::npos) ? pos1
-                 : std::max(pos1, pos2);
+  const auto pos = (pos1 == std::string_view::npos)   ? pos2
+                   : (pos2 == std::string_view::npos) ? pos1
+                                                      : std::max(pos1, pos2);
   return (pos == std::string_view::npos) ? std::string(s) : std::string(s.substr(pos + 1));
 }
 
 static brokkr::core::Result<std::uint64_t> parse_u64_dec(std::string_view s) noexcept {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
+    s.remove_suffix(1);
 
   std::uint64_t v = 0;
   auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, 10);
@@ -84,12 +85,14 @@ bool TarArchive::is_tar_file(const std::string& path) noexcept {
 }
 
 std::optional<TarEntry> TarArchive::find_by_basename(std::string_view base) const {
-  for (const auto& e : entries_) if (basename_of(e.name) == base) return e;
+  for (const auto& e : entries_)
+    if (basename_of(e.name) == base) return e;
   return std::nullopt;
 }
 
 bool TarArchive::header_all_zero(std::span<const std::byte, 512> header) noexcept {
-  for (auto b : header) if (b != std::byte{0}) return false;
+  for (auto b : header)
+    if (b != std::byte{0}) return false;
   return true;
 }
 
@@ -104,7 +107,8 @@ std::string TarArchive::trim_cstr_field(const char* p, std::size_t n) {
 
 std::uint64_t TarArchive::parse_octal(std::string_view s) noexcept {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\0')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\0' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\0' || s.back() == '\r' || s.back() == '\n'))
+    s.remove_suffix(1);
 
   std::uint64_t v = 0;
   for (char ch : s) {
@@ -125,7 +129,8 @@ brokkr::core::Result<std::uint64_t> TarArchive::parse_tar_number(const char* p, 
 
     std::uint64_t val = static_cast<std::uint64_t>(b0 & 0x3Fu);
     for (std::size_t i = 1; i < n; ++i) {
-      if (val > (std::numeric_limits<std::uint64_t>::max() >> 8)) return brokkr::core::fail("Tar: base-256 numeric field too large for uint64");
+      if (val > (std::numeric_limits<std::uint64_t>::max() >> 8))
+        return brokkr::core::fail("Tar: base-256 numeric field too large for uint64");
       val = (val << 8) | static_cast<unsigned char>(p[i]);
     }
     return val;
@@ -197,7 +202,8 @@ brokkr::core::Result<TarArchive::PaxKV> TarArchive::parse_pax_payload(std::strin
     const auto key = kvs.substr(0, eq);
     const auto val = kvs.substr(eq + 1);
 
-    if (key == "path") kv.path = std::string(val);
+    if (key == "path")
+      kv.path = std::string(val);
     else if (key == "size") {
       auto sz = parse_u64_dec(val);
       if (!sz) return brokkr::core::fail(std::move(sz.error()));
@@ -226,7 +232,10 @@ brokkr::core::Status TarArchive::scan_() noexcept {
 
   std::unordered_map<std::string, TarEntry> payload_by_name;
 
-  struct PendingHardlink { std::string name; std::string target; };
+  struct PendingHardlink {
+    std::string name;
+    std::string target;
+  };
   std::vector<PendingHardlink> pending_hardlinks;
 
   auto read_exact = [&](std::byte* dst, std::size_t n) -> brokkr::core::Status {
@@ -238,7 +247,8 @@ brokkr::core::Status TarArchive::scan_() noexcept {
 
   auto skip_exact = [&](std::uint64_t n) -> brokkr::core::Status {
     if (n == 0) return {};
-    if (n > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max())) return brokkr::core::fail("TarArchive: entry too large for seekg");
+    if (n > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
+      return brokkr::core::fail("TarArchive: entry too large for seekg");
     in.seekg(static_cast<std::streamoff>(n), std::ios::cur);
     if (!in.good()) return brokkr::core::failf("TarArchive: seek failed: {}", path_);
     pos += n;
@@ -270,9 +280,7 @@ brokkr::core::Status TarArchive::scan_() noexcept {
       in.read(reinterpret_cast<char*>(hdr2.data()), static_cast<std::streamsize>(hdr2.size()));
       const auto got2 = in.gcount();
 
-      if (got2 == static_cast<std::streamsize>(hdr2.size()) &&
-          header_all_zero(std::span<const std::byte, 512>(hdr2)))
-      {
+      if (got2 == static_cast<std::streamsize>(hdr2.size()) && header_all_zero(std::span<const std::byte, 512>(hdr2))) {
         pos += hdr2.size();
         payload_size_bytes_ = pos;
       } else {
@@ -287,9 +295,9 @@ brokkr::core::Status TarArchive::scan_() noexcept {
 
     const char* h = reinterpret_cast<const char*>(header.data());
 
-    const std::string name   = trim_cstr_field(h + 0,   100);
+    const std::string name = trim_cstr_field(h + 0, 100);
     const std::string prefix = trim_cstr_field(h + 345, 155);
-    const char typeflag      = h[156];
+    const char typeflag = h[156];
 
     auto szr = parse_tar_number(h + 124, 12);
     if (!szr) return brokkr::core::fail(std::move(szr.error()));
@@ -306,8 +314,10 @@ brokkr::core::Status TarArchive::scan_() noexcept {
       auto kvr = parse_pax_payload(payload);
       if (!kvr) return brokkr::core::fail(std::move(kvr.error()));
 
-      if (typeflag == 'g') pax_global.merge_from(*kvr);
-      else pax_next.merge_from(*kvr);
+      if (typeflag == 'g')
+        pax_global.merge_from(*kvr);
+      else
+        pax_next.merge_from(*kvr);
       continue;
     }
 

@@ -25,9 +25,9 @@
 namespace brokkr::io {
 
 class RawFileSource final : public ByteSource {
-public:
+ public:
   explicit RawFileSource(std::filesystem::path p, std::uint64_t size)
-    : path_(std::move(p)), in_(path_, std::ios::binary), size_(size) {}
+      : path_(std::move(p)), in_(path_, std::ios::binary), size_(size) {}
 
   bool opened() const noexcept { return in_.is_open(); }
 
@@ -41,19 +41,16 @@ public:
     return (n <= 0) ? 0u : static_cast<std::size_t>(n);
   }
 
-private:
+ private:
   std::filesystem::path path_;
   std::ifstream in_;
   std::uint64_t size_ = 0;
 };
 
 class TarEntrySource final : public ByteSource {
-public:
+ public:
   TarEntrySource(std::filesystem::path tar, TarEntry e)
-    : tar_path_(std::move(tar))
-    , entry_(std::move(e))
-    , in_(tar_path_, std::ios::binary)
-    , remaining_(entry_.size) {}
+      : tar_path_(std::move(tar)), entry_(std::move(e)), in_(tar_path_, std::ios::binary), remaining_(entry_.size) {}
 
   bool opened() const noexcept { return in_.is_open(); }
 
@@ -77,7 +74,7 @@ public:
     return static_cast<std::size_t>(n);
   }
 
-private:
+ private:
   std::filesystem::path tar_path_;
   TarEntry entry_;
   std::ifstream in_;
@@ -95,7 +92,8 @@ brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::files
   return std::move(ptr);
 }
 
-brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path, const TarEntry& entry) noexcept {
+brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path,
+                                                                 const TarEntry& entry) noexcept {
   auto ptr = std::make_unique<TarEntrySource>(tar_path, entry);
 
   if (!ptr->opened()) return brokkr::core::failf("open_tar_entry: cannot open tar: {}", tar_path.string());

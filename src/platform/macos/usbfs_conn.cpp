@@ -26,12 +26,10 @@
 namespace brokkr::macos {
 
 namespace {
-constexpr std::size_t BULK_BUFFER_LENGTH_LIMIT    = 16 * 1024;
+constexpr std::size_t BULK_BUFFER_LENGTH_LIMIT = 16 * 1024;
 constexpr std::size_t BULK_BUFFER_LENGTH_NO_LIMIT = 128 * 1024;
 
-inline bool ok_or_underrun(IOReturn kr) noexcept {
-  return kr == kIOReturnSuccess || kr == kIOReturnUnderrun;
-}
+inline bool ok_or_underrun(IOReturn kr) noexcept { return kr == kIOReturnSuccess || kr == kIOReturnUnderrun; }
 } // namespace
 
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
@@ -40,8 +38,7 @@ brokkr::core::Status UsbFsConnection::open() noexcept {
   if (connected_) return {};
   if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");
 
-  max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT
-                                                : BULK_BUFFER_LENGTH_NO_LIMIT;
+  max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT : BULK_BUFFER_LENGTH_NO_LIMIT;
 
   connected_ = true;
   zlp_needed_ = true;
@@ -65,13 +62,13 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
 
     unsigned attempt = 0;
     for (;;) {
-      IOReturn kr = (*ifc)->WritePipeTO(
-        ifc, dev_.pipe_out_ref(),
-        const_cast<void*>(static_cast<const void*>(p)), want,
-        static_cast<UInt32>(timeout_ms_), static_cast<UInt32>(timeout_ms_)
-      );
+      IOReturn kr = (*ifc)->WritePipeTO(ifc, dev_.pipe_out_ref(), const_cast<void*>(static_cast<const void*>(p)), want,
+                                        static_cast<UInt32>(timeout_ms_), static_cast<UInt32>(timeout_ms_));
 
-      if (ok_or_underrun(kr)) { p += want; break; }
+      if (ok_or_underrun(kr)) {
+        p += want;
+        break;
+      }
       if (++attempt > retries) return -1;
       ::usleep(10'000);
     }
@@ -114,10 +111,8 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
     unsigned attempt = 0;
     for (;;) {
       bytesRead = xfer;
-      IOReturn kr = (*ifc)->ReadPipeTO(
-        ifc, dev_.pipe_in_ref(), p, &bytesRead,
-        static_cast<UInt32>(timeout_ms_), static_cast<UInt32>(timeout_ms_)
-      );
+      IOReturn kr = (*ifc)->ReadPipeTO(ifc, dev_.pipe_in_ref(), p, &bytesRead, static_cast<UInt32>(timeout_ms_),
+                                       static_cast<UInt32>(timeout_ms_));
 
       if (ok_or_underrun(kr)) break;
       if (++attempt > retries) return -1;

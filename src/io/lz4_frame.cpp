@@ -33,9 +33,7 @@ namespace brokkr::io {
 
 namespace {
 
-constexpr std::array<std::byte, 4> kLz4Magic{
-  std::byte{0x04}, std::byte{0x22}, std::byte{0x4D}, std::byte{0x18}
-};
+constexpr std::array<std::byte, 4> kLz4Magic{std::byte{0x04}, std::byte{0x22}, std::byte{0x4D}, std::byte{0x18}};
 
 static std::uint32_t u32_le(std::span<const std::byte, 4> b) {
   const auto u0 = static_cast<std::uint32_t>(static_cast<unsigned char>(b[0]));
@@ -77,16 +75,16 @@ brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src)
   if (!st) return brokkr::core::fail(std::move(st.error()));
 
   info.flg = static_cast<std::uint8_t>(static_cast<unsigned char>(fb[0]));
-  info.bd  = static_cast<std::uint8_t>(static_cast<unsigned char>(fb[1]));
+  info.bd = static_cast<std::uint8_t>(static_cast<unsigned char>(fb[1]));
 
   const std::uint8_t version = static_cast<std::uint8_t>((info.flg >> 6) & 0x03u);
   if (version != 1) return brokkr::core::fail("LZ4: unsupported frame version");
 
   info.block_independence = (info.flg & 0x20u) != 0;
-  info.block_checksum     = (info.flg & 0x10u) != 0;
-  info.has_content_size   = (info.flg & 0x08u) != 0;
-  info.content_checksum   = (info.flg & 0x04u) != 0;
-  info.has_dict_id        = (info.flg & 0x01u) != 0;
+  info.block_checksum = (info.flg & 0x10u) != 0;
+  info.has_content_size = (info.flg & 0x08u) != 0;
+  info.content_checksum = (info.flg & 0x04u) != 0;
+  info.has_dict_id = (info.flg & 0x01u) != 0;
 
   if (!info.block_independence) return brokkr::core::fail("LZ4: frame must use independent blocks");
   if (info.block_checksum) return brokkr::core::fail("LZ4: block checksum not supported");
@@ -95,7 +93,8 @@ brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src)
 
   info.max_block_size = max_block_size_from_bd(info.bd);
   if (info.max_block_size == 0) return brokkr::core::fail("LZ4: invalid BD/max block size");
-  if (info.max_block_size > static_cast<std::size_t>(LZ4_ONE_MIB)) return brokkr::core::fail("LZ4: max block size > 1MiB not supported");
+  if (info.max_block_size > static_cast<std::size_t>(LZ4_ONE_MIB))
+    return brokkr::core::fail("LZ4: max block size > 1MiB not supported");
 
   std::array<std::byte, 8> cs{};
   st = read_exact(src, std::span<std::byte>(cs.data(), cs.size()));
@@ -130,9 +129,12 @@ std::size_t Lz4BlockStreamReader::blocks_remaining_1m() const noexcept {
   return (blocks_read_ >= t) ? 0u : (t - blocks_read_);
 }
 
-brokkr::core::Status Lz4BlockStreamReader::read_exact_(std::span<std::byte> out) noexcept { return read_exact(*src_, out); }
+brokkr::core::Status Lz4BlockStreamReader::read_exact_(std::span<std::byte> out) noexcept {
+  return read_exact(*src_, out);
+}
 
-brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_t n, std::vector<std::byte>& out) noexcept {
+brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_t n,
+                                                                      std::vector<std::byte>& out) noexcept {
   if (n == 0) return std::size_t{0};
 
   const std::size_t before = out.size();
@@ -165,11 +167,10 @@ brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_
 }
 
 Lz4DecompressedSource::Lz4DecompressedSource(std::unique_ptr<ByteSource> src, Lz4FrameHeaderInfo hdr) noexcept
-  : src_(std::move(src))
-  , display_(src_ ? src_->display_name() : std::string{})
-  , hdr_(hdr)
-  , total_out_(hdr_.content_size)
-{
+    : src_(std::move(src)),
+      display_(src_ ? src_->display_name() : std::string{}),
+      hdr_(hdr),
+      total_out_(hdr_.content_size) {
   block_out_.reserve(static_cast<std::size_t>(LZ4_ONE_MIB));
   comp_payload_.reserve(static_cast<std::size_t>(LZ4_ONE_MIB) + 64);
 }
@@ -180,7 +181,9 @@ brokkr::core::Result<std::unique_ptr<ByteSource>> Lz4DecompressedSource::open(st
   return std::unique_ptr<ByteSource>(new Lz4DecompressedSource(std::move(src), h));
 }
 
-brokkr::core::Status Lz4DecompressedSource::read_exact_(std::span<std::byte> out) noexcept { return read_exact(*src_, out); }
+brokkr::core::Status Lz4DecompressedSource::read_exact_(std::span<std::byte> out) noexcept {
+  return read_exact(*src_, out);
+}
 
 brokkr::core::Status Lz4DecompressedSource::fill_next_block_() noexcept {
   if (produced_ >= total_out_) return brokkr::core::fail("LZ4: internal: produced >= total");
@@ -211,12 +214,11 @@ brokkr::core::Status Lz4DecompressedSource::fill_next_block_() noexcept {
     if (payload != expected_out) return brokkr::core::fail("LZ4: uncompressed block size mismatch");
     std::memcpy(block_out_.data(), comp_payload_.data(), payload);
   } else {
-    const int ret = ::LZ4_decompress_safe(comp_payload_.data(),
-                                         reinterpret_cast<char*>(block_out_.data()),
-                                         static_cast<int>(payload),
-                                         static_cast<int>(expected_out));
+    const int ret = ::LZ4_decompress_safe(comp_payload_.data(), reinterpret_cast<char*>(block_out_.data()),
+                                          static_cast<int>(payload), static_cast<int>(expected_out));
     if (ret < 0) return brokkr::core::fail("LZ4: decompression failed (LZ4_decompress_safe)");
-    if (static_cast<std::size_t>(ret) != expected_out) return brokkr::core::fail("LZ4: decompression produced unexpected size");
+    if (static_cast<std::size_t>(ret) != expected_out)
+      return brokkr::core::fail("LZ4: decompression produced unexpected size");
   }
 
   produced_ += expected_out;
@@ -237,7 +239,10 @@ std::size_t Lz4DecompressedSource::read(std::span<std::byte> out) {
       if (produced_ >= total_out_) break;
 
       st_ = fill_next_block_();
-      if (!st_) { spdlog::error("LZ4 read error: {}", st_.error()); break; }
+      if (!st_) {
+        spdlog::error("LZ4 read error: {}", st_.error());
+        break;
+      }
     }
 
     const std::size_t avail = block_out_.size() - block_off_;
