@@ -54,6 +54,8 @@ class BrokkrWrapper : public QWidget {
   bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
 
+  void changeEvent(QEvent* e) override;
+
  private slots:
   void onRunClicked();
 
