@@ -106,8 +106,8 @@ endif()
 # Platform-specific source files and definitions
 # -----------------------------------------
 if (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_compile_definitions(BROKKR_PLATFORM_LINUX)
     add_library(brokkr-platform INTERFACE)
+    target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_LINUX)
     target_sources(brokkr-platform INTERFACE
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
@@ -117,12 +117,12 @@ if (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/platform/linux/usbfs_conn.cpp
     )
 elseif (WIN32)
-    add_compile_definitions(
+    add_library(brokkr-platform INTERFACE)
+    target_compile_definitions(brokkr-platform INTERFACE
         BROKKR_PLATFORM_WINDOWS
         WIN32_LEAN_AND_MEAN
         NOMINMAX
     )
-    add_library(brokkr-platform INTERFACE)
     target_sources(brokkr-platform INTERFACE
         src/platform/windows/signal_shield.cpp
         src/platform/windows/single_instance.cpp
@@ -132,8 +132,8 @@ elseif (WIN32)
         src/platform/windows/tcp_transport.cpp
     )
 elseif (APPLE)
-    add_compile_definitions(BROKKR_PLATFORM_MACOS)
     add_library(brokkr-platform INTERFACE)
+    target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_MACOS)
     target_sources(brokkr-platform INTERFACE
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
@@ -302,37 +302,21 @@ if (Qt6_FOUND)
         endif()
     endif()
 
-    if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
-        AND CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
+    if (NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_definitions(brokkr PRIVATE _FILE_OFFSET_BITS=64 _LARGEFILE_SOURCE)
-        if (NOT CMAKE_CROSSCOMPILING)
-             target_compile_options(brokkr PRIVATE -march=native -mtune=native)
-        endif()
-        target_compile_options(brokkr PRIVATE -O3 -ffunction-sections -fdata-sections)
+        target_compile_options(brokkr PRIVATE
+            $<$<CONFIG:Release,RelWithDebInfo>:-O3 -ffunction-sections -fdata-sections>
+        )
     endif()
 
-    if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE MATCHES "Release|RelWithDebInfo")
-        include(CheckIPOSupported)
-        check_ipo_supported(RESULT LTO_SUPPORTED)
-        if (LTO_SUPPORTED)
-            message(STATUS "Enabling LTO (Link time optimization)")
-            set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-            set_target_properties(brokkr-platform PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-            set_target_properties(brokkr-lib PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
-        endif()
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT LTO_SUPPORTED)
+    if (LTO_SUPPORTED)
+        message(STATUS "Enabling LTO (Link time optimization)")
+        set_target_properties(brokkr PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 
     # Versioning
-    set(BROKKR_BUILD_TYPE)
-    set(BROKKR_BUILD_TYPE_dbg "dbg")
-    set(BROKKR_BUILD_TYPE_rel "rel")
-
-    if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
-      set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_dbg})
-    else()
-      set(BROKKR_BUILD_TYPE ${BROKKR_BUILD_TYPE_rel})
-    endif()
-
     execute_process(
       COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -344,16 +328,17 @@ if (Qt6_FOUND)
       set(BROKKR_COMMIT_COUNT "0")
     endif()
 
-    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${BROKKR_BUILD_TYPE}")
+    if (CMAKE_BUILD_TYPE)
+      message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${CMAKE_BUILD_TYPE}")
+    else()
+      message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}")
+    endif()
+
     target_compile_definitions(brokkr PRIVATE
       BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
-      BROKKR_BUILD_TYPE=\"${BROKKR_BUILD_TYPE}\"
+      BROKKR_BUILD_TYPE=\"$<IF:$<CONFIG:Debug>,dbg,rel>\"
       BROKKR_VERSION=\"${PROJECT_VERSION}\"
     )
-
-    set(CMAKE_AUTOMOC ON)
-    set(CMAKE_AUTOUIC ON)
-    set(CMAKE_AUTORCC ON)
 
     qt_generate_deploy_app_script(
         TARGET brokkr
