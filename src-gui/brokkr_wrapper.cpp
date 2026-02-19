@@ -110,17 +110,17 @@ class DeviceSquare final : public QWidget {
       case Variant::Green:
         top_ = QColor("#b4e051");
         bot_ = QColor("#5ba30a");
-        textCol_ = QColor("#000000");
+        textCol_ = QColor("#ffffff");
         break;
       case Variant::Blue:
         top_ = QColor("#68b3e4");
         bot_ = QColor("#186ba6");
-        textCol_ = QColor("#000033");
+        textCol_ = QColor("#ffffff");
         break;
       case Variant::Red:
         top_ = QColor("#d95757");
         bot_ = QColor("#9a0a0a");
-        textCol_ = QColor("#000000");
+        textCol_ = QColor("#ffffff");
         break;
     }
     update();
@@ -166,12 +166,17 @@ class DeviceSquare final : public QWidget {
       if (pt < 6) f.setPointSize(6);
 
       p.setFont(f);
-      p.setPen(textCol_);
 
       QFontMetrics fm(f);
       const int maxW = std::max(0, r.width() - 4);
       const QString shown = fm.elidedText(text_, Qt::ElideMiddle, maxW);
-      p.drawText(r.adjusted(2, 0, -2, 0), Qt::AlignCenter, shown);
+      const QRect textR = r.adjusted(2, 0, -2, 0);
+
+      p.setPen(QColor(0, 0, 0, 160));
+      p.drawText(textR.translated(1, 1), Qt::AlignCenter, shown);
+
+      p.setPen(textCol_);
+      p.drawText(textR, Qt::AlignCenter, shown);
     }
   }
 
@@ -239,7 +244,11 @@ static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrWrapper* w) {
   auto sink = std::make_shared<QtTextSink<std::mutex>>(w);
   sink->set_pattern("%v");
   auto log = std::make_shared<spdlog::logger>("qt", spdlog::sinks_init_list{sink});
+#ifndef NDEBUG
+  log->set_level(spdlog::level::debug);
+#else
   log->set_level(spdlog::level::info);
+#endif
   return log;
 }
 
@@ -700,6 +709,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     cmbRebootAction->setCurrentIndex(0);
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    lastFlashDevices_.clear();
 
     setSquaresText_("");
     setSquaresProgress_(0.0, false);
@@ -831,27 +841,6 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   const int physicalCount = physicalUsb.size() + (physicalWireless ? 1 : 0);
   logDevCount_.store(physicalCount, std::memory_order_relaxed);
 
-  {
-    const QSet<QString> prev = QSet<QString>(physicalUsbPrev_.begin(), physicalUsbPrev_.end());
-    const QSet<QString> now = QSet<QString>(physicalUsb.begin(), physicalUsb.end());
-
-    for (const auto& s : now)
-      if (!prev.contains(s)) spdlog::info("Connected: {}", s.toStdString());
-    for (const auto& s : prev)
-      if (!now.contains(s)) spdlog::info("Disconnected: {}", s.toStdString());
-
-    if (physicalWirelessPrev_ && (!physicalWireless || physicalWirelessIdPrev_ != physicalWirelessId)) {
-      if (!physicalWirelessIdPrev_.isEmpty()) spdlog::info("Disconnected: {}", physicalWirelessIdPrev_.toStdString());
-    }
-    if (physicalWireless && (!physicalWirelessPrev_ || physicalWirelessIdPrev_ != physicalWirelessId)) {
-      if (!physicalWirelessId.isEmpty()) spdlog::info("Connected: {}", physicalWirelessId.toStdString());
-    }
-
-    physicalUsbPrev_ = physicalUsb;
-    physicalWirelessPrev_ = physicalWireless;
-    physicalWirelessIdPrev_ = physicalWirelessId;
-  }
-
   const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
   if (!tgt.isEmpty()) {
     auto info = brokkr::platform::find_by_sysname(tgt.toStdString());
@@ -863,6 +852,38 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   if (physicalWireless) shown.prepend(physicalWirelessId);
 
   if (busy_) return;
+
+  {
+    const QSet<QString> prev = QSet<QString>(physicalUsbPrev_.begin(), physicalUsbPrev_.end());
+    const QSet<QString> now = QSet<QString>(physicalUsb.begin(), physicalUsb.end());
+
+    bool anyAttached = false;
+
+    for (const auto& s : now) {
+      if (!prev.contains(s)) {
+        spdlog::info("Connected: {}", s.toStdString());
+        anyAttached = true;
+      }
+    }
+    for (const auto& s : prev)
+      if (!now.contains(s)) spdlog::info("Disconnected: {}", s.toStdString());
+
+    if (physicalWirelessPrev_ && (!physicalWireless || physicalWirelessIdPrev_ != physicalWirelessId)) {
+      if (!physicalWirelessIdPrev_.isEmpty()) spdlog::info("Disconnected: {}", physicalWirelessIdPrev_.toStdString());
+    }
+    if (physicalWireless && (!physicalWirelessPrev_ || physicalWirelessIdPrev_ != physicalWirelessId)) {
+      if (!physicalWirelessId.isEmpty()) {
+        spdlog::info("Connected: {}", physicalWirelessId.toStdString());
+        anyAttached = true;
+      }
+    }
+
+    if (anyAttached) lastFlashDevices_.clear();
+
+    physicalUsbPrev_ = physicalUsb;
+    physicalWirelessPrev_ = physicalWireless;
+    physicalWirelessIdPrev_ = physicalWirelessId;
+  }
 
   connectedDevices_ = shown;
   refreshDeviceBoxes_();
@@ -1273,6 +1294,21 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
         "border-radius: 2px;");
   }
 
+  for (int i = shown; i < comBoxes.size(); ++i) {
+    if (i < lastFlashDevices_.size()) {
+      const QString prev = lastFlashDevices_[i].trimmed();
+      if (!prev.isEmpty()) {
+        const QString raw = QString("%1:[%2]").arg(i).arg(prev);
+        comBoxes[i]->setText(elideFor(comBoxes[i], raw));
+        comBoxes[i]->setToolTip(prev);
+        comBoxes[i]->setStyleSheet(
+            "font-size: 9px;"
+            "color: palette(mid);"
+            "border: 1px dashed palette(mid);");
+      }
+    }
+  }
+
   if (connectedDevices_.size() > comBoxes.size() && !comBoxes.isEmpty()) {
     overflowDevices_ = true;
     const int extra = connectedDevices_.size() - comBoxes.size();
@@ -1442,6 +1478,7 @@ void BrokkrWrapper::onRunClicked() {
 void BrokkrWrapper::startWorkStart_() {
   if (busy_) return;
 
+  lastFlashDevices_ = connectedDevices_;
   const QStringList uiDevicesSnapshot = connectedDevices_;
   setBusy_(true);
 

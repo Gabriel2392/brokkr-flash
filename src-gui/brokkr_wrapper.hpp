@@ -99,6 +99,7 @@ class BrokkrWrapper : public QWidget {
   static constexpr int kBoxesColsMany = 8;
 
   QStringList connectedDevices_;
+  QStringList lastFlashDevices_;
   bool overflowDevices_ = false;
 
   int baseWindowHeight_ = 600;
