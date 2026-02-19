@@ -77,23 +77,29 @@ bool TcpConnection::connected() const noexcept {
 
   WSAPOLLFD pfd{};
   pfd.fd = fd_;
-  pfd.events = POLLRDNORM | POLLERR | POLLHUP;
+  pfd.events = POLLRDNORM;
 
   const int r = WSAPoll(&pfd, 1, 0);
-  if (r == SOCKET_ERROR) return false;
+  if (r == SOCKET_ERROR) {
+	spdlog::warn("TcpConnection::connected: WSAPoll failed: {}", WSAGetLastError());
+	return false;
+  }
+
+  if (pfd.revents & POLLNVAL) return false;
+
   if (r == 0) return true;
 
-  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return false;
+  if (pfd.revents & POLLHUP) return false;
 
   if (pfd.revents & POLLRDNORM) {
-    char c = 0;
-    const int n = ::recv(fd_, &c, 1, MSG_PEEK);
-    if (n == 0) return false;
-    if (n < 0) {
-      const int err = WSAGetLastError();
-      if (err == WSAEWOULDBLOCK) return true;
-      return false;
-    }
+	char c = 0;
+	const int n = ::recv(fd_, &c, 1, MSG_PEEK);
+	if (n == 0) return false;
+	if (n < 0) {
+	  const int err = WSAGetLastError();
+	  if (err == WSAEWOULDBLOCK) return true;
+	  return false;
+	}
   }
 
   return true;
@@ -255,7 +261,7 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   pfd.fd = fd_;
   pfd.events = POLLRDNORM;
 
-  const int pr = WSAPoll(&pfd, 1, 100);
+  const int pr = WSAPoll(&pfd, 1, 1000);
   if (pr == 0) return brokkr::core::fail("accept: timeout");
   if (pr == SOCKET_ERROR) {
     const int err = WSAGetLastError();

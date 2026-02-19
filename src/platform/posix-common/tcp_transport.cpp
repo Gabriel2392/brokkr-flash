@@ -293,7 +293,7 @@ brokkr::core::Result<TcpConnection> TcpListener::accept_one() noexcept {
   pfd.events = POLLIN;
 
   for (;;) {
-    int pr = ::poll(&pfd, 1, 100);
+    int pr = ::poll(&pfd, 1, 1000);
     if (pr == 0) return brokkr::core::fail("accept: timeout");
     if (pr < 0) {
       const int e = errno;
