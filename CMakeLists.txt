@@ -169,8 +169,14 @@ target_sources(brokkr-lib INTERFACE
     src/app/md5_verify.cpp
 )
 
+include(TestBigEndian)
+test_big_endian(BROKKR_IS_BIG_ENDIAN)
+if (BROKKR_IS_BIG_ENDIAN)
+    target_compile_definitions(brokkr-lib INTERFACE BROKKR_BIG_ENDIAN)
+endif()
+
 # ---------------------------
-# Qt6 Detection (Optional)
+# Qt6 Detection
 # ---------------------------
 find_package(Qt6 6.3 COMPONENTS Core Gui Widgets)
 

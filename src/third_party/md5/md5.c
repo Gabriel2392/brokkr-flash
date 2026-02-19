@@ -36,11 +36,13 @@ void md5_transform(MD5_CTX *ctx, const MD5_BYTE data[])
 {
 	MD5_WORD a, b, c, d, m[16], i, j;
 
+#ifndef BROKKR_BIG_ENDIAN
 	// MD5 specifies big endian MD5_BYTE order, but this implementation assumes a little
 	// endian MD5_BYTE order CPU. Reverse all the bytes upon input, and re-reverse them
 	// on output (in md5_final()).
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
 		m[i] = (data[j]) + (data[j + 1] << 8) + (data[j + 2] << 16) + (data[j + 3] << 24);
+#endif // !BROKKR_BIG_ENDIAN
 
 	a = ctx->state[0];
 	b = ctx->state[1];
@@ -192,6 +194,7 @@ void md5_final(MD5_CTX *ctx, MD5_BYTE hash[])
 	ctx->data[63] = ctx->bitlen >> 56;
 	md5_transform(ctx, ctx->data);
 
+#ifndef BROKKR_BIG_ENDIAN
 	// Since this implementation uses little endian MD5_BYTE ordering and MD uses big endian,
 	// reverse all the bytes when copying the final state to the output hash.
 	for (i = 0; i < 4; ++i) {
@@ -200,4 +203,5 @@ void md5_final(MD5_CTX *ctx, MD5_BYTE hash[])
 		hash[i + 8]  = (ctx->state[2] >> (i * 8)) & 0x000000ff;
 		hash[i + 12] = (ctx->state[3] >> (i * 8)) & 0x000000ff;
 	}
+#endif // !BROKKR_BIG_ENDIAN
 }
