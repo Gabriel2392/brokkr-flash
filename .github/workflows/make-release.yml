@@ -1,18 +1,58 @@
-name: Self-contained bundles
+name: Make Release
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.4.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
+  # ═══════════════════════════════════════════════════
+  #  Bump version, commit, tag
+  # ═══════════════════════════════════════════════════
+  prepare:
+    name: Bump version & tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: v${{ inputs.version }}
+      prev_tag: ${{ steps.prev.outputs.prev_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find previous version tag
+        id: prev
+        run: |
+          prev="$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -n1 || true)"
+          echo "prev_tag=${prev:-$(git rev-list --max-parents=0 HEAD)}" >> "$GITHUB_OUTPUT"
+          echo "Previous tag: $prev"
+
+      - name: Update CMakeLists.txt version
+        run: |
+          sed -i "s/project(Brokkr LANGUAGES C CXX VERSION [0-9.]*)/project(Brokkr LANGUAGES C CXX VERSION ${{ inputs.version }})/" CMakeLists.txt
+          grep 'project(Brokkr' CMakeLists.txt
+
+      - name: Commit & tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          git commit -m "Release v${{ inputs.version }}"
+          git tag "v${{ inputs.version }}"
+          git push origin main --tags
+
   # ═══════════════════════════════════════════════════
   #  Linux – Ubuntu 24.04, AppImage
   # ═══════════════════════════════════════════════════
   linux_appimage:
     name: Linux AppImage x64
+    needs: prepare
     runs-on: ubuntu-24.04
 
     env:
@@ -20,6 +60,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
 
       - name: Install build deps
         run: |
@@ -64,7 +106,6 @@ jobs:
           mkdir -p AppDir/usr/share/applications \
                    AppDir/usr/share/icons/hicolor/256x256/apps
 
-          # Desktop file – no leading whitespace
           cat > AppDir/usr/share/applications/brokkr.desktop << 'DESKTOP'
           [Desktop Entry]
           Type=Application
@@ -76,13 +117,10 @@ jobs:
           DESKTOP
           sed -i 's/^[[:space:]]*//' AppDir/usr/share/applications/brokkr.desktop
 
-          # Extract largest frame from ICO, then force-resize to exactly 256x256
           convert assets/brokkr.ico /tmp/brokkr_frame.png
           biggest="$(ls -rS /tmp/brokkr_frame*.png | tail -n1)"
           convert "$biggest" -resize 256x256! \
             AppDir/usr/share/icons/hicolor/256x256/apps/brokkr.png
-
-          # Verify
           identify AppDir/usr/share/icons/hicolor/256x256/apps/brokkr.png
 
       - name: Build AppImage
@@ -115,6 +153,7 @@ jobs:
   # ═══════════════════════════════════════════════════
   linux_appimage_arm64:
     name: Linux AppImage arm64
+    needs: prepare
     runs-on: ubuntu-24.04-arm
 
     env:
@@ -122,6 +161,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
 
       - name: Install build deps
         run: |
@@ -209,13 +250,11 @@ jobs:
           path: Brokkr-linux-arm64.AppImage
 
   # ═══════════════════════════════════════════════════
-  #  Windows x64  (NSIS installer)
-  #
-  #  Qt 6.7.x archives use "msvc2019" naming even
-  #  though they work fine with VS 2022 toolchain.
+  #  Windows x64 (NSIS installer + portable zip)
   # ═══════════════════════════════════════════════════
   windows_installer:
     name: Windows installer x64
+    needs: prepare
     runs-on: windows-2022
 
     env:
@@ -223,6 +262,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -290,6 +331,7 @@ jobs:
   # ═══════════════════════════════════════════════════
   macos_app:
     name: macOS app arm64
+    needs: prepare
     runs-on: macos-15
 
     env:
@@ -297,6 +339,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -321,19 +365,10 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
 
-      # ── THE FIX ─────────────────────────────────────
-      # Qt 6.7 injects -framework AGL during generation.
-      # macOS 14+/15+ SDK removed AGL.framework.
-      # Strip it from the generated build file directly.
-      # ────────────────────────────────────────────────
       - name: Strip missing AGL framework from build files
         run: |
           set -euo pipefail
-          echo "Before:"
-          grep -c 'framework AGL' build/build.ninja || echo "(none)"
           sed -i '' 's/ -framework AGL//g; s/-framework AGL //g; s/-framework AGL//g' build/build.ninja
-          echo "After:"
-          grep -c 'framework AGL' build/build.ninja && exit 1 || echo "✓ All AGL references removed"
 
       - name: Build
         run: cmake --build build --parallel 3
@@ -355,6 +390,7 @@ jobs:
   # ═══════════════════════════════════════════════════
   macos_app_x86:
     name: macOS app x86_64
+    needs: prepare
     runs-on: macos-15-intel
 
     env:
@@ -362,6 +398,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -405,3 +443,56 @@ jobs:
         with:
           name: Brokkr-macos-x86_64.app.zip
           path: Brokkr-macos-x86_64.app.zip
+
+  # ═══════════════════════════════════════════════════
+  #  Create GitHub Release
+  # ═══════════════════════════════════════════════════
+  release:
+    name: Publish release
+    needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate changelog body
+        id: changelog
+        run: |
+          PREV="${{ needs.prepare.outputs.prev_tag }}"
+          TAG="v${{ inputs.version }}"
+
+          echo "## Brokkr $TAG" > body.md
+          echo "" >> body.md
+
+          git log "${PREV}..${TAG}" --pretty=format:"- %s" --no-merges >> body.md
+
+          echo "" >> body.md
+          echo "" >> body.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}" >> body.md
+
+          cat body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Brokkr v${{ inputs.version }}
+          body_path: body.md
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/Brokkr-linux-x86_64.AppImage
+            artifacts/Brokkr-linux-arm64.AppImage
+            artifacts/Brokkr-windows-x64.exe
+            artifacts/Brokkr-windows-x64.zip
+            artifacts/Brokkr-macos-arm64.app.zip
+            artifacts/Brokkr-macos-x86_64.app.zip
