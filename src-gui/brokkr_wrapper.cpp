@@ -6,6 +6,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMetaObject>
@@ -70,9 +71,9 @@ class DeviceSquare final : public QWidget {
 
     auto sp = sizePolicy();
     sp.setHorizontalPolicy(QSizePolicy::Expanding);
-    sp.setVerticalPolicy(QSizePolicy::Preferred);
-    sp.setHeightForWidth(true);
+    sp.setVerticalPolicy(QSizePolicy::Fixed);
     setSizePolicy(sp);
+    setFixedHeight(58);
 
     setVariant(Variant::Green);
     anim_.setEasingCurve(QEasingCurve::InOutQuad);
@@ -85,10 +86,7 @@ class DeviceSquare final : public QWidget {
   }
 
   QSize sizeHint() const override { return QSize(30, 18); }
-  QSize minimumSizeHint() const override { return QSize(14, 9); }
-
-  bool hasHeightForWidth() const override { return true; }
-  int heightForWidth(int w) const override { return std::max(1, (w * 3) / 5); }
+  QSize minimumSizeHint() const override { return QSize(14, 18); }
 
   void setFill(double v) {
     fill_ = std::clamp(v, 0.0, 1.0);
@@ -150,7 +148,7 @@ class DeviceSquare final : public QWidget {
       p.fillRect(fr, g);
     }
 
-    p.setPen(QPen(QColor("#000000"), 1));
+    p.setPen(QPen(palette().color(QPalette::Mid), 1));
     p.drawRect(r);
 
     if (!text_.isEmpty()) {
@@ -352,7 +350,8 @@ static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& li
 } // namespace
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
-  setWindowTitle("Brokkr-Flash");
+  setWindowTitle("Brokkr Flash");
+  setWindowIcon(QIcon(":/brokkr.ico"));
   resize(850, 600);
   baseWindowHeight_ = height();
 
@@ -361,8 +360,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setContentsMargins(10, 10, 10, 10);
 
-  auto* bannerLabel =
-      new QLabel(QString("<b>brokkr v%1</b>").arg(QString::fromStdString(brokkr::app::version_string())), this);
+  auto* bannerLabel = new QLabel("<b>Brokkr Flash Tool</b>", this);
   bannerLabel->setStyleSheet(
       "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4c8ddc, stop:1 #8bbceb); color: white; font-size: "
       "26px; padding: 10px; border-radius: 3px;");
@@ -392,6 +390,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   consoleOutput = new QTextEdit(this);
   consoleOutput->setReadOnly(true);
+  consoleOutput->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   consoleOutput->setStyleSheet("font-family: Consolas, monospace; font-size: 11px;");
   tabWidget_->addTab(consoleOutput, "Log");
 
@@ -409,16 +408,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   chkWireless = new QCheckBox("Wireless", this);
   optLayout->addWidget(chkWireless);
 
-  auto* manyRow = new QHBoxLayout();
-  lblDeviceBoxes = new QLabel("Count: 8", this);
-  sldDeviceBoxes = new QSlider(Qt::Horizontal, this);
-  sldDeviceBoxes->setRange(kBoxesNormal, kMassDlMaxBoxes);
-  sldDeviceBoxes->setValue(kMassDlMaxBoxes);
-  sldDeviceBoxes->setEnabled(false);
-  manyRow->addWidget(lblDeviceBoxes);
-  manyRow->addWidget(sldDeviceBoxes, 1);
-  optLayout->addLayout(manyRow);
-
   optLayout->addSpacing(10);
   optLayout->addWidget(new QLabel("Post-Action:", this));
   cmbRebootAction = new QComboBox(this);
@@ -429,6 +418,19 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   chkAdvanced_ = new QCheckBox("Advanced options", this);
   optLayout->addWidget(chkAdvanced_);
+
+  manyRowWidget_ = new QWidget(this);
+  auto* manyRow = new QHBoxLayout(manyRowWidget_);
+  manyRow->setContentsMargins(0, 0, 0, 0);
+  lblDeviceBoxes = new QLabel("Count: 8", this);
+  sldDeviceBoxes = new QSlider(Qt::Horizontal, this);
+  sldDeviceBoxes->setRange(kBoxesNormal, kMassDlMaxBoxes);
+  sldDeviceBoxes->setValue(kMassDlMaxBoxes);
+  sldDeviceBoxes->setEnabled(false);
+  manyRow->addWidget(lblDeviceBoxes);
+  manyRow->addWidget(sldDeviceBoxes, 1);
+  manyRowWidget_->setVisible(false);
+  optLayout->addWidget(manyRowWidget_);
 
   tabWidget_->addTab(optTab, "Options");
 
@@ -457,6 +459,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       return;
     }
     if (btnPrintPit) btnPrintPit->setVisible(on);
+    if (manyRowWidget_) manyRowWidget_->setVisible(on);
   });
 
   connect(chkUsePit, &QCheckBox::toggled, this, [this](bool checked) {
@@ -501,6 +504,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     if (!checked) {
       lblDeviceBoxes->setText(QString("Count: %1").arg(kBoxesNormal));
       rebuildDeviceBoxes_(kBoxesNormal, true);
+      layout()->invalidate();
+      layout()->activate();
+      setMinimumHeight(0);
       resize(width(), baseWindowHeight_);
     } else {
       const int v = std::min(sldDeviceBoxes->value(), kMassDlMaxBoxes);
@@ -541,6 +547,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       if (lblDeviceBoxes) lblDeviceBoxes->setText("Count: 1");
 
       rebuildDeviceBoxes_(1, true);
+      layout()->invalidate();
+      layout()->activate();
+      setMinimumHeight(0);
       resize(width(), baseWindowHeight_);
 
       startWirelessListener_();
@@ -552,6 +561,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       if (lblDeviceBoxes) lblDeviceBoxes->setText(QString("Count: %1").arg(kBoxesNormal));
 
       rebuildDeviceBoxes_(kBoxesNormal, true);
+      layout()->invalidate();
+      layout()->activate();
+      setMinimumHeight(0);
       resize(width(), baseWindowHeight_);
     }
 
@@ -576,7 +588,11 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       "  OLD model : Download one binary ...\n"
       "  NEW model : Download BL + AP + CP + CSC",
       this);
-  tipsLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 5px;");
+  tipsLabel->setStyleSheet(
+      "color: gray; font-size: 11px;"
+      "border: 1px solid palette(mid);"
+      "border-radius: 4px;"
+      "padding: 6px;");
   rightLayout->addWidget(tipsLabel);
 
   auto* fileLayout = new QGridLayout();
@@ -612,8 +628,18 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   btnPrintPit->setVisible(false);
 
+  auto* footerLabel = new QLabel(
+      QString(R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">Github Repo</a>)"
+              R"(<span style="color: gray;">&nbsp; Version %1</span>)")
+          .arg(QString::fromStdString(brokkr::app::version_string())),
+      this);
+  footerLabel->setOpenExternalLinks(true);
+  footerLabel->setStyleSheet("font-size: 10px; color: gray;");
+  footerLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+  bottomLayout->addWidget(footerLabel, 0, Qt::AlignBottom);
   bottomLayout->addStretch();
-  bottomLayout->addWidget(btnPrintPit);
+  bottomLayout->addWidget(btnPrintPit, 0, Qt::AlignBottom);
   bottomLayout->addSpacing(10);
 
   auto* resetColWidget = new QWidget(this);
@@ -1145,21 +1171,14 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     const QString raw = QString("%1:[%2]").arg(i).arg(sysname);
     comBoxes[i]->setText(elideFor(comBoxes[i], raw));
     comBoxes[i]->setToolTip(sysname);
-    {
-      auto pal = comBoxes[i]->palette();
-      QColor hl = pal.color(QPalette::Highlight);
-      hl.setAlpha(50);
-      QColor base = palette().color(QPalette::Base);
-      const int r2 = (base.red() * (255 - hl.alpha()) + hl.red() * hl.alpha()) / 255;
-      const int g2 = (base.green() * (255 - hl.alpha()) + hl.green() * hl.alpha()) / 255;
-      const int b2 = (base.blue() * (255 - hl.alpha()) + hl.blue() * hl.alpha()) / 255;
-      pal.setColor(QPalette::Base, QColor(r2, g2, b2));
-      comBoxes[i]->setPalette(pal);
-    }
     comBoxes[i]->setStyleSheet(
         "font-weight: bold;"
-        "border: 1px solid palette(highlight);"
-        "font-size: 9px;");
+        "font-size: 9px;"
+        "color: white;"
+        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+        "  stop:0 #5a9fd4, stop:0.5 #4080c0, stop:1 #35608a);"
+        "border: 1px solid #2a5070;"
+        "border-radius: 2px;");
   }
 
   if (connectedDevices_.size() > comBoxes.size() && !comBoxes.isEmpty()) {

@@ -117,6 +117,7 @@ class BrokkrWrapper : public QWidget {
   QPushButton* btnManyDevices_ = nullptr;
   QSlider* sldDeviceBoxes = nullptr;
   QLabel* lblDeviceBoxes = nullptr;
+  QWidget* manyRowWidget_ = nullptr;
 
   QCheckBox* chkAdvanced_ = nullptr;
 

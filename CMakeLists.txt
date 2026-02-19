@@ -246,18 +246,21 @@ if (WIN32)
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/icon.rc
+        assets/brokkr.qrc
     )
 elseif (APPLE)
     add_executable(brokkr MACOSX_BUNDLE
         src-gui/main_gui.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
+        assets/brokkr.qrc
     )
 else()
     add_executable(brokkr
         src-gui/main_gui.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
+        assets/brokkr.qrc
     )
 endif()
 
@@ -289,7 +292,7 @@ target_link_libraries(brokkr PRIVATE
     Qt6::Widgets
 )
 
-set_target_properties(brokkr PROPERTIES AUTOMOC ON)
+set_target_properties(brokkr PROPERTIES AUTOMOC ON AUTORCC ON)
 
 if (MSVC)
     target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
