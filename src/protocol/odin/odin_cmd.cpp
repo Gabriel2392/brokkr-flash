@@ -42,7 +42,7 @@ inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseB
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
   if (r.id != expected_id) return brokkr::core::fail("Unexpected response id");
   if (out_ack) *out_ack = r.ack;
-  else if (r.ack < 0) return brokkr::core::fail("Operation failed (negative ack)");
+  else if (r.ack < 0) return brokkr::core::failf("Operation failed ({})", r.ack);
   return {};
 }
 
