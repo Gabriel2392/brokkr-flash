@@ -25,7 +25,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include <lz4.h>
+#include "third_party/lz4/lz4.h"
 
 #include <spdlog/spdlog.h>
 

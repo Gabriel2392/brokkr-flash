@@ -256,7 +256,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-target_include_directories(brokkr PRIVATE src src-gui src/third_party/lz4)
+target_include_directories(brokkr PRIVATE src src-gui)
 
 if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
     target_include_directories(brokkr PRIVATE "${function2_SOURCE_DIR}/include")
@@ -352,6 +352,20 @@ install(TARGETS brokkr
     RUNTIME DESTINATION bin
     BUNDLE  DESTINATION .
 )
+
+# ── Tests ─────────────────────────────────────────────────────────────
+enable_testing()
+
+add_executable(test_md5
+    tests/test_md5.cpp
+    src/third_party/md5/md5.c
+)
+target_include_directories(test_md5 PRIVATE src)
+add_test(NAME md5 COMMAND test_md5)
+
+add_executable(test_endian tests/test_endian.cpp)
+target_include_directories(test_endian PRIVATE src)
+add_test(NAME endian COMMAND test_endian)
 
 # ── CPack ─────────────────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
