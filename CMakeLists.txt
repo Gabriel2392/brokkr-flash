@@ -16,18 +16,21 @@ FetchContent_Declare(
    spdlog
    GIT_REPOSITORY https://github.com/gabime/spdlog.git
    GIT_TAG        v1.17.0
+   GIT_PROGRESS    TRUE
+   USES_TERMINAL_DOWNLOAD TRUE
 )
 FetchContent_GetProperties(spdlog)
 if (NOT spdlog_POPULATED)
     FetchContent_MakeAvailable(spdlog)
 endif()
 
+# Important: Match the fmt version with spdlog's bundled version to avoid ODR issues.
 FetchContent_Declare(
-        fmt
-        GIT_REPOSITORY  https://github.com/fmtlib/fmt.git
-        GIT_TAG         12.1.0
-        GIT_PROGRESS    TRUE
-        USES_TERMINAL_DOWNLOAD TRUE
+    fmt
+    GIT_REPOSITORY  https://github.com/fmtlib/fmt.git
+    GIT_TAG         12.1.0
+    GIT_PROGRESS    TRUE
+     USES_TERMINAL_DOWNLOAD TRUE
 )
 FetchContent_GetProperties(fmt)
 if (NOT fmt_POPULATED)
