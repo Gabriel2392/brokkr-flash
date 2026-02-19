@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "core/endian.hpp"
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -105,21 +107,24 @@ struct RequestBox {
 #pragma pack(pop)
 static_assert(sizeof(RequestBox) == 1024);
 
+inline void response_from_le(ResponseBox& r) noexcept {
+  r.id  = brokkr::core::le_to_host(r.id);
+  r.ack = brokkr::core::le_to_host(r.ack);
+}
+
 inline RequestBox make_request(RqtCommandType type,
                                RqtCommandParam param,
                                std::span<const std::int32_t> ints = {},
                                std::span<const std::int8_t> chars = {})
 {
-  static_assert(std::endian::native == std::endian::little,
-                "ODIN structs are assumed little-endian.");
-
   RequestBox r{};
-  r.id   = static_cast<std::int32_t>(type);
-  r.data = static_cast<std::int32_t>(param);
+  r.id   = brokkr::core::host_to_le(static_cast<std::int32_t>(type));
+  r.data = brokkr::core::host_to_le(static_cast<std::int32_t>(param));
 
   if (!ints.empty()) {
     const auto n = (ints.size() > RequestBox::DATA_INT_SIZE) ? RequestBox::DATA_INT_SIZE : ints.size();
-    std::memcpy(r.intData, ints.data(), n * sizeof(std::int32_t));
+    for (std::size_t i = 0; i < n; ++i)
+      r.intData[i] = brokkr::core::host_to_le(ints[i]);
   }
 
   if (!chars.empty()) {

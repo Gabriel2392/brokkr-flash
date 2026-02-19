@@ -17,6 +17,8 @@
 
 #include "protocol/odin/pit.hpp"
 
+#include "core/endian.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -64,7 +66,12 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   PitHeaderWire hdr{};
   std::memcpy(&hdr, bytes.data(), sizeof(hdr));
 
-  if (hdr.magic != PIT_MAGIC) return brokkr::core::fail("PIT parse: wrong magic");
+  hdr.magic    = brokkr::core::le_to_host(hdr.magic);
+  hdr.count    = brokkr::core::le_to_host(hdr.count);
+  hdr.lu_count = brokkr::core::le_to_host(hdr.lu_count);
+  hdr.reserved = brokkr::core::le_to_host(hdr.reserved);
+
+  if (hdr.magic != PIT_MAGIC)
   if (hdr.count < 0) return brokkr::core::fail("PIT parse: negative partition count");
 
   const std::size_t count = static_cast<std::size_t>(hdr.count);
@@ -83,6 +90,16 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   for (std::size_t i = 0; i < count; ++i, off += sizeof(PartitionInfoWire)) {
     PartitionInfoWire w{};
     std::memcpy(&w, bytes.data() + off, sizeof(w));
+
+    w.binType         = brokkr::core::le_to_host(w.binType);
+    w.devType         = brokkr::core::le_to_host(w.devType);
+    w.id              = brokkr::core::le_to_host(w.id);
+    w.attribute       = brokkr::core::le_to_host(w.attribute);
+    w.updateAttribute = brokkr::core::le_to_host(w.updateAttribute);
+    w.blockSize       = brokkr::core::le_to_host(w.blockSize);
+    w.blockLength     = brokkr::core::le_to_host(w.blockLength);
+    w.offset          = brokkr::core::le_to_host(w.offset);
+    w.fileSize        = brokkr::core::le_to_host(w.fileSize);
 
     RawEntry r;
     r.w = w;

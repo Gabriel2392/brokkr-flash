@@ -93,6 +93,8 @@ OdinCommands::recv_checked_response(std::int32_t expected_id, std::int32_t* out_
   auto st = recv_raw(std::as_writable_bytes(std::span{&r, 1}), retries);
   if (!st) return brokkr::core::fail(std::move(st.error()));
 
+  response_from_le(r);
+
   st = check_resp(expected_id, r, out_ack);
   if (!st) return brokkr::core::fail(std::move(st.error()));
 
@@ -225,6 +227,8 @@ brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsig
   ResponseBox ack{};
   st = recv_raw(std::as_writable_bytes(std::span{&ack, 1}), retries);
   if (!st) return st;
+
+  response_from_le(ack);
 
   auto r3 = rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {}, nullptr, retries);
   return r3 ? brokkr::core::Status{} : brokkr::core::fail(std::move(r3.error()));
