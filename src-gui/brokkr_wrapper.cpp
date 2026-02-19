@@ -3,6 +3,7 @@
 #include <QCloseEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -360,12 +361,31 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setContentsMargins(10, 10, 10, 10);
 
-  auto* bannerLabel = new QLabel("<b>Brokkr Flash Tool</b>", this);
-  bannerLabel->setStyleSheet(
-      "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4c8ddc, stop:1 #8bbceb); color: white; font-size: "
-      "26px; padding: 10px; border-radius: 3px;");
-  bannerLabel->setAlignment(Qt::AlignCenter);
-  mainLayout->addWidget(bannerLabel);
+  headerWidget_ = new QWidget(this);
+  headerWidget_->setObjectName("headerBanner");
+  headerWidget_->setFixedHeight(56);
+  applyHeaderStyle_();
+
+  auto* headerLayout = new QHBoxLayout(headerWidget_);
+  headerLayout->setContentsMargins(24, 0, 24, 0);
+
+  auto* titleLabel = new QLabel(
+      QString(
+          R"(<span style="color:#4da6ff; font-size:22px; font-weight:bold;">BROKKR</span>)"
+          R"(<span style="color:#ff9900; font-size:22px; font-weight:bold;">&nbsp; FLASH TOOL</span>)"
+          R"(<span style="color:#4da6ff; font-size:11px; font-weight:bold;">&nbsp; v%1</span>)")
+          .arg(QString::fromStdString(brokkr::app::version_string())),
+      headerWidget_);
+  headerLayout->addWidget(titleLabel);
+  headerLayout->addStretch();
+
+  ledContainer_ = new QWidget(headerWidget_);
+  auto* ledInner = new QHBoxLayout(ledContainer_);
+  ledInner->setContentsMargins(0, 0, 0, 0);
+  ledInner->setSpacing(8);
+  headerLayout->addWidget(ledContainer_);
+
+  mainLayout->addWidget(headerWidget_);
 
   idComGroup_ = new QGroupBox("ID:COM", this);
   {
@@ -629,12 +649,10 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   btnPrintPit->setVisible(false);
 
   auto* footerLabel = new QLabel(
-      QString(R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">Github Repo</a>)"
-              R"(<span style="color: gray;">&nbsp; Version %1</span>)")
-          .arg(QString::fromStdString(brokkr::app::version_string())),
+      R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)",
       this);
   footerLabel->setOpenExternalLinks(true);
-  footerLabel->setStyleSheet("font-size: 10px; color: gray;");
+  footerLabel->setStyleSheet("font-size: 10px;");
   footerLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
   bottomLayout->addWidget(footerLabel, 0, Qt::AlignBottom);
@@ -757,6 +775,8 @@ void BrokkrWrapper::closeEvent(QCloseEvent* e) {
 void BrokkrWrapper::changeEvent(QEvent* e) {
   QWidget::changeEvent(e);
   if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
+    applyHeaderStyle_();
+
     {
       auto pal = palette();
       QColor bg = pal.color(QPalette::Window).darker(110);
@@ -846,6 +866,7 @@ void BrokkrWrapper::refreshConnectedDevices_() {
 
   connectedDevices_ = shown;
   refreshDeviceBoxes_();
+  updateHeaderLeds_();
   updateActionButtons_();
 }
 
@@ -950,6 +971,61 @@ void BrokkrWrapper::appendLogLine_(const QString& html) {
   QTextCursor cursor = consoleOutput->textCursor();
   cursor.movePosition(QTextCursor::End);
   consoleOutput->setTextCursor(cursor);
+}
+
+void BrokkrWrapper::applyHeaderStyle_() {
+  if (!headerWidget_) return;
+  const int luma = palette().color(QPalette::Window).lightness();
+  const bool dark = (luma < 128);
+
+  if (dark) {
+    headerWidget_->setStyleSheet(
+        "#headerBanner {"
+        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #3a3c3e, stop:1 #242527);"
+        "  border: 1px solid #1a1a1a;"
+        "  border-radius: 8px;"
+        "}"
+        "#headerBanner QLabel { background: transparent; border: none; }");
+  } else {
+    headerWidget_->setStyleSheet(
+        "#headerBanner {"
+        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #e8eaec, stop:1 #d0d2d4);"
+        "  border: 1px solid #b0b0b0;"
+        "  border-radius: 8px;"
+        "}"
+        "#headerBanner QLabel { background: transparent; border: none; }");
+  }
+}
+
+void BrokkrWrapper::updateHeaderLeds_() {
+  if (!ledContainer_) return;
+
+  auto* lo = ledContainer_->layout();
+  if (!lo) return;
+
+  while (lo->count() > 0) {
+    QLayoutItem* it = lo->takeAt(0);
+    if (!it) break;
+    if (auto* w = it->widget()) delete w;
+    delete it;
+  }
+
+  const int count = std::min<int>(connectedDevices_.size(), 12);
+  for (int i = 0; i < count; ++i) {
+    auto* led = new QWidget(ledContainer_);
+    led->setFixedSize(14, 14);
+    led->setStyleSheet(
+        "background: qradialgradient(cx:0.3, cy:0.3, radius:0.7, fx:0.3, fy:0.3,"
+        "  stop:0 #aaddff, stop:1 #0066cc);"
+        "border: 1px solid #000;"
+        "border-radius: 7px;");
+    auto* glow = new QGraphicsDropShadowEffect(led);
+    glow->setColor(QColor(0, 153, 255, 200));
+    glow->setBlurRadius(10);
+    glow->setOffset(0, 0);
+    led->setGraphicsEffect(glow);
+    lo->addWidget(led);
+  }
 }
 
 void BrokkrWrapper::setControlsEnabled_(bool enabled) {
@@ -1224,6 +1300,18 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
 bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
   const bool wireless = chkWireless->isChecked();
   const bool hasTarget = !editTarget->text().trimmed().isEmpty();
+
+  const bool hasAnyFile = (!editBL->text().isEmpty() && editBL->isEnabled()) ||
+                          (!editAP->text().isEmpty() && editAP->isEnabled()) ||
+                          (!editCP->text().isEmpty() && editCP->isEnabled()) ||
+                          (!editCSC->text().isEmpty() && editCSC->isEnabled()) ||
+                          (!editUserData->text().isEmpty() && editUserData->isEnabled()) ||
+                          (chkUsePit->isChecked() && !editPit->text().isEmpty());
+
+  if (!hasAnyFile) {
+    if (whyNot) *whyNot = "No files selected.";
+    return false;
+  }
 
   if (wireless && hasTarget) {
     if (whyNot) *whyNot = "Wireless cannot be used together with Target Sysname.";

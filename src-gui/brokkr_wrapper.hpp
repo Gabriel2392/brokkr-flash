@@ -85,6 +85,8 @@ class BrokkrWrapper : public QWidget {
   void setControlsEnabled_(bool enabled);
 
   void appendLogLine_(const QString& html);
+  void applyHeaderStyle_();
+  void updateHeaderLeds_();
 
   void setSquaresProgress_(double frac, bool animate);
   void setSquaresText_(const QString& s);
@@ -103,6 +105,8 @@ class BrokkrWrapper : public QWidget {
 
   QGroupBox* idComGroup_ = nullptr;
   QGridLayout* idComLayout_ = nullptr;
+  QWidget* headerWidget_ = nullptr;
+  QWidget* ledContainer_ = nullptr;
 
   QList<DeviceSquare*> devSquares_;
   QList<QLineEdit*> comBoxes;
