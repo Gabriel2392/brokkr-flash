@@ -34,6 +34,11 @@ class QTabWidget;
 #if defined(BROKKR_PLATFORM_LINUX)
 class QSocketNotifier;
 #endif
+#if defined(Q_OS_MACOS)
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
+#include <IOKit/usb/IOUSBLib.h>
+#endif
 
 class DeviceSquare;
 
@@ -156,6 +161,11 @@ class BrokkrWrapper : public QWidget {
 #if defined(BROKKR_PLATFORM_LINUX)
   int uevent_fd_ = -1;
   QSocketNotifier* uevent_notifier_ = nullptr;
+#endif 
+#if defined(Q_OS_MACOS)
+  IONotificationPortRef mac_notify_port_ = nullptr;
+  io_iterator_t mac_added_iter_ = 0;
+  io_iterator_t mac_removed_iter_ = 0;
 #endif
 
   std::jthread worker_;

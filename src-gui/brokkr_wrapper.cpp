@@ -357,6 +357,21 @@ static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& li
   return odin.shutdown(sm);
 }
 
+#if defined(Q_OS_MACOS)
+static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
+  bool changed = false;
+  while (io_service_t object = IOIteratorNext(iterator)) {
+    changed = true;
+    IOObjectRelease(object);
+  }
+  if (changed && refCon) {
+    auto* wrapper = static_cast<BrokkrWrapper*>(refCon);
+    // requestUsbRefresh_ is private, so we invoke it via Qt's event loop
+    QMetaObject::invokeMethod(wrapper, "requestUsbRefresh_", Qt::QueuedConnection);
+  }
+}
+#endif
+
 } // namespace
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
@@ -747,6 +762,28 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     }
   }
 #endif
+#if defined(Q_OS_MACOS)
+  {
+    mac_notify_port_ = IONotificationPortCreate(kIOMasterPortDefault);
+    CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(mac_notify_port_), kCFRunLoopDefaultMode);
+
+    CFMutableDictionaryRef matchDict = IOServiceMatching(kIOUSBDeviceClassName);
+    // Retain dictionary since we use it twice (for add and remove)
+    matchDict = (CFMutableDictionaryRef)CFRetain(matchDict);
+
+    IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict, macOsUsbDeviceChanged,
+                                     this, &mac_added_iter_);
+
+    // Arm the trigger by clearing the iterator
+    macOsUsbDeviceChanged(nullptr, mac_added_iter_);
+
+    IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict, macOsUsbDeviceChanged,
+                                     this, &mac_removed_iter_);
+
+    // Arm the trigger
+    macOsUsbDeviceChanged(nullptr, mac_removed_iter_);
+  }
+#endif
 
   deviceTimer = new QTimer(this);
   connect(deviceTimer, &QTimer::timeout, this, [this]() {
@@ -767,6 +804,22 @@ BrokkrWrapper::~BrokkrWrapper() {
   if (uevent_fd_ >= 0) {
     ::close(uevent_fd_);
     uevent_fd_ = -1;
+  }
+#endif
+#if defined(Q_OS_MACOS)
+  if (mac_notify_port_) {
+    CFRunLoopRemoveSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(mac_notify_port_),
+                          kCFRunLoopDefaultMode);
+    IONotificationPortDestroy(mac_notify_port_);
+    mac_notify_port_ = nullptr;
+  }
+  if (mac_added_iter_) {
+    IOObjectRelease(mac_added_iter_);
+    mac_added_iter_ = 0;
+  }
+  if (mac_removed_iter_) {
+    IOObjectRelease(mac_removed_iter_);
+    mac_removed_iter_ = 0;
   }
 #endif
 }
