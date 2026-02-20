@@ -252,11 +252,14 @@ if (WIN32)
         assets/brokkr.qrc
     )
 elseif (APPLE)
+   set(MACOSX_BUNDLE_ICON_FILE brokkr.icns)
+   set_source_files_properties(assets/brokkr.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     add_executable(brokkr MACOSX_BUNDLE
         src-gui/main_gui.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/brokkr.qrc
+        assets/brokkr.icns
     )
 else()
     add_executable(brokkr
