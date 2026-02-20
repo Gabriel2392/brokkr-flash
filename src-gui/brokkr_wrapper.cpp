@@ -360,15 +360,20 @@ static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& li
 #if defined(Q_OS_MACOS)
 static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
   bool changed = false;
+  spdlog::debug("macOS USB device change detected");
   while (io_service_t object = IOIteratorNext(iterator)) {
     changed = true;
+    spdlog::debug("Device changed: {}", object);
     IOObjectRelease(object);
   }
+  spdlog::debug("End of device change events");
   if (changed && refCon) {
     auto* wrapper = static_cast<BrokkrWrapper*>(refCon);
+    spdlog::debug("Requesting USB refresh from macOS device change event");
     // requestUsbRefresh_ is private, so we invoke it via Qt's event loop
     QMetaObject::invokeMethod(wrapper, "requestUsbRefresh_", Qt::QueuedConnection);
   }
+  spdlog::debug("Finished processing macOS USB device change events");
 }
 #endif
 
@@ -753,7 +758,10 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
           if (n <= 0) return;
           buf[n] = '\0';
           const QString s = QString::fromLocal8Bit(buf, n);
-          if (s.contains("SUBSYSTEM=usb") || s.contains("SUBSYSTEM=tty")) requestUsbRefresh_();
+          if (s.contains("SUBSYSTEM=usb") || s.contains("SUBSYSTEM=tty")) {
+            spdlog::debug("Uevent received: {}", std::string_view{buf, n});
+            requestUsbRefresh_();
+          }
         });
       } else {
         ::close(uevent_fd_);
@@ -867,7 +875,10 @@ bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qint
 }
 #endif
 
-void BrokkrWrapper::requestUsbRefresh_() noexcept { usbDirty_.store(true, std::memory_order_relaxed); }
+void BrokkrWrapper::requestUsbRefresh_() noexcept { 
+    spdlog::debug("USB refresh requested");
+    usbDirty_.store(true, std::memory_order_relaxed);
+}
 
 void BrokkrWrapper::refreshConnectedDevices_() {
   QStringList shown;
