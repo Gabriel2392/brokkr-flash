@@ -404,11 +404,21 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 3
 
-      - name: Deploy + zip
+      - name: Deploy + Zip
+        if: matrix.build_type == 'Release'
         run: |
           set -euo pipefail
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
+
+      - name: Deploy + Zip (debug)
+        if: matrix.build_type == 'Debug'
+        run: |
+          set -euo pipefail
+          APP="build/brokkr.app"
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
+          xattr -cr "$APP" || true
           ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
 
       - uses: actions/upload-artifact@v4
@@ -417,7 +427,7 @@ jobs:
           path: Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
 
   # ═══════════════════════════════════════════════════
-  #  macOS x86_64 (Catalina+)
+  #  macOS x86_64 (Big Sur+)
   # ═══════════════════════════════════════════════════
   macos_app_x86:
     name: macOS app x86_64 (${{ matrix.build_type }})
@@ -467,13 +477,24 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel 3
-
-      - name: Deploy + zip
+        
+      - name: Deploy + Zip
+        if: matrix.build_type == 'Release'
         run: |
           set -euo pipefail
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
           ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
+
+      - name: Deploy + Zip (debug)
+        if: matrix.build_type == 'Debug'
+        run: |
+          set -euo pipefail
+          APP="build/brokkr.app"
+          "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
+          xattr -cr "$APP" || true
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
+
 
       - uses: actions/upload-artifact@v4
         with:
