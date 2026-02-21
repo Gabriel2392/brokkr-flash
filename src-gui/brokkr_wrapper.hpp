@@ -46,7 +46,7 @@ class BrokkrWrapper : public QWidget {
  public:
   explicit BrokkrWrapper(QWidget* parent = nullptr);
   ~BrokkrWrapper() override;
-
+  
   int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
 
  public slots:
@@ -166,6 +166,7 @@ class BrokkrWrapper : public QWidget {
   IONotificationPortRef mac_notify_port_ = nullptr;
   io_iterator_t mac_added_iter_ = 0;
   io_iterator_t mac_removed_iter_ = 0;
+  static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator);
 #endif
 
   std::jthread worker_;

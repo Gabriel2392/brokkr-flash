@@ -357,8 +357,10 @@ static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& li
   return odin.shutdown(sm);
 }
 
+} // namespace
+
 #if defined(Q_OS_MACOS)
-static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
+void BrokkrWrapper::macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
   bool changed = false;
   spdlog::debug("macOS USB device change detected");
   while (io_service_t object = IOIteratorNext(iterator)) {
@@ -370,14 +372,11 @@ static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
   if (changed && refCon) {
     auto* wrapper = static_cast<BrokkrWrapper*>(refCon);
     spdlog::debug("Requesting USB refresh from macOS device change event");
-    // requestUsbRefresh_ is private, so we invoke it via Qt's event loop
-    QMetaObject::invokeMethod(wrapper, "requestUsbRefresh_", Qt::QueuedConnection);
+    static_cast<BrokkrWrapper*>(refCon)->requestUsbRefresh_();
   }
   spdlog::debug("Finished processing macOS USB device change events");
 }
 #endif
-
-} // namespace
 
 BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   setWindowTitle("Brokkr Flash");
@@ -779,13 +778,15 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     // Retain dictionary since we use it twice (for add and remove)
     matchDict = (CFMutableDictionaryRef)CFRetain(matchDict);
 
-    IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict, macOsUsbDeviceChanged,
+    IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict,
+                                     &BrokkrWrapper::macOsUsbDeviceChanged,
                                      this, &mac_added_iter_);
 
     // Arm the trigger by clearing the iterator
     macOsUsbDeviceChanged(nullptr, mac_added_iter_);
 
-    IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict, macOsUsbDeviceChanged,
+    IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict, 
+                                     &BrokkrWrapper::macOsUsbDeviceChanged,
                                      this, &mac_removed_iter_);
 
     // Arm the trigger
