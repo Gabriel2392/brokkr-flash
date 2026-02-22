@@ -439,8 +439,8 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   consoleOutput = new QTextEdit(this);
   consoleOutput->setReadOnly(true);
   consoleOutput->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-  QFont logFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-  logFont.setPointSize(11);
+  QFont logFont = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
+  logFont.setPointSize(9);
   consoleOutput->setFont(logFont);
   tabWidget_->addTab(consoleOutput, "Log");
 
@@ -642,7 +642,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   tipsLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
   tipsLabel->setMargin(6);
   QFont tipsFont = tipsLabel->font();
-  tipsFont.setPointSize(11);
+  tipsFont.setPointSize(9);
   tipsLabel->setFont(tipsFont);
   QPalette tipsPal = tipsLabel->palette();
   tipsPal.setColor(QPalette::WindowText, Qt::gray);
