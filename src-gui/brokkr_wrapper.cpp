@@ -397,13 +397,12 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* headerLayout = new QHBoxLayout(headerWidget_);
   headerLayout->setContentsMargins(24, 0, 24, 0);
 
-  auto* titleLabel = new QLabel(
-      QString(
-          R"(<span style="color:#4da6ff; font-size:22px; font-weight:bold;">BROKKR</span>)"
-          R"(<span style="color:#ff9900; font-size:22px; font-weight:bold;">&nbsp; FLASH TOOL</span>)"
-          R"(<span style="color:#4da6ff; font-size:11px; font-weight:bold;">&nbsp; v%1</span>)")
-          .arg(QString::fromStdString(brokkr::app::version_string())),
-      headerWidget_);
+  auto* titleLabel =
+      new QLabel(QString(R"(<span style="color:#4da6ff; font-size:22px; font-weight:bold;">BROKKR</span>)"
+                         R"(<span style="color:#ff9900; font-size:22px; font-weight:bold;">&nbsp; FLASH TOOL</span>)"
+                         R"(<span style="color:#4da6ff; font-size:11px; font-weight:bold;">&nbsp; v%1</span>)")
+                     .arg(QString::fromStdString(brokkr::app::version_string())),
+                 headerWidget_);
   headerLayout->addWidget(titleLabel);
   headerLayout->addStretch();
 
@@ -677,8 +676,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   btnPrintPit->setVisible(false);
 
   auto* footerLabel = new QLabel(
-      R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)",
-      this);
+      R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)", this);
   footerLabel->setOpenExternalLinks(true);
   footerLabel->setStyleSheet("font-size: 10px;");
   footerLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -753,12 +751,13 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         uevent_notifier_ = new QSocketNotifier(uevent_fd_, QSocketNotifier::Read, this);
         connect(uevent_notifier_, &QSocketNotifier::activated, this, [this]() {
           char buf[4096];
-          const int n = ::recv(uevent_fd_, buf, sizeof(buf) - 1, 0);
+          const ssize_t n = ::recv(uevent_fd_, buf, sizeof(buf) - 1, 0);
           if (n <= 0) return;
           buf[n] = '\0';
           const QString s = QString::fromLocal8Bit(buf, n);
           if (s.contains("SUBSYSTEM=usb") || s.contains("SUBSYSTEM=tty")) {
-            spdlog::debug("Uevent received: {}", std::string_view{buf, n});
+            // SAFETY: n is always positive here due to the check above, and we ensure null-termination at buf[n] = '\0'.
+            spdlog::debug("Uevent received: {}", std::string_view{buf, static_cast<size_t>(n)});
             requestUsbRefresh_();
           }
         });
@@ -779,15 +778,13 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     matchDict = (CFMutableDictionaryRef)CFRetain(matchDict);
 
     IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict,
-                                     &BrokkrWrapper::macOsUsbDeviceChanged,
-                                     this, &mac_added_iter_);
+                                     &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_added_iter_);
 
     // Arm the trigger by clearing the iterator
     macOsUsbDeviceChanged(nullptr, mac_added_iter_);
 
-    IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict, 
-                                     &BrokkrWrapper::macOsUsbDeviceChanged,
-                                     this, &mac_removed_iter_);
+    IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict,
+                                     &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_removed_iter_);
 
     // Arm the trigger
     macOsUsbDeviceChanged(nullptr, mac_removed_iter_);
@@ -876,9 +873,9 @@ bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qint
 }
 #endif
 
-void BrokkrWrapper::requestUsbRefresh_() noexcept { 
-    spdlog::debug("USB refresh requested");
-    usbDirty_.store(true, std::memory_order_relaxed);
+void BrokkrWrapper::requestUsbRefresh_() noexcept {
+  spdlog::debug("USB refresh requested");
+  usbDirty_.store(true, std::memory_order_relaxed);
 }
 
 void BrokkrWrapper::refreshConnectedDevices_() {
