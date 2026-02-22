@@ -3,6 +3,7 @@
 #include <QCloseEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QGraphicsDropShadowEffect>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -438,7 +439,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   consoleOutput = new QTextEdit(this);
   consoleOutput->setReadOnly(true);
   consoleOutput->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-  consoleOutput->setStyleSheet("font-family: Consolas, monospace; font-size: 11px;");
+  QFont logFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  logFont.setPointSize(11);
+  consoleOutput->setFont(logFont);
   tabWidget_->addTab(consoleOutput, "Log");
 
   auto* optTab = new QWidget();
@@ -523,7 +526,8 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   connect(btnPitBrowse, &QPushButton::clicked, this, [this]() {
     if (busy_) return;
     const QString file = QFileDialog::getOpenFileName(this, "Select PIT File", lastDir,
-                                                      "PIT Files (*.pit);;All Files (*)");
+                                                      "PIT Files (*.pit);;All Files (*)", nullptr,
+                                                      QFileDialog::DontUseNativeDialog);
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();
       editPit->setText(file);
@@ -635,11 +639,14 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       "  OLD model : Download one binary ...\n"
       "  NEW model : Download BL + AP + CP + CSC",
       this);
-  tipsLabel->setStyleSheet(
-      "color: gray; font-size: 11px;"
-      "border: 1px solid palette(mid);"
-      "border-radius: 4px;"
-      "padding: 6px;");
+  tipsLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
+  tipsLabel->setMargin(6);
+  QFont tipsFont = tipsLabel->font();
+  tipsFont.setPointSize(11);
+  tipsLabel->setFont(tipsFont);
+  QPalette tipsPal = tipsLabel->palette();
+  tipsPal.setColor(QPalette::WindowText, Qt::gray);
+  tipsLabel->setPalette(tipsPal);
   rightLayout->addWidget(tipsLabel);
 
   auto* fileLayout = new QGridLayout();
@@ -678,7 +685,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* footerLabel = new QLabel(
       R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)", this);
   footerLabel->setOpenExternalLinks(true);
-  footerLabel->setStyleSheet("font-size: 10px;");
+  QFont footerFont = footerLabel->font();
+  footerFont.setPointSize(10);
+  footerLabel->setFont(footerFont);
   footerLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
   bottomLayout->addWidget(footerLabel, 0, Qt::AlignBottom);
@@ -774,19 +783,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     CFRunLoopAddSource(CFRunLoopGetMain(), IONotificationPortGetRunLoopSource(mac_notify_port_), kCFRunLoopDefaultMode);
 
     CFMutableDictionaryRef matchDict = IOServiceMatching(kIOUSBDeviceClassName);
-    // Retain dictionary since we use it twice (for add and remove)
     matchDict = (CFMutableDictionaryRef)CFRetain(matchDict);
 
     IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict,
                                      &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_added_iter_);
 
-    // Arm the trigger by clearing the iterator
     macOsUsbDeviceChanged(nullptr, mac_added_iter_);
 
     IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict,
                                      &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_removed_iter_);
 
-    // Arm the trigger
     macOsUsbDeviceChanged(nullptr, mac_removed_iter_);
   }
 #endif
@@ -854,7 +860,6 @@ void BrokkrWrapper::changeEvent(QEvent* e) {
     }
 
     consoleOutput->setPalette(palette());
-
     refreshDeviceBoxes_();
   }
 }
@@ -1061,23 +1066,14 @@ void BrokkrWrapper::applyHeaderStyle_() {
   const int luma = palette().color(QPalette::Window).lightness();
   const bool dark = (luma < 128);
 
-  if (dark) {
-    headerWidget_->setStyleSheet(
-        "#headerBanner {"
-        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #3a3c3e, stop:1 #242527);"
-        "  border: 1px solid #1a1a1a;"
-        "  border-radius: 8px;"
-        "}"
-        "#headerBanner QLabel { background: transparent; border: none; }");
-  } else {
-    headerWidget_->setStyleSheet(
-        "#headerBanner {"
-        "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #e8eaec, stop:1 #d0d2d4);"
-        "  border: 1px solid #b0b0b0;"
-        "  border-radius: 8px;"
-        "}"
-        "#headerBanner QLabel { background: transparent; border: none; }");
-  }
+  headerWidget_->setStyleSheet(""); // Clear stylesheet to fallback natively
+
+  QPalette pal = headerWidget_->palette();
+  QColor bgColor = dark ? QColor("#2d2e30") : QColor("#dce0e4");
+  pal.setColor(QPalette::Window, bgColor);
+
+  headerWidget_->setAutoFillBackground(true);
+  headerWidget_->setPalette(pal);
 }
 
 void BrokkrWrapper::updateHeaderLeds_() {
@@ -1097,6 +1093,9 @@ void BrokkrWrapper::updateHeaderLeds_() {
   for (int i = 0; i < count; ++i) {
     auto* led = new QWidget(ledContainer_);
     led->setFixedSize(14, 14);
+
+    // NOTE: This single style sheet is maintained because there is no native Mac
+    // widget for a "glowing orb". Styling a pure QWidget does not break Mac theming.
     led->setStyleSheet(
         "background: qradialgradient(cx:0.3, cy:0.3, radius:0.7, fx:0.3, fy:0.3,"
         "  stop:0 #aaddff, stop:1 #0066cc);"
@@ -1270,10 +1269,11 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
     box->setReadOnly(true);
     box->setAlignment(Qt::AlignCenter);
     box->setMinimumHeight(22);
-    box->setStyleSheet(
-        "border: 1px solid palette(mid);"
-        "font-size: 9px;"
-        "color: palette(dark);");
+
+    // Use QFont instead of CSS for text size
+    QFont boxFont = box->font();
+    boxFont.setPointSize(9);
+    box->setFont(boxFont);
 
     if (singleCellNoStretch && fixedCellW > 0) {
       cell->setFixedWidth(fixedCellW);
@@ -1326,13 +1326,16 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
   for (auto* box : comBoxes) {
     box->clear();
     box->setToolTip(QString());
-    auto pal = box->palette();
+    box->setStyleSheet(""); // Clear any leftover inline styling
+
+    QPalette pal = box->palette();
     pal.setColor(QPalette::Base, palette().color(QPalette::Window));
+    pal.setColor(QPalette::Text, palette().color(QPalette::Text));
     box->setPalette(pal);
-    box->setStyleSheet(
-        "border: 1px solid palette(mid);"
-        "font-size: 9px;"
-        "color: palette(dark);");
+
+    QFont f = box->font();
+    f.setBold(false);
+    box->setFont(f);
   }
 
   auto elideFor = [&](QLineEdit* box, const QString& s) {
@@ -1346,14 +1349,15 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     const QString raw = QString("%1:[%2]").arg(i).arg(sysname);
     comBoxes[i]->setText(elideFor(comBoxes[i], raw));
     comBoxes[i]->setToolTip(sysname);
-    comBoxes[i]->setStyleSheet(
-        "font-weight: bold;"
-        "font-size: 9px;"
-        "color: white;"
-        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-        "  stop:0 #5a9fd4, stop:0.5 #4080c0, stop:1 #35608a);"
-        "border: 1px solid #2a5070;"
-        "border-radius: 2px;");
+
+    QPalette pal = comBoxes[i]->palette();
+    pal.setColor(QPalette::Base, QColor("#4080c0")); // Active blue tint
+    pal.setColor(QPalette::Text, Qt::white);
+    comBoxes[i]->setPalette(pal);
+
+    QFont f = comBoxes[i]->font();
+    f.setBold(true);
+    comBoxes[i]->setFont(f);
   }
 
   for (int i = shown; i < comBoxes.size(); ++i) {
@@ -1363,10 +1367,10 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
         const QString raw = QString("%1:[%2]").arg(i).arg(prev);
         comBoxes[i]->setText(elideFor(comBoxes[i], raw));
         comBoxes[i]->setToolTip(prev);
-        comBoxes[i]->setStyleSheet(
-            "font-size: 9px;"
-            "color: palette(mid);"
-            "border: 1px dashed palette(mid);");
+
+        QPalette pal = comBoxes[i]->palette();
+        pal.setColor(QPalette::Text, palette().color(QPalette::Mid));
+        comBoxes[i]->setPalette(pal);
       }
     }
   }
@@ -1377,21 +1381,22 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     auto* last = comBoxes.back();
     const QString raw = QString("... +%1 more").arg(extra);
     last->setText(elideFor(last, raw));
-    {
-      auto pal = last->palette();
-      QColor base = palette().color(QPalette::Base);
-      QColor warn(255, 183, 77);
-      warn.setAlpha(50);
-      const int r2 = (base.red() * (255 - warn.alpha()) + warn.red() * warn.alpha()) / 255;
-      const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
-      const int b2 = (base.blue() * (255 - warn.alpha()) + warn.blue() * warn.alpha()) / 255;
-      pal.setColor(QPalette::Base, QColor(r2, g2, b2));
-      last->setPalette(pal);
-    }
-    last->setStyleSheet(
-        "font-weight: bold;"
-        "border: 1px solid #ffb74d;"
-        "font-size: 9px;");
+
+    QPalette pal = last->palette();
+    QColor base = palette().color(QPalette::Base);
+    QColor warn(255, 183, 77);
+    warn.setAlpha(50);
+    const int r2 = (base.red() * (255 - warn.alpha()) + warn.red() * warn.alpha()) / 255;
+    const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
+    const int b2 = (base.blue() * (255 - warn.alpha()) + warn.blue() * warn.alpha()) / 255;
+
+    pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+    pal.setColor(QPalette::Text, palette().color(QPalette::Text));
+    last->setPalette(pal);
+
+    QFont f = last->font();
+    f.setBold(true);
+    last->setFont(f);
   }
 }
 
@@ -1511,7 +1516,8 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
     QString file = QFileDialog::getOpenFileName(this, "Select Firmware File", lastDir,
-                                                "Firmware Archives (*.tar *.tar.md5);;All Files (*)");
+                                                "Firmware Archives (*.tar *.tar.md5);;All Files (*)", nullptr,
+                                                QFileDialog::DontUseNativeDialog);
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();
       lineEdit->setText(file);
@@ -1682,15 +1688,13 @@ void BrokkrWrapper::startWorkStart_() {
                   devSquares_[idx]->setText("FAIL!");
                   devSquares_[idx]->setFill(1.0);
                 }
+
+                // Keep native but set red palette for failure
                 if (idx < comBoxes.size() && comBoxes[idx]) {
-                  comBoxes[idx]->setStyleSheet(
-                      "font-weight: bold;"
-                      "font-size: 9px;"
-                      "color: white;"
-                      "background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-                      "  stop:0 #c04040, stop:0.5 #a02020, stop:1 #801010);"
-                      "border: 1px solid #600000;"
-                      "border-radius: 2px;");
+                  QPalette pal = comBoxes[idx]->palette();
+                  pal.setColor(QPalette::Base, QColor("#a02020"));
+                  pal.setColor(QPalette::Text, Qt::white);
+                  comBoxes[idx]->setPalette(pal);
                 }
 
                 shown = reason.isEmpty() ? "FAIL!" : QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
