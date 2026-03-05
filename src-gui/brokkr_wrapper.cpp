@@ -108,17 +108,14 @@ class DeviceSquare final : public QWidget {
       case Variant::Green:
         top_ = QColor("#b4e051");
         bot_ = QColor("#5ba30a");
-        textCol_ = QColor("#ffffff");
         break;
       case Variant::Blue:
         top_ = QColor("#68b3e4");
         bot_ = QColor("#186ba6");
-        textCol_ = QColor("#ffffff");
         break;
       case Variant::Red:
         top_ = QColor("#d95757");
         bot_ = QColor("#9a0a0a");
-        textCol_ = QColor("#ffffff");
         break;
     }
     update();
@@ -170,10 +167,14 @@ class DeviceSquare final : public QWidget {
       const QString shown = fm.elidedText(text_, Qt::ElideMiddle, maxW);
       const QRect textR = r.adjusted(2, 0, -2, 0);
 
-      p.setPen(QColor(0, 0, 0, 160));
+      const bool dark_theme = palette().color(QPalette::Window).lightness() < 128;
+      const QColor shadow_col = dark_theme ? QColor(0, 0, 0, 160) : QColor(255, 255, 255, 180);
+      const QColor text_col = dark_theme ? QColor("#ffffff") : QColor("#111111");
+
+      p.setPen(shadow_col);
       p.drawText(textR.translated(1, 1), Qt::AlignCenter, shown);
 
-      p.setPen(textCol_);
+      p.setPen(text_col);
       p.drawText(textR, Qt::AlignCenter, shown);
     }
   }
@@ -183,7 +184,6 @@ class DeviceSquare final : public QWidget {
   Variant var_ = Variant::Green;
   QColor top_;
   QColor bot_;
-  QColor textCol_;
   QString text_;
   QVariantAnimation anim_{};
 };

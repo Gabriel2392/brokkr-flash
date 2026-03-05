@@ -218,7 +218,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
   std::uint64_t total = 0;
   for (const auto& j : jobs) total += j.bytes_to_hash;
 
-  if (ui.on_stage) ui.on_stage("Checking package checksums");
+  if (ui.on_stage) ui.on_stage("Checking package MD5");
   spdlog::info("Checking MD5 on {} package(s), {} bytes total", jobs.size(), total);
 
   if (ui.on_plan) {
@@ -226,7 +226,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     pi.kind = brokkr::odin::PlanItem::Kind::Part;
     pi.part_id = 0;
     pi.dev_type = 0;
-    pi.part_name = "Checksums";
+    pi.part_name = "MD5";
     pi.source_base = fmt::format("{} package(s)", jobs.size());
     pi.size = total;
     ui.on_plan({std::move(pi)}, total);
