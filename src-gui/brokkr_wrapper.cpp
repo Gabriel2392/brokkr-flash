@@ -47,9 +47,6 @@
 #include "core/str.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/group_flasher.hpp"
-#include "protocol/odin/odin_cmd.hpp"
-#include "protocol/odin/pit.hpp"
-#include "protocol/odin/pit_transfer.hpp"
 
 #if defined(BROKKR_PLATFORM_LINUX)
   #include <linux/netlink.h>
@@ -310,53 +307,6 @@ static std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::v
   return std::make_shared<const std::vector<std::byte>>(std::move(*rr));
 }
 
-static void print_pit_table_to_log(const brokkr::odin::pit::PitTable& t) {
-  auto d = [&](const std::string& s) { return s.empty() ? "-" : s; };
-
-  spdlog::info("PIT TABLE");
-  spdlog::info("cpu_bl_id: {}", d(t.cpu_bl_id));
-  spdlog::info("com_tar2:  {}", d(t.com_tar2));
-  spdlog::info("lu_count:  {}", t.lu_count);
-  spdlog::info("entries:   {}", t.partitions.size());
-  spdlog::info(" ");
-
-  for (std::size_t i = 0; i < t.partitions.size(); ++i) {
-    const auto& p = t.partitions[i];
-    spdlog::info("Partition #{}:", i);
-    spdlog::info("id: {}", p.id);
-    spdlog::info("dev_type: {}", p.dev_type);
-    spdlog::info("block_count: {}", p.block_size);
-    spdlog::info("block_size: {}", p.block_bytes);
-    spdlog::info("file_size: {}", p.file_size);
-    spdlog::info("name: {}", d(p.name));
-    spdlog::info("file_name: {}", d(p.file_name));
-    spdlog::info(" ");
-  }
-}
-
-static brokkr::odin::OdinCommands::ShutdownMode shutdown_mode_from_ui(int idx) {
-  if (idx == 1) return brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
-  return brokkr::odin::OdinCommands::ShutdownMode::Reboot;
-}
-
-static brokkr::core::Status print_pit_over_link(brokkr::core::IByteTransport& link, const brokkr::odin::Cfg& cfg,
-                                                brokkr::odin::OdinCommands::ShutdownMode sm) noexcept {
-  brokkr::odin::OdinCommands odin(link);
-  link.set_timeout_ms(cfg.preflash_timeout_ms);
-
-  BRK_TRY(odin.handshake(cfg.preflash_retries));
-  BRK_TRYV(_, odin.get_version(cfg.preflash_retries));
-
-  link.set_timeout_ms(cfg.flash_timeout_ms);
-
-  BRK_TRYV(bytes, brokkr::odin::download_pit_bytes(odin, cfg.preflash_retries));
-  BRK_TRYV(tbl, brokkr::odin::pit::parse({bytes.data(), bytes.size()}));
-
-  print_pit_table_to_log(tbl);
-
-  return odin.shutdown(sm);
-}
-
 } // namespace
 
 #if defined(Q_OS_MACOS)
@@ -464,22 +414,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   cmbRebootAction->addItem("No Reboot");
   optLayout->addWidget(cmbRebootAction);
 
-  chkAdvanced_ = new QCheckBox("Advanced options", this);
-  optLayout->addWidget(chkAdvanced_);
-
-  manyRowWidget_ = new QWidget(this);
-  auto* manyRow = new QHBoxLayout(manyRowWidget_);
-  manyRow->setContentsMargins(0, 0, 0, 0);
-  lblDeviceBoxes = new QLabel("Count: 8", this);
-  sldDeviceBoxes = new QSlider(Qt::Horizontal, this);
-  sldDeviceBoxes->setRange(kBoxesNormal, kMassDlMaxBoxes);
-  sldDeviceBoxes->setValue(kMassDlMaxBoxes);
-  sldDeviceBoxes->setEnabled(false);
-  manyRow->addWidget(lblDeviceBoxes);
-  manyRow->addWidget(sldDeviceBoxes, 1);
-  manyRowWidget_->setVisible(false);
-  optLayout->addWidget(manyRowWidget_);
-
   tabWidget_->addTab(optTab, "Options");
 
   auto* pitTab = new QWidget();
@@ -500,15 +434,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   pitLayout->addWidget(btnPitBrowse, 1, 2);
 
   tabWidget_->addTab(pitTab, "Pit");
-
-  connect(chkAdvanced_, &QCheckBox::toggled, this, [this](bool on) {
-    if (busy_) {
-      chkAdvanced_->setChecked(!on);
-      return;
-    }
-    if (btnPrintPit) btnPrintPit->setVisible(on);
-    if (manyRowWidget_) manyRowWidget_->setVisible(on);
-  });
 
   connect(chkUsePit, &QCheckBox::toggled, this, [this](bool checked) {
     if (busy_) {
@@ -548,35 +473,17 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       return;
     }
 
-    sldDeviceBoxes->setEnabled(checked);
-
     if (!checked) {
-      lblDeviceBoxes->setText(QString("Count: %1").arg(kBoxesNormal));
       rebuildDeviceBoxes_(kBoxesNormal, true);
       layout()->invalidate();
       layout()->activate();
       setMinimumHeight(0);
       resize(width(), baseWindowHeight_);
     } else {
-      const int v = std::min(sldDeviceBoxes->value(), kMassDlMaxBoxes);
-      lblDeviceBoxes->setText(QString("Count: %1").arg(v));
-      rebuildDeviceBoxes_(v, false);
+      rebuildDeviceBoxes_(kMassDlMaxBoxes, false);
       applyWindowHeightToContents_();
     }
 
-    refreshDeviceBoxes_();
-    updateActionButtons_();
-  });
-
-  connect(sldDeviceBoxes, &QSlider::valueChanged, this, [this](int v) {
-    if (busy_) return;
-    if (!btnManyDevices_ || !btnManyDevices_->isChecked()) return;
-    if (chkWireless && chkWireless->isChecked()) return;
-
-    v = std::min(v, kMassDlMaxBoxes);
-    lblDeviceBoxes->setText(QString("Count: %1").arg(v));
-    rebuildDeviceBoxes_(v, false);
-    applyWindowHeightToContents_();
     refreshDeviceBoxes_();
     updateActionButtons_();
   });
@@ -592,8 +499,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         btnManyDevices_->setChecked(false);
         btnManyDevices_->setEnabled(false);
       }
-      if (sldDeviceBoxes) sldDeviceBoxes->setEnabled(false);
-      if (lblDeviceBoxes) lblDeviceBoxes->setText("Count: 1");
 
       rebuildDeviceBoxes_(1, true);
       layout()->invalidate();
@@ -606,8 +511,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       stopWirelessListener_();
 
       if (btnManyDevices_) btnManyDevices_->setEnabled(true);
-      if (sldDeviceBoxes) sldDeviceBoxes->setEnabled(false);
-      if (lblDeviceBoxes) lblDeviceBoxes->setText(QString("Count: %1").arg(kBoxesNormal));
 
       rebuildDeviceBoxes_(kBoxesNormal, true);
       layout()->invalidate();
@@ -670,15 +573,11 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   btnRun = new QPushButton("Start", this);
   btnReset_ = new QPushButton("Reset", this);
-  btnPrintPit = new QPushButton("Print PIT", this);
 
   const int bottomW = 135;
   const int bottomH = 32;
   btnRun->setMinimumSize(bottomW, bottomH);
   btnReset_->setMinimumSize(bottomW, bottomH);
-  btnPrintPit->setMinimumSize(bottomW, bottomH);
-
-  btnPrintPit->setVisible(false);
 
   auto* footerLabel = new QLabel(
       R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)", this);
@@ -690,8 +589,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   bottomLayout->addWidget(footerLabel, 0, Qt::AlignBottom);
   bottomLayout->addStretch();
-  bottomLayout->addWidget(btnPrintPit, 0, Qt::AlignBottom);
-  bottomLayout->addSpacing(10);
 
   auto* resetColWidget = new QWidget(this);
   auto* resetColLayout = new QVBoxLayout(resetColWidget);
@@ -705,16 +602,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   bottomLayout->addWidget(btnRun, 0, Qt::AlignBottom);
 
   mainLayout->addLayout(bottomLayout);
-
-  connect(btnPrintPit, &QPushButton::clicked, this, [this]() {
-    if (busy_) return;
-    QString why;
-    if (!canRunPrintPit_(&why)) {
-      showBlocked_("Cannot print PIT", why);
-      return;
-    }
-    startWorkPrintPit_();
-  });
 
   connect(btnRun, &QPushButton::clicked, this, &BrokkrWrapper::onRunClicked);
 
@@ -1129,10 +1016,6 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
   const bool wireless = (chkWireless && chkWireless->isChecked());
 
   if (btnManyDevices_) btnManyDevices_->setEnabled(enabled && !wireless);
-  if (sldDeviceBoxes)
-    sldDeviceBoxes->setEnabled(enabled && !wireless && btnManyDevices_ && btnManyDevices_->isChecked());
-
-  if (chkAdvanced_) chkAdvanced_->setEnabled(enabled);
 
   for (auto* chk : fileChecks_)
     if (chk) chk->setEnabled(enabled);
@@ -1441,54 +1324,14 @@ bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
   return true;
 }
 
-bool BrokkrWrapper::canRunPrintPit_(QString* whyNot) const {
-  const bool wireless = chkWireless->isChecked();
-  const bool hasTarget = !editTarget->text().trimmed().isEmpty();
-
-  if (wireless && hasTarget) {
-    if (whyNot) *whyNot = "Wireless cannot be used together with Target Sysname.";
-    return false;
-  }
-
-  if (wireless) {
-    std::lock_guard lk(wireless_mtx_);
-    if (!wireless_conn_ || !wireless_conn_->connected()) {
-      if (whyNot) *whyNot = "Wireless is enabled but no device is connected yet.";
-      return false;
-    }
-    return true;
-  }
-
-  if (hasTarget) return true;
-
-  if (connectedDevices_.isEmpty()) {
-    if (whyNot) *whyNot = "No connected devices detected.";
-    return false;
-  }
-
-  if (connectedDevices_.size() != 1) {
-    if (whyNot) *whyNot = "Printing PIT from device requires exactly one connected device.";
-    return false;
-  }
-
-  if (overflowDevices_) {
-    if (whyNot) *whyNot = "Too many devices for PIT print.";
-    return false;
-  }
-
-  return true;
-}
-
 void BrokkrWrapper::updateActionButtons_() {
   if (busy_) {
     btnRun->setEnabled(false);
-    if (btnPrintPit) btnPrintPit->setEnabled(false);
     return;
   }
 
   QString why;
   btnRun->setEnabled(canRunStart_(&why));
-  if (btnPrintPit) btnPrintPit->setEnabled(canRunPrintPit_(&why));
 }
 
 void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const {
@@ -1879,118 +1722,5 @@ void BrokkrWrapper::startWorkStart_() {
     QMetaObject::invokeMethod(this, [this]() { setSquaresProgress_(0.0, false); }, Qt::QueuedConnection);
 
     run_engine(std::move(srcs));
-  });
-}
-
-void BrokkrWrapper::startWorkPrintPit_() {
-  if (busy_) return;
-  setBusy_(true);
-
-  slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
-  slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
-  {
-    const int activeCount = std::min<int>(connectedDevices_.size(), devSquares_.size());
-    for (int i = 0; i < activeCount; ++i) slotActive_[static_cast<std::size_t>(i)] = 1;
-  }
-
-  setSquaresProgress_(0.0, false);
-  setSquaresText_("PIT");
-  setSquaresActiveColor_(false);
-
-  const int actionIndex = cmbRebootAction->currentIndex();
-
-  worker_ = std::jthread([this, actionIndex](std::stop_token) {
-    auto done_ui = [&] {
-      QMetaObject::invokeMethod(
-          this,
-          [this]() {
-            setSquaresText_("PASS");
-            setSquaresFinal_(true);
-            setBusy_(false);
-          },
-          Qt::QueuedConnection);
-    };
-
-    auto fail_ui = [&](const QString& msg) {
-      QMetaObject::invokeMethod(
-          this,
-          [this, msg]() {
-            appendLogLine_(QString("<font color=\"#ff5555\">%1</font>").arg(htmlEsc(msg)));
-            setSquaresFinal_(false);
-            setBusy_(false);
-          },
-          Qt::QueuedConnection);
-    };
-
-    const auto sm = shutdown_mode_from_ui(actionIndex);
-
-    const QString tgt = editTarget->text().trimmed();
-    const bool wireless = chkWireless->isChecked();
-    if (wireless && !tgt.isEmpty()) {
-      fail_ui("Wireless cannot be used together with Target Sysname.");
-      return;
-    }
-
-    brokkr::odin::Cfg cfg;
-
-    auto run_link = [&](brokkr::core::IByteTransport& link) {
-      QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
-
-      auto st = print_pit_over_link(link, cfg, sm);
-      if (!st) {
-        fail_ui(QString::fromStdString(st.error()));
-        return;
-      }
-
-      QMetaObject::invokeMethod(this, [this]() { setSquaresText_("RESET"); }, Qt::QueuedConnection);
-      done_ui();
-    };
-
-    if (wireless) {
-      brokkr::platform::TcpConnection* connp = nullptr;
-      {
-        std::lock_guard lk(wireless_mtx_);
-        if (wireless_conn_) connp = &*wireless_conn_;
-      }
-      if (!connp || !connp->connected()) {
-        fail_ui("No wireless device connected.");
-        return;
-      }
-      run_link(*connp);
-      return;
-    }
-
-    std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
-    if (!tgt.isEmpty()) {
-      auto one = select_target(tgt);
-      if (!one) {
-        fail_ui("Target sysname not found or not supported.");
-        return;
-      }
-      targets.push_back(*one);
-    } else {
-      targets = enumerate_targets();
-    }
-
-    if (targets.size() != 1) {
-      fail_ui("Printing PIT requires exactly one device.");
-      return;
-    }
-
-    brokkr::platform::UsbFsDevice dev(targets.front().devnode());
-    auto dst = dev.open_and_init();
-    if (!dst) {
-      fail_ui(QString::fromStdString(dst.error()));
-      return;
-    }
-
-    brokkr::platform::UsbFsConnection conn(dev);
-    auto cst = conn.open();
-    if (!cst) {
-      fail_ui(QString::fromStdString(cst.error()));
-      return;
-    }
-
-    run_link(conn);
   });
 }

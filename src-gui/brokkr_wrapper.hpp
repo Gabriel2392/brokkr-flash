@@ -12,7 +12,6 @@
 #include <QLineEdit>
 #include <QObject>
 #include <QPushButton>
-#include <QSlider>
 #include <QTextEdit>
 #include <QTimer>
 
@@ -73,7 +72,6 @@ class BrokkrWrapper : public QWidget {
   void applyWindowHeightToContents_();
 
   bool canRunStart_(QString* whyNot = nullptr) const;
-  bool canRunPrintPit_(QString* whyNot = nullptr) const;
 
   void showBlocked_(const QString& title, const QString& msg) const;
 
@@ -84,7 +82,6 @@ class BrokkrWrapper : public QWidget {
   void stopWirelessListener_();
 
   void startWorkStart_();
-  void startWorkPrintPit_();
 
   void setBusy_(bool busy);
   void setControlsEnabled_(bool enabled);
@@ -127,11 +124,6 @@ class BrokkrWrapper : public QWidget {
   QCheckBox* chkWireless = nullptr;
 
   QPushButton* btnManyDevices_ = nullptr;
-  QSlider* sldDeviceBoxes = nullptr;
-  QLabel* lblDeviceBoxes = nullptr;
-  QWidget* manyRowWidget_ = nullptr;
-
-  QCheckBox* chkAdvanced_ = nullptr;
 
   QComboBox* cmbRebootAction = nullptr;
 
@@ -146,7 +138,6 @@ class BrokkrWrapper : public QWidget {
   QLineEdit* editUserData = nullptr;
 
   QPushButton* btnRun = nullptr;
-  QPushButton* btnPrintPit = nullptr;
   QPushButton* btnReset_ = nullptr;
 
   QList<QCheckBox*> fileChecks_;
