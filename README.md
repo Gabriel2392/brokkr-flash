@@ -4,17 +4,12 @@
 
 A modern, cross-platform Samsung device flashing utility written in C++23. Brokkr provides a command-line interface for flashing firmware partitions to Samsung Android devices using the ODIN protocol.
 
-## Features
+## Features (why is it better than etc lol)
 
-- **Multi-device support**: Flash multiple Samsung devices simultaneously
-- **Multiple partition types**: Support for AP (Application Processor), BL (Bootloader), CP (Cellular Processor), CSC (Consumer Software Customization), and USERDATA partitions
-- **In-place Decompression support**: Built-in LZ4 decompression for efficient firmware transfers
-- **Wireless flashing**: Support for TCP-based flashing for Galaxy Watch and other wireless devices
-- **PIT management**: Get, set, and print PIT (Partition Information Table) files
-- **Cross-platform**: Native support for Windows and Linux
-- **USB and TCP transport**: Direct USB and TCP connectivity options
-- **MD5 verification**: Built-in MD5 verification for data integrity
-- **Compressed download support**; Odin3/4 decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compressed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
+- **Multi-device support**: Flash multiple devices in parallel
+- **Wireless flashing support**: Support for TCP-based flashing for Galaxy Watch
+- **Cross-platform**: Native support for Windows, Linux and MacOS
+- **Compressed download support**; Samsung's Odin decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compressed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
 
 ## Requirements
 
@@ -75,39 +70,6 @@ brokkr-flash/
 └── LICENSE               # GNU General Public License v3
 ```
 
-## Architecture
-
-### ODIN Protocol
-
-Brokkr implements the Samsung ODIN (Open Download Interface for Nodes) protocol for device communication. The protocol layer handles:
-
-- Device initialization and handshaking
-- Partition table (PIT) management
-- Binary transfer and flashing
-- Bootloader communication
-
-### Transport Layer
-
-Multiple transport backends support different connection types:
-
-- **USB Bulk**: Direct USB connection to Samsung devices
-- **TCP**: Wireless connections via network interface
-
-### Device Detection
-
-Platform-specific device enumeration:
-- **Windows**: Uses Windows USB APIs to detect connected devices
-- **Linux**: Uses sysfs interface for device detection
-- **macOS** Uses IOKit for device detection
-
-## Partition Types
-
-- **AP (Application Processor)**: Main system firmware
-- **BL (Bootloader)**: Bootloader image
-- **CP (Cellular Processor)**: Modem/radio firmware
-- **CSC (Consumer Software Customization)**: Region-specific customization
-- **USERDATA**: User data partition
-
 ## License
 
 This project is licensed under the GNU General Public License v3 - see the [LICENSE](LICENSE) file for details.
@@ -139,13 +101,5 @@ Flashing custom firmware may void device warranties and violate terms of service
 
 ### Dependencies
 
-- **LZ4**: Compression library for firmware data
 - **Threads**: Standard C++ threading library
 - **Platform Libraries**: Windows API (Windows) or none (Linux)
-
-### Performance Features
-
-- Thread pool for parallel operations
-- Efficient binary I/O with zero-copy spans
-- Streaming tar and LZ4 decompression
-- Hardware-accelerated crypto operations when available
