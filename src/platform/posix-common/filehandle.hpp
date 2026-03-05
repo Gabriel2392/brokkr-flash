@@ -146,7 +146,7 @@ struct FileHandle {
     const int rc = ::ioctl(fd, request, arg);
     if (rc < 0) { // FIX: ioctl signals error with -1; some ioctls return positive values
       const int e = errno;
-      spdlog::error("ioctl(fd={}, req={}): {}", fd, req_name, std::strerror(e));
+      spdlog::debug("ioctl(fd={}, req={}): {}", fd, req_name, std::strerror(e));
       errno = e;
     }
     return rc;

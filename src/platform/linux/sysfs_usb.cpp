@@ -133,7 +133,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
     if (info->vendor != filter.vendor) continue;
     if (!product_allowed(info->product, filter.products)) continue;
 
-    spdlog::info("Matched USB device: {}", info->describe());
+    spdlog::debug("Matched USB device: {}", info->describe());
 
     out.emplace_back(std::move(*info));
   }

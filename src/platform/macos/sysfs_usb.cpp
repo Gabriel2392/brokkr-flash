@@ -105,7 +105,7 @@ void enumerate_class(const char* className, const EnumerateFilter& filter, std::
     info.vendor = vendor;
     info.product = product;
 
-    spdlog::info("Matched USB device: {}", info.describe());
+    spdlog::debug("Matched USB device: {}", info.describe());
 
     Match m;
     m.info = std::move(info);

@@ -289,7 +289,7 @@ brokkr::core::Status UsbFsDevice::parse_descriptors_() noexcept {
 
   commit_ifc();
 
-  spdlog::info("UsbFsDevice: {} vendor=0x{:04X} product=0x{:04X} ifc={} bulk_in=0x{:02X} bulk_out=0x{:02X}", devnode_,
+  spdlog::debug("UsbFsDevice: {} vendor=0x{:04X} product=0x{:04X} ifc={} bulk_in=0x{:02X} bulk_out=0x{:02X}", devnode_,
                ids_.vendor, ids_.product, ifc_num_, eps_.bulk_in, eps_.bulk_out);
 
   if (eps_.bulk_in == 0 || eps_.bulk_out == 0) return brokkr::core::fail("UsbFsDevice: missing bulk endpoints");

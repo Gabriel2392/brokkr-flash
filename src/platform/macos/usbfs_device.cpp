@@ -237,7 +237,7 @@ brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
     return brokkr::core::fail("No interface with bulk endpoints found");
   }
 
-  spdlog::info("Opened USB device at {} (VID: 0x{:04x}, PID: 0x{:04x}, bulk_in: 0x{:02x}, bulk_out: 0x{:02x})",
+  spdlog::debug("Opened USB device at {} (VID: 0x{:04x}, PID: 0x{:04x}, bulk_in: 0x{:02x}, bulk_out: 0x{:02x})",
                devnode_, ids_.vendor, ids_.product, eps_.bulk_in, eps_.bulk_out);
 
   return {};
