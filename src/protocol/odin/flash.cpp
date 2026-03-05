@@ -225,7 +225,10 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
     out.reserve(dl->size());
     for (const auto& name : *dl) {
       auto it = cands.find(name);
-      if (it == cands.end()) return brokkr::core::fail("download-list.txt references missing file: " + name);
+      if (it == cands.end()) {
+        spdlog::warn("download-list.txt references missing file: {} (skipping)", name);
+        continue;
+      }
 
       BRK_TRYV(spec, finalize(it->second, true));
       out.push_back(std::move(spec));

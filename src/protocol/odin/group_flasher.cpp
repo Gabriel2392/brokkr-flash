@@ -138,14 +138,14 @@ static brokkr::core::Result<std::vector<ImageSpec>> sources_common_mapping_or_em
   for (const auto& s : sources) {
     const auto* ref = devs.front()->pit_table.find_by_file_name(s.basename);
     if (!ref) {
-      spdlog::warn("Source '{}' has no matching PIT entry — skipped", s.basename);
+      spdlog::debug("Source '{}' has no matching PIT entry — skipped", s.basename);
       continue;
     }
 
     for (auto* d : devs) {
       const auto* p = d->pit_table.find_by_file_name(s.basename);
       if (!p) {
-        spdlog::warn("Source '{}' missing on device '{}' — skipped", s.basename, d->id);
+        spdlog::debug("Source '{}' missing on one or more devices — skipped", s.basename);
         goto next;
       }
       if (p->id != ref->id || p->dev_type != ref->dev_type)
@@ -325,10 +325,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   auto shutdown_active = [&](OdinCommands::ShutdownMode m, std::string_view stg) -> brokkr::core::Status {
     log_shutdown_action(m);
     stage(stg);
-    return fanout_keep([&](Target& d) {
-      spdlog::info("(dev={}) Shutdown", d.id);
-      return OdinCommands(link(d)).shutdown(m);
-    });
+    return fanout_keep([&](Target& d) { return OdinCommands(link(d)).shutdown(m); });
   };
 
   auto steps = std::vector<std::move_only_function<brokkr::core::Status()>>{};
@@ -342,13 +339,11 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
       c.set_timeout_ms(cfg.preflash_timeout_ms);
       OdinCommands odin(c);
 
-      spdlog::info("(dev={}) Handshake", d.id);
       BRK_TRY(odin.handshake(cfg.preflash_retries));
       BRK_TRYV(vr, odin.get_version(cfg.preflash_retries));
 
       d.init = vr;
       d.proto = d.init.protocol();
-      spdlog::info("(dev={}) Protocol v{}", d.id, static_cast<int>(d.proto));
       return {};
     });
   });
@@ -364,7 +359,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         if (d.proto < ProtocolVersion::PROTOCOL_VER2) return {};
         auto& c = link(d);
         c.set_timeout_ms(cfg.preflash_timeout_ms);
-        spdlog::info("(dev={}) Setting transfer options", d.id);
         return OdinCommands(c).setup_transfer_options(static_cast<std::int32_t>(pkt), cfg.preflash_retries);
       });
       if (!st) return st;
@@ -379,7 +373,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
       spdlog::info("Uploading PIT");
       stage(kPitUpStr);
       return fanout_keep([&](Target& d) {
-        spdlog::info("(dev={}) Uploading PIT", d.id);
         return OdinCommands(link(d)).set_pit({pit_to_upload->data(), pit_to_upload->size()}, cfg.preflash_retries);
       });
     });
@@ -392,13 +385,11 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
       set_flash_timeout_active();
 
       return fanout_keep([&](Target& d) -> brokkr::core::Status {
-        spdlog::info("(dev={}) Downloading PIT", d.id);
         OdinCommands odin(link(d));
         BRK_TRYV(bytes, download_pit_bytes(odin));
         d.pit_bytes = std::move(bytes);
         BRK_TRYV(t, pit::parse({d.pit_bytes.data(), d.pit_bytes.size()}));
         d.pit_table = std::move(t);
-        spdlog::info("(dev={}) PIT OK ({} partitions)", d.id, d.pit_table.partitions.size());
         return {};
       });
     });
@@ -465,7 +456,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         return brokkr::core::fail("No sources matched any PIT partition — nothing to flash");
 
       if (effective_sources.size() < sources.size())
-        spdlog::warn("{} of {} source(s) matched PIT entries", effective_sources.size(), sources.size());
+        spdlog::debug("{} of {} source(s) matched PIT entries", effective_sources.size(), sources.size());
 
       BRK_TRYV(items2, map_to_pit(active.front()->pit_table, effective_sources));
       items = std::move(items2);
@@ -545,7 +536,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         const std::size_t orig = active_idx[i];
 
         workers.emplace_back([&, d, i, orig](std::stop_token stt) {
-          spdlog::info("(dev={}) Flash worker started", d->id);
           OdinCommands odin(link(*d));
           bool dead_local = false;
 
@@ -593,6 +583,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
           const auto& item = items[idx];
           const std::size_t plan_idx = plan_off + idx;
+
+          const std::string& file_name =
+              item.spec.source_basename.empty() ? item.spec.basename : item.spec.source_basename;
+          if (!file_name.empty()) spdlog::info("{}", file_name);
 
           if (ui.on_item_active) ui.on_item_active(plan_idx);
 
