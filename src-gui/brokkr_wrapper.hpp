@@ -142,6 +142,7 @@ class BrokkrWrapper : public QWidget {
 
   QList<QCheckBox*> fileChecks_;
   QList<QPushButton*> fileButtons_;
+  QList<QLineEdit*> fileLineEdits_;
 
   QString lastDir;
 

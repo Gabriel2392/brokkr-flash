@@ -1018,7 +1018,14 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
   if (btnManyDevices_) btnManyDevices_->setEnabled(enabled && !wireless);
 
   for (auto* chk : fileChecks_)
-    if (chk) chk->setEnabled(enabled);
+    (void)chk;
+  for (int i = 0; i < fileChecks_.size(); ++i) {
+    auto* chk = fileChecks_[i];
+    auto* edit = (i < fileLineEdits_.size()) ? fileLineEdits_[i] : nullptr;
+    if (!chk) continue;
+    const bool has_file = (edit && !edit->text().trimmed().isEmpty());
+    chk->setEnabled(enabled && has_file);
+  }
   for (auto* btn : fileButtons_)
     if (btn) btn->setEnabled(enabled);
 
@@ -1285,11 +1292,13 @@ bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
   const bool wireless = chkWireless->isChecked();
   const bool hasTarget = !editTarget->text().trimmed().isEmpty();
 
-  const bool hasAnyFile = (!editBL->text().isEmpty() && editBL->isEnabled()) ||
-                          (!editAP->text().isEmpty() && editAP->isEnabled()) ||
-                          (!editCP->text().isEmpty() && editCP->isEnabled()) ||
-                          (!editCSC->text().isEmpty() && editCSC->isEnabled()) ||
-                          (!editUserData->text().isEmpty() && editUserData->isEnabled()) ||
+  auto selected = [&](int idx, const QLineEdit* e) {
+    const bool checked = (idx < fileChecks_.size() && fileChecks_[idx] && fileChecks_[idx]->isChecked());
+    return checked && e && !e->text().trimmed().isEmpty();
+  };
+
+  const bool hasAnyFile = selected(0, editBL) || selected(1, editAP) || selected(2, editCP) || selected(3, editCSC) ||
+                          selected(4, editUserData) ||
                           (chkUsePit->isChecked() && !editPit->text().isEmpty());
 
   if (!hasAnyFile) {
@@ -1340,6 +1349,7 @@ void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const
 
 void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {
   auto* chk = new QCheckBox(this);
+  chk->setEnabled(false);
   layout->addWidget(chk, row, 0);
 
   auto* btn = new QPushButton(label, this);
@@ -1353,6 +1363,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
 
   fileChecks_.append(chk);
   fileButtons_.append(btn);
+  fileLineEdits_.append(lineEdit);
 
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
@@ -1362,14 +1373,22 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();
       lineEdit->setText(file);
+      chk->setEnabled(true);
       chk->setChecked(true);
     }
     updateActionButtons_();
   });
 
-  connect(chk, &QCheckBox::toggled, this, [this, lineEdit](bool checked) {
+  connect(chk, &QCheckBox::toggled, this, [this](bool) {
     if (busy_) return;
-    lineEdit->setEnabled(checked);
+    updateActionButtons_();
+  });
+
+  connect(lineEdit, &QLineEdit::textChanged, this, [this, chk](const QString& txt) {
+    if (busy_) return;
+    const bool has_file = !txt.trimmed().isEmpty();
+    chk->setEnabled(has_file);
+    if (!has_file) chk->setChecked(false);
     updateActionButtons_();
   });
 }
@@ -1573,12 +1592,17 @@ void BrokkrWrapper::startWorkStart_() {
     }
 
     std::vector<std::filesystem::path> inputs;
-    if (editBL->isEnabled() && !editBL->text().isEmpty()) inputs.emplace_back(editBL->text().toStdString());
-    if (editAP->isEnabled() && !editAP->text().isEmpty()) inputs.emplace_back(editAP->text().toStdString());
-    if (editCP->isEnabled() && !editCP->text().isEmpty()) inputs.emplace_back(editCP->text().toStdString());
-    if (editCSC->isEnabled() && !editCSC->text().isEmpty()) inputs.emplace_back(editCSC->text().toStdString());
-    if (editUserData->isEnabled() && !editUserData->text().isEmpty())
-      inputs.emplace_back(editUserData->text().toStdString());
+    auto push_if_selected = [&](int idx, QLineEdit* e) {
+      if (!e) return;
+      const bool checked = (idx < fileChecks_.size() && fileChecks_[idx] && fileChecks_[idx]->isChecked());
+      if (checked && !e->text().trimmed().isEmpty()) inputs.emplace_back(e->text().toStdString());
+    };
+
+    push_if_selected(0, editBL);
+    push_if_selected(1, editAP);
+    push_if_selected(2, editCP);
+    push_if_selected(3, editCSC);
+    push_if_selected(4, editUserData);
 
     struct Provider {
       std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> usb; // owns USB transports
