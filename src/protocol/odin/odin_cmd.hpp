@@ -44,7 +44,7 @@ struct InitTargetInfo {
 
 class OdinCommands {
  public:
-  enum class ShutdownMode { NoReboot, Reboot, ReDownload };
+  enum class ShutdownMode { NoReboot, Reboot };
 
   explicit OdinCommands(brokkr::core::IByteTransport& c) : conn_(c) {}
 

@@ -335,8 +335,7 @@ static void print_pit_table_to_log(const brokkr::odin::pit::PitTable& t) {
 }
 
 static brokkr::odin::OdinCommands::ShutdownMode shutdown_mode_from_ui(int idx) {
-  if (idx == 1) return brokkr::odin::OdinCommands::ShutdownMode::ReDownload;
-  if (idx == 2) return brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
+  if (idx == 1) return brokkr::odin::OdinCommands::ShutdownMode::NoReboot;
   return brokkr::odin::OdinCommands::ShutdownMode::Reboot;
 }
 
@@ -462,7 +461,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   optLayout->addWidget(new QLabel("Post-Action:", this));
   cmbRebootAction = new QComboBox(this);
   cmbRebootAction->addItem("Default (Reboot Normally)");
-  cmbRebootAction->addItem("Redownload");
   cmbRebootAction->addItem("No Reboot");
   optLayout->addWidget(cmbRebootAction);
 
@@ -1601,8 +1599,7 @@ void BrokkrWrapper::startWorkStart_() {
     QMetaObject::invokeMethod(this, [this]() { setSquaresText_("HANDSHAKE"); }, Qt::QueuedConnection);
 
     brokkr::odin::Cfg cfg;
-    cfg.redownload_after = (actionIndex == 1);
-    cfg.reboot_after = (actionIndex != 2);
+    cfg.reboot_after = (actionIndex == 0);
 
     brokkr::odin::Ui ui;
 

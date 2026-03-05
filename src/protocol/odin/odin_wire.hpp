@@ -70,7 +70,6 @@ enum class RqtCommandParam : std::int32_t {
   RQT_CLOSE_REBOOT = 1,
   RQT_CLOSE_DISCONNECT = 2,
   RQT_CLOSE_REBOOT_RECOVERY = 3,
-  RQT_CLOSE_REDOWNLOAD = 4,
 };
 
 enum class ProtocolVersion : std::int16_t {

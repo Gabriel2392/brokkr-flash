@@ -80,7 +80,6 @@ struct Cfg {
   int flash_timeout_ms = 45'000;
 
   bool reboot_after = true;
-  bool redownload_after = false;
 };
 
 struct Ui {

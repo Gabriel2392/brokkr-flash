@@ -330,32 +330,7 @@ brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries)
     return {};
   }
 
-  st = close_cmd(RQT_CLOSE_REDOWNLOAD);
-  if (!st) return st;
-
-  static constexpr std::string_view kAutoTest = "@#AuToTEstRst@#";  
-  std::array<std::byte, kAutoTest.size()> msg{};
-  for (std::size_t i = 0; i < kAutoTest.size(); ++i) msg[i] = static_cast<std::byte>(kAutoTest[i]);
-
-  st = send_raw({msg.data(), msg.size()}, retries);
-  if (!st) {
-    spdlog::error("Failed to send re-download trigger message: {}", st.error());
-    return st;
-  }
-
-  const int old_to = conn_.timeout_ms();
-  conn_.set_timeout_ms(500);
-  std::array<std::uint8_t, 64> tmp{};
-  if (conn_.recv({tmp.data(), tmp.size()}, 0) < 0) {
-    spdlog::debug("No data received after re-download trigger, as expected");
-  } else {
-    spdlog::error("Received unexpected data after re-download trigger, something may have gone wrong");
-#ifndef NDEBUG
-    spdlog::error("Data ({} bytes): {}", tmp.size(), fmt::join(tmp.begin(), tmp.end(), " "));
-#endif
-  }
-  conn_.set_timeout_ms(old_to);
-  return {};
+  return brokkr::core::fail("Invalid shutdown mode");
 }
 
 } // namespace brokkr::odin

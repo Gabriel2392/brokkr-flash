@@ -78,15 +78,12 @@ constexpr std::string_view kFlashNorm = "Flashing (Speed: Normal)";
 constexpr std::string_view kRebooting = "Rebooting devices";
 
 static std::string_view final_stage(OdinCommands::ShutdownMode m) {
-  if (m == OdinCommands::ShutdownMode::ReDownload) return "Finalizing + redownload";
   if (m == OdinCommands::ShutdownMode::Reboot) return "Finalizing + reboot";
   return "Finalizing";
 }
 
 static OdinCommands::ShutdownMode shutdown_mode_final(const Cfg& cfg) {
-  return cfg.redownload_after ? OdinCommands::ShutdownMode::ReDownload
-         : cfg.reboot_after   ? OdinCommands::ShutdownMode::Reboot
-                              : OdinCommands::ShutdownMode::NoReboot;
+  return cfg.reboot_after ? OdinCommands::ShutdownMode::Reboot : OdinCommands::ShutdownMode::NoReboot;
 }
 
 static void log_summary(std::size_t total, std::size_t failed) {
@@ -96,10 +93,6 @@ static void log_summary(std::size_t total, std::size_t failed) {
 }
 
 static void log_shutdown_action(OdinCommands::ShutdownMode m) {
-  if (m == OdinCommands::ShutdownMode::ReDownload) {
-    spdlog::info("Re-download");
-    return;
-  }
   if (m == OdinCommands::ShutdownMode::Reboot) {
     spdlog::info("Reset");
     return;
