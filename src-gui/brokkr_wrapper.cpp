@@ -1230,7 +1230,7 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     box->setStyleSheet(""); // Clear any leftover inline styling
 
     QPalette pal = box->palette();
-    pal.setColor(QPalette::Base, palette().color(QPalette::Window));
+    pal.setColor(QPalette::Base, palette().color(QPalette::Base));
     pal.setColor(QPalette::Text, palette().color(QPalette::Text));
     box->setPalette(pal);
 
