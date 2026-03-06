@@ -360,8 +360,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf portable
-          cmake --install build --prefix portable/brokkr --config ${{ matrix.build_type }}
+          install_root="$PWD/portable/brokkr"
+          rm -rf "$install_root"
+          cmake --install build --prefix "$install_root" --config ${{ matrix.build_type }}
           cd portable
           7z a -tzip ../Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip brokkr/
 
