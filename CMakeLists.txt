@@ -321,7 +321,7 @@ if(WIN32)
     if(NOT BROKKR_WINDOWS_ARM64 AND WINDEPLOYQT_EXEC)
         add_custom_command(TARGET brokkr POST_BUILD
             COMMAND "${WINDEPLOYQT_EXEC}"
-            ARGS --no-translations --compiler-runtime "$<TARGET_FILE:brokkr>"
+            ARGS --no-translations --no-compiler-runtime "$<TARGET_FILE:brokkr>"
             COMMENT "Running windeployqt to deploy Qt libraries..."
         )
     elseif(NOT BROKKR_WINDOWS_ARM64)
@@ -370,6 +370,7 @@ target_compile_definitions(brokkr PRIVATE
 qt_generate_deploy_app_script(
     TARGET brokkr
     OUTPUT_SCRIPT deploy_script
+    NO_COMPILER_RUNTIME
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
@@ -450,6 +451,8 @@ if(WIN32)
       install(FILES "${_vcredist_path}" DESTINATION redist)
       set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
           ExecWait '\\\"$INSTDIR\\\\redist\\\\${_vcredist_name}\\\" /install /quiet /norestart'
+                    SetOutPath '$INSTDIR'
+                    RMDir /r /REBOOTOK '$INSTDIR\\redist'
       ")
     else()
       message(WARNING "VCToolsRedistDir set but ${_vcredist_name} not found at: ${_vcredist_path}")
@@ -468,5 +471,6 @@ endif()
 set(CPACK_PACKAGE_FILE_NAME
     "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
 )
+set(CPACK_VERBATIM_VARIABLES TRUE)
 
 include(CPack)
