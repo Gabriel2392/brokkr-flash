@@ -112,6 +112,7 @@ if (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(brokkr-platform INTERFACE)
     target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_LINUX)
     target_sources(brokkr-platform INTERFACE
+        src/platform/posix-common/app_dirs.cpp
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
         src/platform/posix-common/tcp_transport.cpp
@@ -127,6 +128,7 @@ elseif (WIN32)
         NOMINMAX
     )
     target_sources(brokkr-platform INTERFACE
+        src/platform/windows/app_dirs.cpp
         src/platform/windows/signal_shield.cpp
         src/platform/windows/single_instance.cpp
         src/platform/windows/sysfs_usb.cpp
@@ -138,6 +140,7 @@ elseif (APPLE)
     add_library(brokkr-platform INTERFACE)
     target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_MACOS)
     target_sources(brokkr-platform INTERFACE
+        src/platform/posix-common/app_dirs.cpp
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
         src/platform/posix-common/tcp_transport.cpp
@@ -169,6 +172,7 @@ target_sources(brokkr-lib INTERFACE
     src/protocol/odin/flash.cpp
     src/protocol/odin/group_flasher.cpp
     src/protocol/odin/pit_transfer.cpp
+    src/app/md5_xxh3_cache.cpp
     src/app/md5_verify.cpp
 )
 
@@ -388,6 +392,14 @@ add_executable(test_md5
 )
 target_include_directories(test_md5 PRIVATE src)
 add_test(NAME md5 COMMAND test_md5)
+
+add_executable(test_md5_xxh3_cache
+    tests/test_md5_xxh3_cache.cpp
+    src/app/md5_xxh3_cache.cpp
+)
+target_include_directories(test_md5_xxh3_cache PRIVATE src)
+target_link_libraries(test_md5_xxh3_cache PRIVATE fmt::fmt-header-only)
+add_test(NAME md5_xxh3_cache COMMAND test_md5_xxh3_cache)
 
 add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)

@@ -23,6 +23,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
 #include <vector>
 
 namespace brokkr::app {
@@ -34,6 +35,7 @@ struct Md5Job {
 };
 
 brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept;
+std::string_view md5_verify_name(const std::vector<Md5Job>& jobs) noexcept;
 brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui) noexcept;
 
 } // namespace brokkr::app

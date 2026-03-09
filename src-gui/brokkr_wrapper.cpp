@@ -1434,6 +1434,16 @@ void BrokkrWrapper::startWorkStart_() {
     for (int i = 0; i < activeCount; ++i) slotActive_[static_cast<std::size_t>(i)] = 1;
   }
 
+  int progressSteps = 1;
+  for (int i = 0; i < devSquares_.size(); ++i) {
+    auto* sq = devSquares_[i];
+    if (!sq) continue;
+    if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
+    progressSteps = std::max(progressSteps, std::max(sq->width(), sq->sizeHint().width()));
+  }
+  progressVisualSteps_.store(progressSteps, std::memory_order_relaxed);
+  progressVisualBucket_.store(-1, std::memory_order_relaxed);
+
   setSquaresProgress_(0.0, false);
   setSquaresText_("");
   setSquaresActiveColor_(false);
@@ -1518,6 +1528,8 @@ void BrokkrWrapper::startWorkStart_() {
               setSquaresActiveColor_(true);
             else if (qs.contains("Normal", Qt::CaseInsensitive))
               setSquaresActiveColor_(false);
+            if (qs.contains("xxh3", Qt::CaseInsensitive)) setSquaresText_("XXH3");
+            if (qs.contains("md5", Qt::CaseInsensitive)) setSquaresText_("MD5");
             if (qs.contains("handshake", Qt::CaseInsensitive)) setSquaresText_("HANDSHAKE");
             if (qs.contains("shutdown", Qt::CaseInsensitive) || qs.contains("reboot", Qt::CaseInsensitive) ||
                 qs.contains("reset", Qt::CaseInsensitive) || qs.contains("finalizing", Qt::CaseInsensitive))
@@ -1528,6 +1540,19 @@ void BrokkrWrapper::startWorkStart_() {
 
     ui.on_progress = [&](std::uint64_t d, std::uint64_t t, std::uint64_t, std::uint64_t) {
       const double frac = (t > 0) ? (static_cast<double>(d) / static_cast<double>(t)) : 0.0;
+      const int steps = std::max(1, progressVisualSteps_.load(std::memory_order_relaxed));
+      const int bucket = (t > 0)
+                             ? static_cast<int>(std::clamp<std::uint64_t>((d * static_cast<std::uint64_t>(steps)) / t, 0,
+                                                                         static_cast<std::uint64_t>(steps)))
+                             : 0;
+
+      int prev = progressVisualBucket_.load(std::memory_order_relaxed);
+      while (prev != bucket &&
+             !progressVisualBucket_.compare_exchange_weak(prev, bucket, std::memory_order_relaxed,
+                                                          std::memory_order_relaxed)) {
+      }
+      if (prev == bucket) return;
+
       QMetaObject::invokeMethod(this, [this, frac]() { setSquaresProgress_(frac, true); }, Qt::QueuedConnection);
     };
 
@@ -1651,8 +1676,9 @@ void BrokkrWrapper::startWorkStart_() {
         }
         targets.push_back(*one);
       } else {
-        for (const auto& sys : uiDevicesSnapshot)
+        for (const auto& sys : uiDevicesSnapshot) {
           if (auto one = select_target(sys)) targets.push_back(*one);
+        }
         if (targets.empty()) targets = enumerate_targets();
       }
 
@@ -1718,12 +1744,14 @@ void BrokkrWrapper::startWorkStart_() {
       if (!ec) totalBytes += static_cast<std::uint64_t>(sz);
     }
 
-    spdlog::info("MD5 check ({}), Please wait.", human_bytes(totalBytes).toStdString());
+    const QString verifyName = QString::fromStdString(std::string(brokkr::app::md5_verify_name(*jobsr)));
+
+    spdlog::info("{} check ({}), Please wait.", verifyName.toStdString(), human_bytes(totalBytes).toStdString());
     QMetaObject::invokeMethod(
         this,
-        [this]() {
+        [this, verifyName]() {
           setSquaresActiveColor_(false);
-          setSquaresText_("MD5");
+          setSquaresText_(verifyName);
           setSquaresProgress_(0.0, false);
         },
         Qt::QueuedConnection);
@@ -1756,6 +1784,7 @@ void BrokkrWrapper::startWorkStart_() {
       return;
     }
 
+    progressVisualBucket_.store(-1, std::memory_order_relaxed);
     QMetaObject::invokeMethod(this, [this]() { setSquaresProgress_(0.0, false); }, Qt::QueuedConnection);
 
     run_engine(std::move(srcs));

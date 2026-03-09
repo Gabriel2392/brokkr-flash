@@ -16,6 +16,7 @@
  */
 
 #if defined(BROKKR_PLATFORM_LINUX)
+  #include "platform/posix-common/app_dirs.hpp"
   #include "platform/posix-common/signal_shield.hpp"
   #include "platform/posix-common/single_instance.hpp"
   #include "platform/posix-common/tcp_transport.hpp"
@@ -30,6 +31,7 @@ using namespace posix_common;
 } // namespace brokkr::platform
 
 #elif defined(BROKKR_PLATFORM_WINDOWS)
+  #include "platform/windows/app_dirs.hpp"
   #include "platform/windows/signal_shield.hpp"
   #include "platform/windows/single_instance.hpp"
   #include "platform/windows/sysfs_usb.hpp"
@@ -42,6 +44,7 @@ using namespace windows;
 } // namespace brokkr::platform
 
 #elif defined(BROKKR_PLATFORM_MACOS)
+  #include "platform/posix-common/app_dirs.hpp"
   #include "platform/posix-common/signal_shield.hpp"
   #include "platform/posix-common/single_instance.hpp"
   #include "platform/posix-common/tcp_transport.hpp"

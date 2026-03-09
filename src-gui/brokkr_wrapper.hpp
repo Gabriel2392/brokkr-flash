@@ -170,6 +170,8 @@ class BrokkrWrapper : public QWidget {
   QString wireless_sysname_;
 
   std::atomic_int logDevCount_{0};
+  std::atomic_int progressVisualSteps_{1};
+  std::atomic_int progressVisualBucket_{-1};
 
   QStringList physicalUsbPrev_;
   bool physicalWirelessPrev_ = false;
