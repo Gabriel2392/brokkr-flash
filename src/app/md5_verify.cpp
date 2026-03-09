@@ -40,6 +40,17 @@
 #include <thread>
 #include <utility>
 
+#if defined(_WIN32)
+  #include <windows.h>
+#else
+  #include <cerrno>
+  #include <fcntl.h>
+  #include <unistd.h>
+  #if defined(POSIX_FADV_SEQUENTIAL)
+    #include <sys/types.h>
+  #endif
+#endif
+
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
@@ -50,10 +61,86 @@ namespace {
 constexpr std::size_t kTrailerMaxBytes = 16 * 1024;
 constexpr std::size_t kMd5HexChars = 32;
 constexpr std::size_t kMd5Xxh3CacheMaxEntries = 100;
+constexpr std::size_t kHashBufBytes = 32 * 1024 * 1024;
 
 struct CombinedDigest {
   std::array<unsigned char, 16> md5{};
   std::uint64_t xxh3_64 = 0;
+};
+
+class HashFileReader {
+ public:
+  explicit HashFileReader(const std::filesystem::path& path) noexcept : path_(path) {}
+
+  brokkr::core::Status open() noexcept {
+#if defined(_WIN32)
+    handle_ = CreateFileW(path_.c_str(), GENERIC_READ,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (handle_ == INVALID_HANDLE_VALUE) {
+      return brokkr::core::failf("Cannot open for hashing: {}", path_.string());
+    }
+    return {};
+#else
+    fd_ = ::open(path_.c_str(), O_RDONLY
+#if defined(O_CLOEXEC)
+                                   | O_CLOEXEC
+#endif
+    );
+    if (fd_ < 0) return brokkr::core::failf("Cannot open for hashing: {}", path_.string());
+#if defined(POSIX_FADV_SEQUENTIAL)
+    (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
+#if defined(POSIX_FADV_WILLNEED)
+    (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_WILLNEED);
+#endif
+    return {};
+#endif
+  }
+
+  brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept {
+#if defined(_WIN32)
+    std::size_t total = 0;
+    while (total < want) {
+      const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(want - total, static_cast<std::size_t>(1u << 30)));
+      DWORD got = 0;
+      if (!ReadFile(handle_, data + total, chunk, &got, nullptr)) {
+        return brokkr::core::failf("Read failed while hashing: {}", path_.string());
+      }
+      if (got == 0) break;
+      total += static_cast<std::size_t>(got);
+    }
+    return total;
+#else
+    std::size_t total = 0;
+    while (total < want) {
+      const ssize_t got = ::read(fd_, data + total, want - total);
+      if (got < 0) {
+        if (errno == EINTR) continue;
+        return brokkr::core::failf("Read failed while hashing: {}", path_.string());
+      }
+      if (got == 0) break;
+      total += static_cast<std::size_t>(got);
+    }
+    return total;
+#endif
+  }
+
+  ~HashFileReader() {
+#if defined(_WIN32)
+    if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+#else
+    if (fd_ >= 0) ::close(fd_);
+#endif
+  }
+
+ private:
+  std::filesystem::path path_;
+#if defined(_WIN32)
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+  int fd_ = -1;
+#endif
 };
 
 static bool is_hex(unsigned char c) noexcept {
@@ -144,15 +231,13 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const std::
                                                                      std::atomic_uint64_t& done,
                                                                      std::uint64_t total,
                                                                      const brokkr::odin::Ui& ui) noexcept {
-  constexpr std::size_t kBuf = 8 * 1024 * 1024;
   struct Slot {
     std::vector<unsigned char> buf;
     std::size_t n = 0;
   };
 
-  std::FILE* f = std::fopen(path.string().c_str(), "rb");
-  if (!f) return brokkr::core::failf("Cannot open for hashing: {}", path.string());
-  std::unique_ptr<std::FILE, int (*)(std::FILE*)> g(f, &std::fclose);
+  HashFileReader reader(path);
+  BRK_TRY(reader.open());
 
   std::uint64_t remaining = bytes_to_hash;
 
@@ -160,15 +245,15 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const std::
       [&](Slot& s, std::stop_token st) -> brokkr::core::Result<bool> {
         if (st.stop_requested() || !remaining) return false;
 
-        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, kBuf));
-        const std::size_t got = std::fread(s.buf.data(), 1, want, f);
+        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, kHashBufBytes));
+        BRK_TRYV(got, reader.read_some(s.buf.data(), want));
         if (got != want) return brokkr::core::failf("Short read while hashing: {}", path.string());
 
         s.n = got;
         remaining -= static_cast<std::uint64_t>(got);
         return true;
       },
-      [&](Slot& s) { s.buf.resize(kBuf); });
+      [&](Slot& s) { s.buf.resize(kHashBufBytes); });
 
   Consumer consumer;
   if constexpr (Consumer::kUsesMd5) {
