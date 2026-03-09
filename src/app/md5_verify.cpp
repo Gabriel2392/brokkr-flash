@@ -20,6 +20,7 @@
 #include "app/md5_xxh3_cache.hpp"
 
 #include "core/prefetcher.hpp"
+#include "core/str.hpp"
 #include "core/thread_pool.hpp"
 
 #include "io/tar.hpp"
@@ -163,6 +164,10 @@ static bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>&
     out[i] = static_cast<unsigned char>((hi << 4) | lo);
   }
   return true;
+}
+
+static bool is_md5_wrapped_tar_name(const std::filesystem::path& path) noexcept {
+  return brokkr::core::ends_with_ci(path.filename().string(), ".md5");
 }
 
 struct Xxh3Consumer {
@@ -361,6 +366,7 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesy
   std::vector<Md5Job> jobs;
 
   for (const auto& p : inputs) {
+    if (!is_md5_wrapped_tar_name(p)) continue;
     if (!brokkr::io::TarArchive::is_tar_file(p.string())) continue;
 
     auto r = detect_md5_job(p);
