@@ -628,7 +628,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     cmbRebootAction->setCurrentIndex(0);
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
-    lastFlashDevices_.clear();
 
     setSquaresText_("");
     setSquaresProgress_(0.0, false);
@@ -837,8 +836,6 @@ void BrokkrWrapper::refreshConnectedDevices_() {
         anyAttached = true;
       }
     }
-
-    if (anyAttached) lastFlashDevices_.clear();
 
     physicalUsbPrev_ = physicalUsb;
     physicalWirelessPrev_ = physicalWireless;
@@ -1261,21 +1258,6 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     comBoxes[i]->setFont(f);
   }
 
-  for (int i = shown; i < comBoxes.size(); ++i) {
-    if (i < lastFlashDevices_.size()) {
-      const QString prev = lastFlashDevices_[i].trimmed();
-      if (!prev.isEmpty()) {
-        const QString raw = QString("%1:[%2]").arg(i).arg(prev);
-        comBoxes[i]->setText(elideFor(comBoxes[i], raw));
-        comBoxes[i]->setToolTip(prev);
-
-        QPalette pal = comBoxes[i]->palette();
-        pal.setColor(QPalette::Text, palette().color(QPalette::Mid));
-        comBoxes[i]->setPalette(pal);
-      }
-    }
-  }
-
   if (connectedDevices_.size() > comBoxes.size() && !comBoxes.isEmpty()) {
     overflowDevices_ = true;
     const int extra = connectedDevices_.size() - comBoxes.size();
@@ -1419,7 +1401,6 @@ void BrokkrWrapper::onRunClicked() {
 void BrokkrWrapper::startWorkStart_() {
   if (busy_) return;
 
-  lastFlashDevices_ = connectedDevices_;
   const QStringList uiDevicesSnapshot = connectedDevices_;
   setBusy_(true);
 
