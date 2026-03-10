@@ -30,6 +30,9 @@ namespace brokkr::app {
 
 struct Md5Job {
   std::filesystem::path path;
+  std::filesystem::path identity_path;
+  std::uint64_t identity_size = 0;
+  std::int64_t identity_write_time = 0;
   std::uint64_t bytes_to_hash = 0;
   std::array<unsigned char, 16> expected{};
 };

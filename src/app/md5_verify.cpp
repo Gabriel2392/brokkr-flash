@@ -39,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 #if defined(_WIN32)
@@ -68,6 +69,45 @@ struct CombinedDigest {
   std::array<unsigned char, 16> md5{};
   std::uint64_t xxh3_64 = 0;
 };
+
+struct SessionVerifyKey {
+  std::string identity_path;
+  std::uint64_t identity_size = 0;
+  std::int64_t identity_write_time = 0;
+  std::uint64_t bytes_to_hash = 0;
+  std::array<unsigned char, 16> expected{};
+
+  bool operator==(const SessionVerifyKey& other) const noexcept {
+    return identity_path == other.identity_path && identity_size == other.identity_size &&
+           identity_write_time == other.identity_write_time && bytes_to_hash == other.bytes_to_hash &&
+           expected == other.expected;
+  }
+};
+
+struct SessionVerifyKeyHash {
+  std::size_t operator()(const SessionVerifyKey& key) const noexcept {
+    auto hash_combine = [](std::size_t seed, std::size_t value) noexcept {
+      return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+    };
+
+    std::size_t seed = std::hash<std::string>{}(key.identity_path);
+    seed = hash_combine(seed, std::hash<std::uint64_t>{}(key.identity_size));
+    seed = hash_combine(seed, std::hash<std::int64_t>{}(key.identity_write_time));
+    seed = hash_combine(seed, std::hash<std::uint64_t>{}(key.bytes_to_hash));
+    for (unsigned char b : key.expected) seed = hash_combine(seed, std::hash<unsigned int>{}(b));
+    return seed;
+  }
+};
+
+std::unordered_set<SessionVerifyKey, SessionVerifyKeyHash>& session_verify_cache() {
+  static std::unordered_set<SessionVerifyKey, SessionVerifyKeyHash> cache;
+  return cache;
+}
+
+std::mutex& session_verify_cache_mutex() {
+  static std::mutex mtx;
+  return mtx;
+}
 
 class HashFileReader {
  public:
@@ -168,6 +208,42 @@ static bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>&
 
 static bool is_md5_wrapped_tar_name(const std::filesystem::path& path) noexcept {
   return brokkr::core::ends_with_ci(path.filename().string(), ".md5");
+}
+
+static std::filesystem::path session_identity_path(const std::filesystem::path& path) noexcept {
+  std::error_code ec;
+  auto canonical = std::filesystem::weakly_canonical(path, ec);
+  if (!ec) return canonical;
+
+  auto absolute = std::filesystem::absolute(path, ec);
+  if (!ec) return absolute.lexically_normal();
+
+  return path.lexically_normal();
+}
+
+static std::int64_t session_identity_write_time(std::filesystem::file_time_type t) noexcept {
+  return static_cast<std::int64_t>(t.time_since_epoch().count());
+}
+
+static SessionVerifyKey make_session_verify_key(const Md5Job& job) {
+  SessionVerifyKey key;
+  key.identity_path = job.identity_path.generic_string();
+  key.identity_size = job.identity_size;
+  key.identity_write_time = job.identity_write_time;
+  key.bytes_to_hash = job.bytes_to_hash;
+  key.expected = job.expected;
+  return key;
+}
+
+static bool session_verify_cache_contains(const Md5Job& job) {
+  const auto key = make_session_verify_key(job);
+  std::lock_guard lk(session_verify_cache_mutex());
+  return session_verify_cache().contains(key);
+}
+
+static void remember_session_verify_cache(const Md5Job& job) {
+  std::lock_guard lk(session_verify_cache_mutex());
+  session_verify_cache().insert(make_session_verify_key(job));
 }
 
 struct Xxh3Consumer {
@@ -307,6 +383,8 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::fil
   std::error_code ec;
   const std::uint64_t file_size = std::filesystem::file_size(p, ec);
   if (ec) return brokkr::core::failf("Cannot stat file: {}", p.string());
+  const auto write_time = std::filesystem::last_write_time(p, ec);
+  if (ec) return brokkr::core::failf("Cannot stat file write time: {}", p.string());
   if (file_size < (kMd5HexChars + 2)) return std::nullopt;
 
   const std::uint64_t tail_off = (file_size > kTrailerMaxBytes) ? (file_size - kTrailerMaxBytes) : 0;
@@ -355,6 +433,9 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::fil
 
   Md5Job j;
   j.path = p;
+  j.identity_path = session_identity_path(p);
+  j.identity_size = file_size;
+  j.identity_write_time = session_identity_write_time(write_time);
   j.bytes_to_hash = bytes_to_hash;
   j.expected = expected;
   return std::optional<Md5Job>(std::move(j));
@@ -400,11 +481,6 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
   std::uint64_t total = 0;
   for (const auto& j : jobs) total += j.bytes_to_hash;
-
-  const std::size_t threads = std::min<std::size_t>(jobs.size(),
-                                                    std::max<std::size_t>(1, std::thread::hardware_concurrency()));
-
-  brokkr::core::ThreadPool pool(threads);
   std::atomic_uint64_t done{0};
 
   std::filesystem::path cache_file;
@@ -445,6 +521,29 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
   if (ui.on_item_active) ui.on_item_active(0);
   if (ui.on_progress) ui.on_progress(0, total, 0, total);
 
+  std::vector<Md5Job> pending_jobs;
+  pending_jobs.reserve(jobs.size());
+  for (const auto& j : jobs) {
+    if (session_verify_cache_contains(j)) {
+      const auto new_done = done.fetch_add(j.bytes_to_hash, std::memory_order_relaxed) + j.bytes_to_hash;
+      if (ui.on_progress) ui.on_progress(new_done, total, new_done, total);
+      spdlog::debug("Session verify cache hit: {}", j.path.string());
+      continue;
+    }
+    pending_jobs.push_back(j);
+  }
+
+  if (pending_jobs.empty()) {
+    if (ui.on_item_done) ui.on_item_done(0);
+    spdlog::info("{} OK", verify_name);
+    return {};
+  }
+
+  const std::size_t threads = std::min<std::size_t>(pending_jobs.size(),
+                                                    std::max<std::size_t>(1, std::thread::hardware_concurrency()));
+
+  brokkr::core::ThreadPool pool(threads);
+
   auto persist_cache_if_needed = [&]() noexcept {
     std::vector<Md5Xxh3CacheEntry> cache_snapshot;
     bool should_save_cache = false;
@@ -460,7 +559,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     }
   };
 
-  for (const auto& j : jobs) {
+  for (const auto& j : pending_jobs) {
     auto st = pool.submit([&, j]() -> brokkr::core::Status {
       if (pool.cancelled()) return {};
 
@@ -486,6 +585,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
         if (*xxh3 == *cached_xxh3) {
           spdlog::debug("MD5/XXH3 cache hit: {}", j.path.string());
+          remember_session_verify_cache(j);
           return {};
         }
 
@@ -512,6 +612,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
                                   kMd5Xxh3CacheMaxEntries);
           cache_dirty = true;
         }
+        remember_session_verify_cache(j);
         return {};
       }
 
@@ -530,6 +631,8 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
                                 kMd5Xxh3CacheMaxEntries);
         cache_dirty = true;
       }
+
+      remember_session_verify_cache(j);
 
       return {};
     });
