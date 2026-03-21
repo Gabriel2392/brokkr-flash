@@ -1,7 +1,5 @@
 # Brokkr Flash
 
-![brokkr](https://raw.githubusercontent.com/Gabriel2392/brokkr-flash/main/assets/brokkr.jpg)
-
 A modern, cross-platform Samsung device flashing utility written in C++23.
 
 ## Features (why is it better than etc lol)
