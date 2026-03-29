@@ -29,6 +29,11 @@ class QGroupBox;
 class QTextEdit;
 class QCloseEvent;
 class QTabWidget;
+class QMimeData;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QChildEvent;
 
 #if defined(BROKKR_PLATFORM_LINUX)
 class QSocketNotifier;
@@ -53,6 +58,11 @@ class BrokkrWrapper : public QWidget {
 
  protected:
   void closeEvent(QCloseEvent* e) override;
+  void dragEnterEvent(QDragEnterEvent* e) override;
+  void dragMoveEvent(QDragMoveEvent* e) override;
+  void dropEvent(QDropEvent* e) override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
+  void childEvent(QChildEvent* e) override;
 
 #if defined(Q_OS_WIN)
   bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
@@ -64,6 +74,24 @@ class BrokkrWrapper : public QWidget {
   void onRunClicked();
 
  private:
+  static constexpr int kDropSlotAny = -1;
+  static constexpr int kDropSlotUnknown = -2;
+  static constexpr int kDropSlotBL = 0;
+  static constexpr int kDropSlotAP = 1;
+  static constexpr int kDropSlotCP = 2;
+  static constexpr int kDropSlotCSC = 3;
+  static constexpr int kDropSlotUSERDATA = 4;
+  static constexpr int kDropSlotPIT = 5;
+
+  static QString dropSlotName_(int slotId);
+  static int inferDropSlotFromFileName_(const QString& fileName);
+  static bool isDropFileAllowedForSlot_(int slotId, const QString& fileName);
+
+  QStringList extractLocalDropFiles_(const QMimeData* mime) const;
+  void bindDropTarget_(QWidget* widget, int slotId);
+  void handleDroppedFiles_(const QStringList& localFiles, int forcedSlotId);
+  bool assignDroppedFileToSlot_(int slotId, const QString& localPath, QString* reason, bool* replaced);
+
   void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
   void rebuildDeviceBoxes_(int boxCount, bool singleRow);
@@ -148,6 +176,7 @@ class BrokkrWrapper : public QWidget {
   QTimer* deviceTimer = nullptr;
   std::atomic_bool usbDirty_{true};
   bool busy_ = false;
+  bool windowsElevatedHintShown_ = false;
 
 #if defined(BROKKR_PLATFORM_LINUX)
   int uevent_fd_ = -1;

@@ -1,6 +1,10 @@
 #include "brokkr_wrapper.hpp"
 
 #include <QCloseEvent>
+#include <QChildEvent>
+#include <QDir>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -12,15 +16,19 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QMimeData>
+#include <QDropEvent>
 #include <QPainter>
 #include <QPalette>
 #include <QPen>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSizePolicy>
 #include <QSpacerItem>
 #include <QStringList>
 #include <QTabWidget>
 #include <QTextCursor>
+#include <QUrl>
 #include <QVariantAnimation>
 #include <QVBoxLayout>
 
@@ -57,6 +65,7 @@
 
 #if defined(Q_OS_WIN)
   #include <dbt.h>
+  #include <shellapi.h>
   #include <windows.h>
 #endif
 
@@ -197,6 +206,114 @@ static std::vector<std::uint16_t> default_pids() { return {std::begin(ODIN_PIDS)
 
 static bool is_pit_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".pit"); }
 
+static bool is_pit_drop_name(const QString& file_name) {
+  return file_name.trimmed().toLower().endsWith(".pit");
+}
+
+static bool is_firmware_drop_name(const QString& file_name) {
+  const QString name = file_name.trimmed().toLower();
+  return name.endsWith(".tar") || name.endsWith(".tar.md5");
+}
+
+static bool is_token_char(QChar c) { return c.isLetterOrNumber(); }
+
+static bool contains_token(const QString& upper_name, const QString& token) {
+  int from = 0;
+  for (;;) {
+    const int pos = upper_name.indexOf(token, from, Qt::CaseSensitive);
+    if (pos < 0) return false;
+
+    const int left = pos - 1;
+    const int right = pos + token.size();
+
+    const bool left_ok = (left < 0) || !is_token_char(upper_name[left]);
+    const bool right_ok = (right >= upper_name.size()) || !is_token_char(upper_name[right]);
+
+    if (left_ok && right_ok) return true;
+    from = pos + 1;
+  }
+}
+
+static constexpr const char* kDropSlotProperty = "brokkr.dropSlot";
+
+static QString drop_file_identity_key(const QString& path_like) {
+  QFileInfo fi(QDir::cleanPath(path_like.trimmed()));
+  QString key;
+
+  if (fi.exists()) {
+    key = fi.canonicalFilePath();
+    if (key.isEmpty()) key = fi.absoluteFilePath();
+  } else {
+    key = fi.absoluteFilePath();
+  }
+
+  key = QDir::cleanPath(key);
+#if defined(Q_OS_WIN)
+  key = key.toLower();
+#endif
+  return key;
+}
+
+#if defined(Q_OS_WIN)
+static void allow_windows_drop_messages(HWND hwnd) {
+  if (!hwnd) return;
+  (void)ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, nullptr);
+  (void)ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
+  (void)ChangeWindowMessageFilterEx(hwnd, 0x0049, MSGFLT_ALLOW, nullptr); // WM_COPYGLOBALDATA
+  DragAcceptFiles(hwnd, TRUE);
+}
+
+static bool is_windows_process_elevated() {
+  HANDLE tok = nullptr;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) return false;
+
+  TOKEN_ELEVATION elev{};
+  DWORD out = 0;
+  const BOOL ok = GetTokenInformation(tok, TokenElevation, &elev, sizeof(elev), &out);
+  CloseHandle(tok);
+  return ok && elev.TokenIsElevated;
+}
+
+static QStringList parse_hdrop_files(HDROP hdrop) {
+  QStringList out;
+  if (!hdrop) return out;
+
+  const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+  for (UINT i = 0; i < count; ++i) {
+    const UINT need = DragQueryFileW(hdrop, i, nullptr, 0);
+    if (need == 0) continue;
+
+    std::wstring tmp;
+    tmp.resize(static_cast<std::size_t>(need));
+    const UINT got = DragQueryFileW(hdrop, i, tmp.data(), need + 1);
+    if (got == 0) continue;
+
+    out.push_back(QDir::cleanPath(QString::fromWCharArray(tmp.c_str())));
+  }
+  return out;
+}
+
+static QStringList parse_windows_filenamew_payload(const QByteArray& raw) {
+  QStringList out;
+  if (raw.isEmpty()) return out;
+
+  const auto* w = reinterpret_cast<const wchar_t*>(raw.constData());
+  const int wlen = static_cast<int>(raw.size() / static_cast<int>(sizeof(wchar_t)));
+  if (wlen <= 0) return out;
+
+  QString packed = QString::fromWCharArray(w, wlen);
+  packed.replace('\r', '\0');
+  packed.replace('\n', '\0');
+
+  const auto parts = packed.split('\0', Qt::SkipEmptyParts);
+  for (const auto& p : parts) {
+    const QString t = QDir::cleanPath(p.trimmed());
+    if (!t.isEmpty()) out.push_back(t);
+  }
+  return out;
+}
+#endif
+
 static QString htmlEsc(const QString& s) { return s.toHtmlEscaped(); }
 
 static QString human_bytes(std::uint64_t b) {
@@ -332,6 +449,10 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   setWindowTitle("Brokkr Flash");
   setWindowIcon(QIcon(":/brokkr.ico"));
   resize(850, 600);
+  setAcceptDrops(true);
+#if defined(Q_OS_WIN)
+  allow_windows_drop_messages(reinterpret_cast<HWND>(winId()));
+#endif
   baseWindowHeight_ = height();
 
   spdlog::set_default_logger(make_qt_logger(this));
@@ -432,6 +553,11 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   btnPitBrowse = new QPushButton("Browse", this);
   btnPitBrowse->setEnabled(false);
   pitLayout->addWidget(btnPitBrowse, 1, 2);
+
+  bindDropTarget_(pitTab, kDropSlotPIT);
+  bindDropTarget_(chkUsePit, kDropSlotPIT);
+  bindDropTarget_(editPit, kDropSlotPIT);
+  bindDropTarget_(btnPitBrowse, kDropSlotPIT);
 
   tabWidget_->addTab(pitTab, "Pit");
 
@@ -699,6 +825,25 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   requestUsbRefresh_();
   setControlsEnabled_(true);
   updateActionButtons_();
+
+  // Ensure drops are handled regardless of the exact child widget under cursor.
+  bindDropTarget_(this, kDropSlotAny);
+  for (auto* w : findChildren<QWidget*>()) {
+    if (!w) continue;
+    if (w->property(kDropSlotProperty).isValid()) continue;
+    bindDropTarget_(w, kDropSlotAny);
+  }
+
+#if defined(Q_OS_WIN)
+  if (!windowsElevatedHintShown_ && is_windows_process_elevated()) {
+    windowsElevatedHintShown_ = true;
+#ifndef NDEBUG
+    appendLogLine_(
+        "<font color=\"#ffb366\">Notice: Running as Administrator can block Explorer drag &amp; drop. "
+        "Run Brokkr normally for reliable DnD.</font>");
+#endif
+  }
+#endif
 }
 
 BrokkrWrapper::~BrokkrWrapper() {
@@ -739,6 +884,346 @@ void BrokkrWrapper::closeEvent(QCloseEvent* e) {
   e->accept();
 }
 
+QString BrokkrWrapper::dropSlotName_(int slotId) {
+  switch (slotId) {
+    case kDropSlotBL: return "BL";
+    case kDropSlotAP: return "AP";
+    case kDropSlotCP: return "CP";
+    case kDropSlotCSC: return "CSC";
+    case kDropSlotUSERDATA: return "USERDATA";
+    case kDropSlotPIT: return "PIT";
+    default: return "UNKNOWN";
+  }
+}
+
+int BrokkrWrapper::inferDropSlotFromFileName_(const QString& fileName) {
+  const QString leaf = QFileInfo(fileName).fileName();
+  if (leaf.isEmpty()) return kDropSlotUnknown;
+
+  if (is_pit_drop_name(leaf)) return kDropSlotPIT;
+
+  const QString upper = leaf.toUpper();
+
+  if (contains_token(upper, "HOME_CSC")) return kDropSlotCSC;
+  if (contains_token(upper, "USERDATA")) return kDropSlotUSERDATA;
+  if (contains_token(upper, "CSC")) return kDropSlotCSC;
+  if (contains_token(upper, "BL")) return kDropSlotBL;
+  if (contains_token(upper, "AP")) return kDropSlotAP;
+  if (contains_token(upper, "CP")) return kDropSlotCP;
+
+  return kDropSlotUnknown;
+}
+
+bool BrokkrWrapper::isDropFileAllowedForSlot_(int slotId, const QString& fileName) {
+  if (slotId == kDropSlotPIT) return is_pit_drop_name(fileName);
+  if (slotId >= kDropSlotBL && slotId <= kDropSlotUSERDATA) return is_firmware_drop_name(fileName);
+  return false;
+}
+
+QStringList BrokkrWrapper::extractLocalDropFiles_(const QMimeData* mime) const {
+  QStringList out;
+  if (!mime) return out;
+
+  QSet<QString> seen;
+
+  auto add_if_local = [&](const QString& pathLike) {
+    const QString p = QDir::cleanPath(pathLike.trimmed());
+    if (p.isEmpty()) return;
+    const QString key = drop_file_identity_key(p);
+    if (key.isEmpty() || seen.contains(key)) return;
+    seen.insert(key);
+    out.push_back(p);
+  };
+
+  if (mime->hasUrls()) {
+    for (const QUrl& u : mime->urls()) {
+      if (!u.isLocalFile()) continue;
+      add_if_local(u.toLocalFile());
+    }
+  }
+
+  if (mime->hasText()) {
+    const auto lines = mime->text().split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+    for (const auto& line : lines) {
+      const QString t = line.trimmed();
+      if (t.isEmpty()) continue;
+      const QUrl maybeUrl(t);
+      if (maybeUrl.isValid() && maybeUrl.isLocalFile()) {
+        add_if_local(maybeUrl.toLocalFile());
+      } else if (QFileInfo(t).isAbsolute()) {
+        add_if_local(t);
+      }
+    }
+  }
+
+#if defined(Q_OS_WIN)
+  static constexpr const char* kFmtFileNameW = "application/x-qt-windows-mime;value=\"FileNameW\"";
+  static constexpr const char* kFmtFileNameA = "application/x-qt-windows-mime;value=\"FileName\"";
+
+  if (mime->hasFormat(kFmtFileNameW)) {
+    for (const auto& p : parse_windows_filenamew_payload(mime->data(kFmtFileNameW))) add_if_local(p);
+  }
+  if (mime->hasFormat(kFmtFileNameA)) {
+    const auto raw = mime->data(kFmtFileNameA);
+    for (const auto& part : QString::fromLocal8Bit(raw).split(QChar('\0'), Qt::SkipEmptyParts)) add_if_local(part);
+  }
+#endif
+
+  return out;
+}
+
+void BrokkrWrapper::bindDropTarget_(QWidget* widget, int slotId) {
+  if (!widget) return;
+  widget->setAcceptDrops(true);
+  widget->setProperty(kDropSlotProperty, slotId);
+  widget->removeEventFilter(this);
+  widget->installEventFilter(this);
+}
+
+bool BrokkrWrapper::assignDroppedFileToSlot_(int slotId, const QString& localPath, QString* reason, bool* replaced) {
+  if (replaced) *replaced = false;
+
+  QFileInfo fi(localPath);
+  if (!fi.exists()) {
+    if (reason) *reason = "File does not exist.";
+    return false;
+  }
+  if (!fi.isFile()) {
+    if (reason) *reason = "Dropped item is not a regular file.";
+    return false;
+  }
+  if (!fi.isReadable()) {
+    if (reason) *reason = "File is not readable.";
+    return false;
+  }
+  if (!isDropFileAllowedForSlot_(slotId, fi.fileName())) {
+    if (reason) {
+      if (slotId == kDropSlotPIT)
+        *reason = "PIT slot accepts only .pit files.";
+      else
+        *reason = "Firmware slots accept only .tar or .tar.md5 files.";
+    }
+    return false;
+  }
+
+  const QString finalPath = QDir::toNativeSeparators(fi.absoluteFilePath());
+  lastDir = fi.absolutePath();
+
+  if (slotId == kDropSlotPIT) {
+    if (!chkUsePit || !editPit) {
+      if (reason) *reason = "PIT controls are unavailable.";
+      return false;
+    }
+
+    const QString old = editPit->text().trimmed();
+    if (replaced) *replaced = !old.isEmpty() && old.compare(finalPath, Qt::CaseInsensitive) != 0;
+
+    if (!chkUsePit->isChecked()) chkUsePit->setChecked(true);
+    editPit->setText(finalPath);
+    return true;
+  }
+
+  if (slotId < kDropSlotBL || slotId > kDropSlotUSERDATA) {
+    if (reason) *reason = "Unknown destination slot.";
+    return false;
+  }
+  if (slotId >= fileLineEdits_.size() || slotId >= fileChecks_.size()) {
+    if (reason) *reason = "Destination slot is not available in this UI.";
+    return false;
+  }
+
+  auto* lineEdit = fileLineEdits_[slotId];
+  auto* check = fileChecks_[slotId];
+  if (!lineEdit || !check) {
+    if (reason) *reason = "Destination slot controls are not available.";
+    return false;
+  }
+
+  const QString old = lineEdit->text().trimmed();
+  if (replaced) *replaced = !old.isEmpty() && old.compare(finalPath, Qt::CaseInsensitive) != 0;
+
+  lineEdit->setText(finalPath);
+  check->setEnabled(true);
+  check->setChecked(true);
+  return true;
+}
+
+void BrokkrWrapper::handleDroppedFiles_(const QStringList& localFiles, int forcedSlotId) {
+  if (busy_) {
+    showBlocked_("Cannot accept files", "Cannot change files while flashing is in progress.");
+    return;
+  }
+  if (localFiles.isEmpty()) return;
+
+  QStringList accepted;
+  QStringList rejected;
+  QSet<int> usedSlots;
+  QSet<QString> seenFiles;
+
+  for (const QString& p : localFiles) {
+    const QString fileKey = drop_file_identity_key(p);
+    if (!fileKey.isEmpty() && seenFiles.contains(fileKey)) {
+      // Ignore duplicate payload entries (e.g., Windows long-path + 8.3 alias of the same file).
+      continue;
+    }
+    if (!fileKey.isEmpty()) seenFiles.insert(fileKey);
+
+    const QFileInfo fi(p);
+    const QString leaf = fi.fileName().isEmpty() ? p : fi.fileName();
+
+    int slotId = forcedSlotId;
+    if (slotId == kDropSlotAny) slotId = inferDropSlotFromFileName_(leaf);
+    if (slotId == kDropSlotUnknown) {
+      rejected.push_back(
+          QString("%1 -> rejected (cannot infer destination: expected AP/BL/CP/CSC/USERDATA token or .pit)")
+              .arg(leaf));
+      continue;
+    }
+
+    if (usedSlots.contains(slotId)) {
+      rejected.push_back(QString("%1 -> rejected (%2 already assigned in this drop)").arg(leaf, dropSlotName_(slotId)));
+      continue;
+    }
+
+    QString reason;
+    bool replaced = false;
+    if (!assignDroppedFileToSlot_(slotId, p, &reason, &replaced)) {
+      rejected.push_back(QString("%1 -> rejected (%2)").arg(leaf, reason));
+      continue;
+    }
+
+    usedSlots.insert(slotId);
+    accepted.push_back(QString("%1 -> %2%3")
+                           .arg(leaf, dropSlotName_(slotId), replaced ? " (replaced existing file)" : ""));
+  }
+
+  updateActionButtons_();
+
+#ifndef NDEBUG
+  for (const auto& msg : accepted)
+    appendLogLine_(QString("<font color=\"#7ecf7e\">DnD route: %1</font>").arg(htmlEsc(msg)));
+  for (const auto& msg : rejected)
+    appendLogLine_(QString("<font color=\"#ff7777\">DnD reject: %1</font>").arg(htmlEsc(msg)));
+#endif
+
+  if (accepted.isEmpty() && !rejected.isEmpty()) {
+    showBlocked_("Drop rejected", rejected.join("\n"));
+  }
+}
+
+void BrokkrWrapper::dragEnterEvent(QDragEnterEvent* e) {
+  if (busy_) {
+    e->ignore();
+    return;
+  }
+  const auto files = extractLocalDropFiles_(e->mimeData());
+  if (files.isEmpty()) {
+    e->ignore();
+    return;
+  }
+  e->acceptProposedAction();
+}
+
+void BrokkrWrapper::dragMoveEvent(QDragMoveEvent* e) {
+  if (busy_) {
+    e->ignore();
+    return;
+  }
+  const auto files = extractLocalDropFiles_(e->mimeData());
+  if (files.isEmpty()) {
+    e->ignore();
+    return;
+  }
+  e->acceptProposedAction();
+}
+
+void BrokkrWrapper::dropEvent(QDropEvent* e) {
+  if (busy_) {
+    e->ignore();
+    return;
+  }
+  const auto files = extractLocalDropFiles_(e->mimeData());
+  if (files.isEmpty()) {
+#ifndef NDEBUG
+    appendLogLine_(
+        "<font color=\"#ff7777\">DnD reject: unsupported payload (drop local files from Explorer)</font>");
+#endif
+    e->ignore();
+    return;
+  }
+  handleDroppedFiles_(files, kDropSlotAny);
+  e->acceptProposedAction();
+}
+
+bool BrokkrWrapper::eventFilter(QObject* watched, QEvent* event) {
+  if (!watched || !event) return QWidget::eventFilter(watched, event);
+
+  auto* ww = qobject_cast<QWidget*>(watched);
+  if (!ww) return QWidget::eventFilter(watched, event);
+  if (ww != this && !isAncestorOf(ww)) return QWidget::eventFilter(watched, event);
+
+  int forcedSlotId = kDropSlotAny;
+  const QVariant slotVar = ww->property(kDropSlotProperty);
+  if (slotVar.isValid()) forcedSlotId = slotVar.toInt();
+
+  switch (event->type()) {
+    case QEvent::DragEnter: {
+      auto* de = static_cast<QDragEnterEvent*>(event);
+      if (!busy_ && !extractLocalDropFiles_(de->mimeData()).isEmpty())
+        de->acceptProposedAction();
+      else
+        de->ignore();
+      return true;
+    }
+    case QEvent::DragMove: {
+      auto* de = static_cast<QDragMoveEvent*>(event);
+      if (!busy_ && !extractLocalDropFiles_(de->mimeData()).isEmpty())
+        de->acceptProposedAction();
+      else
+        de->ignore();
+      return true;
+    }
+    case QEvent::Drop: {
+      auto* de = static_cast<QDropEvent*>(event);
+      if (busy_) {
+        de->ignore();
+        return true;
+      }
+      const auto files = extractLocalDropFiles_(de->mimeData());
+      if (files.isEmpty()) {
+#ifndef NDEBUG
+        appendLogLine_(
+            "<font color=\"#ff7777\">DnD reject: unsupported payload (drop local files from Explorer)</font>");
+#endif
+        de->ignore();
+        return true;
+      }
+      handleDroppedFiles_(files, forcedSlotId);
+      de->acceptProposedAction();
+      return true;
+    }
+    default: break;
+  }
+
+  return QWidget::eventFilter(watched, event);
+}
+
+void BrokkrWrapper::childEvent(QChildEvent* e) {
+  QWidget::childEvent(e);
+  if (!e || !e->added()) return;
+
+  auto* w = qobject_cast<QWidget*>(e->child());
+  if (!w || w == this) return;
+
+  if (!w->property(kDropSlotProperty).isValid()) bindDropTarget_(w, kDropSlotAny);
+
+  for (auto* sub : w->findChildren<QWidget*>()) {
+    if (!sub || sub == this) continue;
+    if (sub->property(kDropSlotProperty).isValid()) continue;
+    bindDropTarget_(sub, kDropSlotAny);
+  }
+}
+
 void BrokkrWrapper::changeEvent(QEvent* e) {
   QWidget::changeEvent(e);
   if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
@@ -759,13 +1244,48 @@ void BrokkrWrapper::changeEvent(QEvent* e) {
 #if defined(Q_OS_WIN)
 bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
   (void)eventType;
-  (void)result;
   MSG* msg = reinterpret_cast<MSG*>(message);
   if (!msg) return false;
+
+  if (msg->message == WM_DROPFILES) {
+    HDROP hdrop = reinterpret_cast<HDROP>(msg->wParam);
+    int forcedSlotId = kDropSlotAny;
+
+    POINT pt{};
+    if (DragQueryPoint(hdrop, &pt)) {
+      QWidget* hit = childAt(QPoint(pt.x, pt.y));
+      while (hit) {
+        const QVariant v = hit->property(kDropSlotProperty);
+        if (v.isValid()) {
+          forcedSlotId = v.toInt();
+          break;
+        }
+        if (hit == this) break;
+        hit = hit->parentWidget();
+      }
+    }
+
+    const auto files = parse_hdrop_files(hdrop);
+    DragFinish(hdrop);
+
+    if (!files.isEmpty()) {
+      handleDroppedFiles_(files, forcedSlotId);
+    } else {
+#ifndef NDEBUG
+      appendLogLine_(
+          "<font color=\"#ff7777\">DnD reject: WM_DROPFILES payload did not contain local files</font>");
+#endif
+    }
+
+    if (result) *result = 0;
+    return true;
+  }
 
   if (msg->message == WM_DEVICECHANGE) {
     if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) requestUsbRefresh_();
   }
+
+  if (result) *result = 0;
   return false;
 }
 #endif
@@ -1359,6 +1879,10 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   fileChecks_.append(chk);
   fileButtons_.append(btn);
   fileLineEdits_.append(lineEdit);
+
+  bindDropTarget_(chk, row);
+  bindDropTarget_(btn, row);
+  bindDropTarget_(lineEdit, row);
 
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
