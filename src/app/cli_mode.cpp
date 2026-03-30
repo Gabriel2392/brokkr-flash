@@ -371,7 +371,21 @@ int run_flash_cli(const CliArgs& args) {
   cfg.reboot_after = !args.no_reboot;
 
   std::atomic_bool saw_per_device_fail{false};
+  std::optional<brokkr::core::SignalShield> sig_guard;
+  bool flash_signal_shield_attempted = false;
   brokkr::odin::Ui ui;
+  ui.on_stage = [&](const std::string& s) {
+    if (flash_signal_shield_attempted) return;
+    if (s.rfind("Flashing", 0) != 0) return;
+
+    flash_signal_shield_attempted = true;
+    sig_guard = brokkr::core::SignalShield::enable([](const char* sig_desc, int count) {
+      spdlog::warn("{} received during active flash operation - ignoring ({})", sig_desc, count);
+    });
+    if (!sig_guard) {
+      spdlog::warn("Failed to enable signal shielding; interrupts may terminate this flash run.");
+    }
+  };
   ui.on_progress = [](std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t) {
     // CLI intentionally suppresses percentage/progress bars.
   };
