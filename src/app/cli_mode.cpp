@@ -409,6 +409,16 @@ int run_flash_cli(const CliArgs& args) {
       return 1;
     }
 
+    for (const auto& job : *jobsr) {
+      std::string name = job.path.filename().string();
+      if (name.empty()) name = job.path.string();
+
+      if (name.size() >= 11)
+        name = name.substr(0, 10) + "...";
+
+      spdlog::info("Checking MD5/XXH3 on {}", name);
+    }
+
     auto vst = brokkr::app::md5_verify(*jobsr, ui);
     if (!vst) {
       spdlog::error("{}", vst.error());
