@@ -41,7 +41,7 @@ namespace {
 constexpr std::size_t kMd5HexChars = 32;
 constexpr std::size_t kXxh3HexChars = 16;
 constexpr std::string_view kCacheHeader = "brokkr-md5-xxh3-cache v1";
-constexpr std::size_t kMaxEntriesDefault = 100;
+constexpr std::size_t kMaxEntriesDefault = 65535;
 constexpr std::uintmax_t kMaxCacheFileBytes = 1024 * 1024;
 
 struct ParsedCacheFile {

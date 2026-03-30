@@ -100,25 +100,25 @@ static void test_roundtrip_save_load() {
   std::filesystem::remove_all(dir);
 }
 
-static void test_eviction_keeps_most_recent_100() {
+static void test_eviction_keeps_most_recent_65535() {
   std::vector<Md5Xxh3CacheEntry> entries;
-  for (std::uint64_t i = 0; i < 105; ++i) {
+  for (std::uint64_t i = 0; i < 65540; ++i) {
     brokkr::app::remember_md5_xxh3_cache(entries, make_md5(static_cast<unsigned char>(i)), i, 0xABC00000ULL + i);
   }
 
-  if (entries.size() != 100) {
-    fail_msg("eviction_keeps_most_recent_100", "cache did not clamp to 100 entries");
+  if (entries.size() != 65535) {
+    fail_msg("eviction_keeps_most_recent_65535", "cache did not clamp to 65535 entries");
     return;
   }
 
   if (brokkr::app::lookup_md5_xxh3_cache(entries, make_md5(0), 0).has_value()) {
-    fail_msg("eviction_keeps_most_recent_100", "oldest entry was not evicted");
+    fail_msg("eviction_keeps_most_recent_65535", "oldest entry was not evicted");
     return;
   }
 
-  auto newest = brokkr::app::lookup_md5_xxh3_cache(entries, make_md5(104), 104);
-  if (!newest || *newest != 0xABC00000ULL + 104) {
-    fail_msg("eviction_keeps_most_recent_100", "newest entry missing after eviction");
+  auto newest = brokkr::app::lookup_md5_xxh3_cache(entries, make_md5(65539), 65539);
+  if (!newest || *newest != 0xABC00000ULL + 65539) {
+    fail_msg("eviction_keeps_most_recent_65535", "newest entry missing after eviction");
     return;
   }
 
@@ -290,7 +290,7 @@ static void test_locked_cache_file_fails_fast() {
 
 int main() {
   test_roundtrip_save_load();
-  test_eviction_keeps_most_recent_100();
+  test_eviction_keeps_most_recent_65535();
   test_remember_updates_existing_pair();
   test_forget_removes_existing_pair();
   test_corrupt_primary_falls_back_to_backup();

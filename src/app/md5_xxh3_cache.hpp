@@ -45,7 +45,7 @@ brokkr::core::Result<std::vector<Md5Xxh3CacheEntry>> load_md5_xxh3_cache(
     const std::filesystem::path& cache_file) noexcept;
 brokkr::core::Status save_md5_xxh3_cache(const std::filesystem::path& cache_file,
                                          std::vector<Md5Xxh3CacheEntry> entries,
-                                         std::size_t max_entries = 100) noexcept;
+                                         std::size_t max_entries = 65535) noexcept;
 
 std::optional<std::uint64_t> lookup_md5_xxh3_cache(std::vector<Md5Xxh3CacheEntry>& entries,
                                                    const std::array<unsigned char, 16>& md5,
@@ -57,6 +57,6 @@ void remember_md5_xxh3_cache(std::vector<Md5Xxh3CacheEntry>& entries,
                              const std::array<unsigned char, 16>& md5,
                              std::uint64_t bytes_to_hash,
                              std::uint64_t xxh3_64,
-                             std::size_t max_entries = 100) noexcept;
+                             std::size_t max_entries = 65535) noexcept;
 
 } // namespace brokkr::app
