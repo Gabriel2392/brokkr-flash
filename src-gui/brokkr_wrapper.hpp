@@ -97,6 +97,7 @@ class BrokkrWrapper : public QWidget {
   void rebuildDeviceBoxes_(int boxCount, bool singleRow);
   void refreshDeviceBoxes_();
   void updateActionButtons_();
+  void updateRebootDownloadButton_();
   void applyWindowHeightToContents_();
 
   bool canRunStart_(QString* whyNot = nullptr) const;
@@ -111,6 +112,7 @@ class BrokkrWrapper : public QWidget {
   void stopWirelessListener_();
 
   void startWorkStart_();
+  void tryRebootIntoDownloadMode_();
 
   void setBusy_(bool busy);
   void setControlsEnabled_(bool enabled);
@@ -152,6 +154,7 @@ class BrokkrWrapper : public QWidget {
   QCheckBox* chkWireless = nullptr;
 
   QPushButton* btnManyDevices_ = nullptr;
+  QPushButton* btnRebootDownloadMode_ = nullptr;
 
   QComboBox* cmbRebootAction = nullptr;
 

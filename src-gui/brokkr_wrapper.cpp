@@ -543,6 +543,17 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   chkWireless = new QCheckBox("Wireless", this);
   optLayout->addWidget(chkWireless);
 
+#if defined(BROKKR_PLATFORM_WINDOWS)
+  btnRebootDownloadMode_ = new QPushButton("Try to Reboot them into Download Mode", this);
+  btnRebootDownloadMode_->setEnabled(false);
+  optLayout->addWidget(btnRebootDownloadMode_);
+
+  connect(btnRebootDownloadMode_, &QPushButton::clicked, this, [this]() {
+    if (busy_) return;
+    tryRebootIntoDownloadMode_();
+  });
+#endif
+
   optLayout->addSpacing(10);
   optLayout->addWidget(new QLabel("Post-Action:", this));
   cmbRebootAction = new QComboBox(this);
@@ -1598,6 +1609,8 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
     if (btn) btn->setEnabled(enabled);
 
   if (btnReset_) btnReset_->setEnabled(enabled);
+
+  updateRebootDownloadButton_();
 }
 
 void BrokkrWrapper::setBusy_(bool busy) {
@@ -1906,11 +1919,35 @@ bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
 bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
   if (chkWireless && chkWireless->isChecked()) return true;
 
+  auto show_odin_popup = [this](const QString& text, bool allowIgnore) {
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle("Brokkr Flasher");
+    box.setText(text);
+
+    auto* ok_btn = box.addButton(QMessageBox::Ok);
+  #if defined(BROKKR_PLATFORM_WINDOWS)
+    auto* reboot_btn = box.addButton("Try to Reboot them into Download Mode", QMessageBox::ActionRole);
+  #endif
+    QAbstractButton* ignore_btn = nullptr;
+    if (allowIgnore) ignore_btn = box.addButton("Ignore them", QMessageBox::AcceptRole);
+
+    box.setDefaultButton(qobject_cast<QPushButton*>(ok_btn));
+    box.exec();
+
+#if defined(BROKKR_PLATFORM_WINDOWS)
+    if (box.clickedButton() == reboot_btn) {
+      tryRebootIntoDownloadMode_();
+      return false;
+    }
+#endif
+    return allowIgnore && ignore_btn && box.clickedButton() == ignore_btn;
+  };
+
   const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
   if (!tgt.isEmpty()) {
     if (auto one = select_samsung_target(tgt); one && !is_odin_product(one->product)) {
-      showBlocked_("Cannot start", "The device is not in Odin Mode, reboot to download mode first.");
-      return false;
+      return show_odin_popup("The device is not in Odin Mode, reboot to download mode first.", false);
     }
   }
 
@@ -1932,38 +1969,114 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
   const int total = static_cast<int>(all_samsung.size());
 
   if (total == 1) {
-    showBlocked_("Cannot start", "The device is not in Odin Mode, reboot to download mode first.");
-    return false;
+    return show_odin_popup("The device is not in Odin Mode, reboot to download mode first.", false);
   }
 
   if (odin_count == 0) {
-    showBlocked_("Cannot start", "None of the devices are in Odin Mode");
-    return false;
+    return show_odin_popup("None of the devices are in Odin Mode", false);
   }
 
-  QMessageBox box(this);
-  box.setIcon(QMessageBox::Warning);
-  box.setWindowTitle("Brokkr Flasher");
-  box.setText(QString("The following device(s) are not in Odin Mode:\n%1").arg(not_odin.join("\n")));
-  box.addButton(QMessageBox::Ok);
-  auto* ignore_btn = box.addButton("Ignore them", QMessageBox::AcceptRole);
-  box.setDefaultButton(QMessageBox::Ok);
-  box.exec();
-  return box.clickedButton() == ignore_btn;
+  return show_odin_popup(QString("The following device(s) are not in Odin Mode:\n%1").arg(not_odin.join("\n")),
+                         true);
 }
 
 void BrokkrWrapper::updateActionButtons_() {
   if (busy_) {
     btnRun->setEnabled(false);
+    updateRebootDownloadButton_();
     return;
   }
 
   QString why;
   btnRun->setEnabled(canRunStart_(&why));
+  updateRebootDownloadButton_();
+}
+
+void BrokkrWrapper::updateRebootDownloadButton_() {
+  if (!btnRebootDownloadMode_) return;
+#if !defined(BROKKR_PLATFORM_WINDOWS)
+  btnRebootDownloadMode_->setEnabled(false);
+  btnRebootDownloadMode_->hide();
+  return;
+#endif
+  if (busy_) {
+    btnRebootDownloadMode_->setEnabled(false);
+    return;
+  }
+
+  bool hasNonOdin = false;
+  for (const auto& sys : connectedDevices_) {
+    if (auto one = select_samsung_target(sys); one && !is_odin_product(one->product)) {
+      hasNonOdin = true;
+      break;
+    }
+  }
+
+  btnRebootDownloadMode_->setEnabled(hasNonOdin);
 }
 
 void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const {
   QMessageBox::warning(const_cast<BrokkrWrapper*>(this), title, msg);
+}
+
+void BrokkrWrapper::tryRebootIntoDownloadMode_() {
+  if (busy_) return;
+
+#if !defined(BROKKR_PLATFORM_WINDOWS)
+  QMessageBox::information(this, "Brokkr Flasher", "This action is available only on Windows builds.");
+  return;
+#else
+
+  int nonOdinCount = 0;
+  for (const auto& sys : connectedDevices_) {
+    if (auto one = select_samsung_target(sys); one && !is_odin_product(one->product)) {
+      ++nonOdinCount;
+    }
+  }
+
+  if (nonOdinCount <= 0) {
+    QMessageBox::information(this, "Brokkr Flasher", "No connected device needs reboot into Download Mode.");
+    return;
+  }
+
+  const auto r = brokkr::platform::send_suddlmod_to_samsung_serial(SAMSUNG_VID, nonOdinCount);
+  if (r.ports_seen == 0) {
+    QMessageBox::warning(this, "Brokkr Flasher", "No Samsung serial port found.");
+    return;
+  }
+
+  if (r.sent_ok == 0) {
+    QString detail;
+    for (const auto& f : r.failures) {
+      if (!detail.isEmpty()) detail += "\n";
+      detail += QString::fromStdString(f);
+    }
+    QMessageBox::warning(this, "Brokkr Flasher",
+                         detail.isEmpty() ? "Failed to send reboot command to Samsung serial ports."
+                                          : QString("Failed to send reboot command to Samsung serial ports.\n%1")
+                                                .arg(detail));
+    return;
+  }
+
+  if (r.failures.empty()) {
+    QMessageBox::information(this, "Brokkr Flasher",
+                             QString("Reboot command sent to %1 Samsung serial port(s).")
+                                 .arg(r.sent_ok));
+  } else {
+    QString detail;
+    for (const auto& f : r.failures) {
+      if (!detail.isEmpty()) detail += "\n";
+      detail += QString::fromStdString(f);
+    }
+    QMessageBox::warning(this, "Brokkr Flasher",
+                         QString("Reboot command sent to %1 port(s), but %2 failed.\n%3")
+                             .arg(r.sent_ok)
+                             .arg(static_cast<int>(r.failures.size()))
+                             .arg(detail));
+  }
+
+  requestUsbRefresh_();
+#endif
 }
 
 void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {

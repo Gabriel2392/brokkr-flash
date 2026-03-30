@@ -39,7 +39,14 @@ struct EnumerateFilter {
   std::vector<std::uint16_t> products;
 };
 
+struct SuddlmodResult {
+  int ports_seen = 0;
+  int sent_ok = 0;
+  std::vector<std::string> failures;
+};
+
 std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter);
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname);
+SuddlmodResult send_suddlmod_to_samsung_serial(std::uint16_t vendor = 0x04E8, int maxTargets = -1);
 
 } // namespace brokkr::windows

@@ -21,8 +21,11 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 
