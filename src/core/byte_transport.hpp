@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -34,6 +35,9 @@ class IByteTransport {
 
   virtual void set_timeout_ms(int ms) noexcept = 0;
   virtual int timeout_ms() const noexcept = 0;
+
+  // Optional hint used by protocols that negotiate preferred transfer packet sizes.
+  virtual void set_packet_size_hint(std::size_t bytes) noexcept { (void)bytes; }
 
   virtual int send(std::span<const std::uint8_t> data, unsigned retries = 8) = 0;
   virtual int recv(std::span<std::uint8_t> data, unsigned retries = 8) = 0;

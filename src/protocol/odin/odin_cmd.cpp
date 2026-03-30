@@ -176,7 +176,12 @@ brokkr::core::Result<InitTargetInfo> OdinCommands::get_version(unsigned retries)
 brokkr::core::Status OdinCommands::setup_transfer_options(std::int32_t packet_size, unsigned retries) noexcept {
   const std::int32_t ints[] = {packet_size};
   auto r = rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_PACKETSIZE, ints, {}, nullptr, retries);
-  return r ? brokkr::core::Status{} : brokkr::core::fail(std::move(r.error()));
+  if (!r) return brokkr::core::fail(std::move(r.error()));
+
+  if (packet_size > 0)
+    conn_.set_packet_size_hint(static_cast<std::size_t>(static_cast<std::uint32_t>(packet_size)));
+
+  return {};
 }
 
 brokkr::core::Status OdinCommands::send_total_size(std::uint64_t total_size, ProtocolVersion proto,

@@ -36,6 +36,17 @@ inline bool ok_or_underrun(IOReturn kr) noexcept { return kr == kIOReturnSuccess
 
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
+void UsbFsConnection::set_packet_size_hint(std::size_t bytes) noexcept {
+  if (bytes == 0) return;
+
+  if (dev_.has_packet_size_limit())
+    max_pack_size_ = std::min<std::size_t>(bytes, BULK_BUFFER_LENGTH_LIMIT);
+  else
+    max_pack_size_ = bytes;
+
+  if (max_pack_size_ == 0) max_pack_size_ = 1;
+}
+
 brokkr::core::Status UsbFsConnection::open() noexcept {
   if (connected_) return {};
   if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");

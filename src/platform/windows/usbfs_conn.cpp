@@ -40,6 +40,11 @@ void backoff_10ms() noexcept { ::Sleep(10); }
 
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
+void UsbFsConnection::set_packet_size_hint(std::size_t bytes) noexcept {
+  if (bytes == 0) return;
+  max_pack_size_ = bytes;
+}
+
 brokkr::core::Status UsbFsConnection::open() noexcept {
   if (connected_ && dev_.is_open()) return {};
 

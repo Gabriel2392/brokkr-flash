@@ -30,7 +30,7 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
  public:
   explicit UsbFsConnection(UsbFsDevice& dev);
 
-  Kind kind() const noexcept override { return Kind::TcpStream; }
+  Kind kind() const noexcept override { return Kind::UsbBulk; }
 
   brokkr::core::Status open() noexcept;
   void close() noexcept;
@@ -43,13 +43,14 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
 
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
   int timeout_ms() const noexcept override { return timeout_ms_; }
+  void set_packet_size_hint(std::size_t bytes) noexcept override;
 
  private:
   UsbFsDevice& dev_;
   bool connected_ = false;
   int timeout_ms_ = 1000;
 
-  std::size_t max_pack_size_ = 128 * 1024;
+  std::size_t max_pack_size_ = 1 * 1024 * 1024;
 };
 
 } // namespace brokkr::windows

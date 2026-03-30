@@ -45,6 +45,7 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
 
   void set_timeout_ms(int ms) noexcept override { timeout_ms_ = ms; }
   int timeout_ms() const noexcept override { return timeout_ms_; }
+  void set_packet_size_hint(std::size_t bytes) noexcept override;
 
   std::size_t max_packet_size() const noexcept { return max_pack_size_; }
 
