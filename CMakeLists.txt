@@ -248,8 +248,10 @@ endif()
 # ── end macOS framework fixup ─────────────────────────────────────
 
 if (WIN32)
-    add_executable(brokkr WIN32
+    add_executable(brokkr
         src-gui/main_gui.cpp
+        src/app/cli_mode.hpp
+        src/app/cli_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/icon.rc
@@ -260,6 +262,8 @@ elseif (APPLE)
    set_source_files_properties(assets/brokkr.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     add_executable(brokkr MACOSX_BUNDLE
         src-gui/main_gui.cpp
+        src/app/cli_mode.hpp
+        src/app/cli_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/brokkr.qrc
@@ -268,6 +272,8 @@ elseif (APPLE)
 else()
     add_executable(brokkr
         src-gui/main_gui.cpp
+        src/app/cli_mode.hpp
+        src/app/cli_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/brokkr.qrc
@@ -304,7 +310,7 @@ target_link_libraries(brokkr PRIVATE
 
 set_target_properties(brokkr PROPERTIES AUTOMOC ON AUTORCC ON)
 
-if (MSVC)
+if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
 endif()
 
@@ -373,8 +379,7 @@ target_compile_definitions(brokkr PRIVATE
 
 qt_generate_deploy_app_script(
     TARGET brokkr
-    OUTPUT_SCRIPT deploy_script
-    NO_COMPILER_RUNTIME
+    FILENAME_VARIABLE deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})

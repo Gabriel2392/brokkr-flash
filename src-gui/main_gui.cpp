@@ -18,10 +18,28 @@
 #include <QApplication>
 #include <QMessageBox>
 
+#include "app/cli_mode.hpp"
 #include "platform/platform_all.hpp"
 #include "brokkr_wrapper.hpp"
 
+#if defined(_WIN32)
+  #include <windows.h>
+#endif
+
 int main(int argc, char* argv[]) {
+  const bool cli_mode = brokkr::app::should_run_cli(argc, argv);
+
+  if (cli_mode) {
+    return brokkr::app::run_cli(argc, argv);
+  }
+
+#if defined(_WIN32)
+  if (HWND cw = ::GetConsoleWindow(); cw) {
+    ::ShowWindow(cw, SW_HIDE);
+    (void)::FreeConsole();
+  }
+#endif
+
   QApplication app(argc, argv);
 
   auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
