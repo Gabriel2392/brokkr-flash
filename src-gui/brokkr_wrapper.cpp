@@ -204,6 +204,11 @@ static constexpr std::uint16_t ODIN_PIDS[] = {0x6601, 0x685D, 0x68C3};
 
 static std::vector<std::uint16_t> default_pids() { return {std::begin(ODIN_PIDS), std::end(ODIN_PIDS)}; }
 
+static bool is_odin_product(std::uint16_t pid) {
+  const auto pids = default_pids();
+  return std::ranges::find(pids, pid) != pids.end();
+}
+
 static bool is_pit_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".pit"); }
 
 static bool is_pit_drop_name(const QString& file_name) {
@@ -367,7 +372,7 @@ static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrWrapper* w) {
   return log;
 }
 
-static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_target(QString sysname_q) {
+static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_samsung_target(QString sysname_q) {
   const std::string sysname = sysname_q.trimmed().toStdString();
   if (sysname.empty()) return {};
 
@@ -375,12 +380,22 @@ static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_target(QString
   if (!info) return {};
 
   if (info->vendor != SAMSUNG_VID) return {};
-  const auto pids = default_pids();
-  if (std::ranges::find(pids, info->product) == pids.end()) return {};
   return info;
 }
 
-static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_targets() {
+static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_odin_target(QString sysname_q) {
+  auto info = select_samsung_target(std::move(sysname_q));
+  if (!info) return {};
+  if (!is_odin_product(info->product)) return {};
+  return info;
+}
+
+static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_samsung_targets() {
+  brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID};
+  return brokkr::platform::enumerate_usb_devices_sysfs(f);
+}
+
+static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_odin_targets() {
   brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID, .products = default_pids()};
   return brokkr::platform::enumerate_usb_devices_sysfs(f);
 }
@@ -754,10 +769,17 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     cmbRebootAction->setCurrentIndex(0);
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
 
-    setSquaresText_("");
-    setSquaresProgress_(0.0, false);
-    setSquaresActiveColor_(false);
+    for (auto* sq : devSquares_) {
+      if (!sq) continue;
+      sq->setVariant(DeviceSquare::Variant::Green);
+      sq->setText("");
+      sq->setFill(0.0);
+    }
+
+    refreshDeviceBoxes_();
+    updateHeaderLeds_();
 
     for (int i = 0; i < fileLayout->count(); ++i) {
       if (auto* chk = qobject_cast<QCheckBox*>(fileLayout->itemAt(i)->widget())) chk->setChecked(false);
@@ -1299,7 +1321,7 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   QStringList shown;
   QStringList physicalUsb;
 
-  for (const auto& d : enumerate_targets()) physicalUsb << QString::fromStdString(d.sysname);
+  for (const auto& d : enumerate_samsung_targets()) physicalUsb << QString::fromStdString(d.sysname);
 
   bool physicalWireless = false;
   QString physicalWirelessId;
@@ -1362,7 +1384,28 @@ void BrokkrWrapper::refreshConnectedDevices_() {
     physicalWirelessIdPrev_ = physicalWirelessId;
   }
 
+  const QStringList prevShown = connectedDevices_;
   connectedDevices_ = shown;
+
+  auto clearRowState = [this](int i) {
+    if (i < 0 || i >= devSquares_.size()) return;
+    if (static_cast<std::size_t>(i) < slotFailed_.size()) slotFailed_[static_cast<std::size_t>(i)] = 0;
+    if (static_cast<std::size_t>(i) < slotActive_.size()) slotActive_[static_cast<std::size_t>(i)] = 0;
+
+    if (auto* sq = devSquares_[i]) {
+      sq->setVariant(DeviceSquare::Variant::Green);
+      sq->setText("");
+      sq->setFill(0.0);
+    }
+  };
+
+  const int rows = devSquares_.size();
+  for (int i = 0; i < rows; ++i) {
+    const QString prevSys = (i < prevShown.size()) ? prevShown[i].trimmed() : QString{};
+    const QString nowSys = (i < connectedDevices_.size()) ? connectedDevices_[i].trimmed() : QString{};
+    if (!nowSys.isEmpty() && prevSys != nowSys) clearRowState(i);
+  }
+
   refreshDeviceBoxes_();
   updateHeaderLeds_();
   updateActionButtons_();
@@ -1768,9 +1811,21 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     comBoxes[i]->setText(elideFor(comBoxes[i], raw));
     comBoxes[i]->setToolTip(sysname);
 
+    bool odin_mode = false;
+    if (chkWireless && chkWireless->isChecked() && !wireless_sysname_.isEmpty() && sysname == wireless_sysname_) {
+      odin_mode = true;
+    } else if (auto info = select_samsung_target(sysname)) {
+      odin_mode = is_odin_product(info->product);
+    }
+
     QPalette pal = comBoxes[i]->palette();
-    pal.setColor(QPalette::Base, QColor("#4080c0")); // Active blue tint
-    pal.setColor(QPalette::Text, Qt::white);
+    if (odin_mode) {
+      pal.setColor(QPalette::Base, QColor("#4080c0")); // Odin mode: blue tint
+      pal.setColor(QPalette::Text, Qt::white);
+    } else {
+      pal.setColor(QPalette::Base, QColor("#d9822b")); // Non-Odin Samsung device: orange tint
+      pal.setColor(QPalette::Text, Qt::white);
+    }
     comBoxes[i]->setPalette(pal);
 
     QFont f = comBoxes[i]->font();
@@ -1848,6 +1903,55 @@ bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
   return true;
 }
 
+bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
+  if (chkWireless && chkWireless->isChecked()) return true;
+
+  const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
+  if (!tgt.isEmpty()) {
+    if (auto one = select_samsung_target(tgt); one && !is_odin_product(one->product)) {
+      showBlocked_("Cannot start", "The device is not in Odin Mode, reboot to download mode first.");
+      return false;
+    }
+  }
+
+  const auto all_samsung = enumerate_samsung_targets();
+  if (all_samsung.empty()) return true;
+
+  QStringList not_odin;
+  int odin_count = 0;
+  for (const auto& d : all_samsung) {
+    if (is_odin_product(d.product)) {
+      ++odin_count;
+    } else {
+      not_odin << QString::fromStdString(d.sysname);
+    }
+  }
+
+  if (not_odin.isEmpty()) return true;
+
+  const int total = static_cast<int>(all_samsung.size());
+
+  if (total == 1) {
+    showBlocked_("Cannot start", "The device is not in Odin Mode, reboot to download mode first.");
+    return false;
+  }
+
+  if (odin_count == 0) {
+    showBlocked_("Cannot start", "None of the devices are in Odin Mode");
+    return false;
+  }
+
+  QMessageBox box(this);
+  box.setIcon(QMessageBox::Warning);
+  box.setWindowTitle("Brokkr Flasher");
+  box.setText(QString("The following device(s) are not in Odin Mode:\n%1").arg(not_odin.join("\n")));
+  box.addButton(QMessageBox::Ok);
+  auto* ignore_btn = box.addButton("Ignore them", QMessageBox::AcceptRole);
+  box.setDefaultButton(QMessageBox::Ok);
+  box.exec();
+  return box.clickedButton() == ignore_btn;
+}
+
 void BrokkrWrapper::updateActionButtons_() {
   if (busy_) {
     btnRun->setEnabled(false);
@@ -1919,6 +2023,7 @@ void BrokkrWrapper::onRunClicked() {
     showBlocked_("Cannot start", why);
     return;
   }
+  if (!confirmOdinModeDevicesForStart_()) return;
   startWorkStart_();
 }
 
@@ -1936,7 +2041,17 @@ void BrokkrWrapper::startWorkStart_() {
   slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
   {
     const int activeCount = std::min<int>(uiDevicesSnapshot.size(), devSquares_.size());
-    for (int i = 0; i < activeCount; ++i) slotActive_[static_cast<std::size_t>(i)] = 1;
+    for (int i = 0; i < activeCount; ++i) {
+      bool active = false;
+      const QString sysname = uiDevicesSnapshot[i].trimmed();
+      if (chkWireless && chkWireless->isChecked() && !wireless_sysname_.isEmpty() && sysname == wireless_sysname_) {
+        active = true;
+      } else if (auto info = select_odin_target(sysname)) {
+        (void)info;
+        active = true;
+      }
+      slotActive_[static_cast<std::size_t>(i)] = active ? 1 : 0;
+    }
   }
 
   int progressSteps = 1;
@@ -1965,14 +2080,15 @@ void BrokkrWrapper::startWorkStart_() {
           Qt::QueuedConnection);
     };
 
-    auto fail_ui = [&](const QString& msg) {
+    auto fail_ui = [&](const QString& msg, bool showPopup = false) {
       QMetaObject::invokeMethod(
           this,
-          [this, msg]() {
+          [this, msg, showPopup]() {
             const int z = logDevCount_.load(std::memory_order_relaxed);
             appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>").arg(z).arg(htmlEsc(msg)));
             setSquaresFinal_(false);
             setBusy_(false);
+            if (showPopup) QMessageBox::warning(this, "Brokkr Flasher", "The connected devices do not match!");
           },
           Qt::QueuedConnection);
     };
@@ -1992,6 +2108,16 @@ void BrokkrWrapper::startWorkStart_() {
     cfg.reboot_after = (actionIndex == 0);
 
     brokkr::odin::Ui ui;
+    std::atomic_bool sawPerDeviceFail{false};
+    std::vector<int> targetToUiSlots;
+
+    auto findUiIndexBySysname = [&](const QString& sysname) {
+      const QString needle = sysname.trimmed();
+      for (int i = 0; i < uiDevicesSnapshot.size(); ++i) {
+        if (uiDevicesSnapshot[i].trimmed() == needle) return i;
+      }
+      return -1;
+    };
 
     ui.on_plan = [&](const std::vector<brokkr::odin::PlanItem>& p, std::uint64_t) {
       std::vector<QString> parts, froms;
@@ -2062,9 +2188,11 @@ void BrokkrWrapper::startWorkStart_() {
     };
 
     ui.on_error = [&](const std::string& s) {
+      if (s.rfind("DEVFAIL idx=", 0) == 0) sawPerDeviceFail.store(true, std::memory_order_relaxed);
+      const std::vector<int> mapSnapshot = targetToUiSlots;
       QMetaObject::invokeMethod(
           this,
-          [this, qs = QString::fromStdString(s)]() {
+          [this, qs = QString::fromStdString(s), mapSnapshot]() {
             const int z = logDevCount_.load(std::memory_order_relaxed);
 
             QString shown = qs;
@@ -2081,25 +2209,35 @@ void BrokkrWrapper::startWorkStart_() {
               if (sp < qs.size()) reason = qs.mid(sp + 1).trimmed();
 
               if (okNum && idx >= 0) {
-                if (static_cast<std::size_t>(idx) >= slotFailed_.size())
-                  slotFailed_.resize(static_cast<std::size_t>(idx) + 1, 0);
-                slotFailed_[static_cast<std::size_t>(idx)] = 1;
+                int uiIdx = -1;
+                if (static_cast<std::size_t>(idx) < mapSnapshot.size()) uiIdx = mapSnapshot[static_cast<std::size_t>(idx)];
 
-                if (idx < devSquares_.size() && devSquares_[idx]) {
-                  devSquares_[idx]->setVariant(DeviceSquare::Variant::Red);
-                  devSquares_[idx]->setText("FAIL!");
-                  devSquares_[idx]->setFill(1.0);
+                if (uiIdx >= 0) {
+                  if (static_cast<std::size_t>(uiIdx) >= slotFailed_.size())
+                    slotFailed_.resize(static_cast<std::size_t>(uiIdx) + 1, 0);
+                  slotFailed_[static_cast<std::size_t>(uiIdx)] = 1;
+                }
+
+                if (uiIdx >= 0 && uiIdx < devSquares_.size() && devSquares_[uiIdx]) {
+                  devSquares_[uiIdx]->setVariant(DeviceSquare::Variant::Red);
+                  devSquares_[uiIdx]->setText("FAIL!");
+                  devSquares_[uiIdx]->setFill(1.0);
                 }
 
                 // Keep native but set red palette for failure
-                if (idx < comBoxes.size() && comBoxes[idx]) {
-                  QPalette pal = comBoxes[idx]->palette();
+                if (uiIdx >= 0 && uiIdx < comBoxes.size() && comBoxes[uiIdx]) {
+                  QPalette pal = comBoxes[uiIdx]->palette();
                   pal.setColor(QPalette::Base, QColor("#a02020"));
                   pal.setColor(QPalette::Text, Qt::white);
-                  comBoxes[idx]->setPalette(pal);
+                  comBoxes[uiIdx]->setPalette(pal);
                 }
 
-                shown = reason.isEmpty() ? "FAIL!" : QString("FAIL! (Device %1) %2").arg(idx).arg(reason);
+                if (reason.isEmpty()) {
+                  shown = (uiIdx >= 0) ? QString("FAIL! (Device %1)").arg(uiIdx) : QString("FAIL!");
+                } else {
+                  shown = (uiIdx >= 0) ? QString("FAIL! (Device %1) %2").arg(uiIdx).arg(reason)
+                                       : QString("FAIL! %1").arg(reason);
+                }
               }
             }
 
@@ -2155,6 +2293,7 @@ void BrokkrWrapper::startWorkStart_() {
 
     auto make_provider = [&]() -> std::optional<Provider> {
       Provider p;
+      targetToUiSlots.clear();
 
       if (wireless) {
         brokkr::platform::TcpConnection* connp = nullptr;
@@ -2169,22 +2308,36 @@ void BrokkrWrapper::startWorkStart_() {
 
         p.owned.push_back(brokkr::odin::Target{.id = wireless_sysname_.toStdString(), .link = connp});
         p.ptrs.push_back(&p.owned.back());
+        int uiIdx = findUiIndexBySysname(wireless_sysname_);
+        if (uiIdx < 0 && !devSquares_.isEmpty()) uiIdx = 0;
+        targetToUiSlots.push_back(uiIdx);
         return p;
       }
 
       std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
       if (!tgt.isEmpty()) {
-        auto one = select_target(tgt);
+        auto one = select_odin_target(tgt);
         if (!one) {
           fail_ui("Target sysname not found or not supported.");
           return std::nullopt;
         }
         targets.push_back(*one);
+        targetToUiSlots.push_back(findUiIndexBySysname(QString::fromStdString(one->sysname)));
       } else {
-        for (const auto& sys : uiDevicesSnapshot) {
-          if (auto one = select_target(sys)) targets.push_back(*one);
+        for (int i = 0; i < uiDevicesSnapshot.size(); ++i) {
+          const QString sys = uiDevicesSnapshot[i].trimmed();
+          if (auto one = select_odin_target(sys)) {
+            targets.push_back(*one);
+            targetToUiSlots.push_back(i);
+          }
         }
-        if (targets.empty()) targets = enumerate_targets();
+        if (targets.empty()) {
+          targets = enumerate_odin_targets();
+          targetToUiSlots.clear();
+          for (const auto& td : targets) {
+            targetToUiSlots.push_back(findUiIndexBySysname(QString::fromStdString(td.sysname)));
+          }
+        }
       }
 
       if (targets.empty()) {
@@ -2226,7 +2379,19 @@ void BrokkrWrapper::startWorkStart_() {
       if (!prov) return;
 
       auto st = brokkr::odin::flash(prov->ptrs, srcs, pit_to_upload, cfg, ui);
-      (void)st; // UI handles per-device fails via ui.on_error; overall uses setSquaresFinal_(true)
+      if (!st) {
+        if (sawPerDeviceFail.load(std::memory_order_relaxed)) {
+          done_ui();
+        } else {
+          const QString err = QString::fromStdString(st.error());
+          const bool mismatch =
+              err.contains("mismatch across devices", Qt::CaseInsensitive) ||
+              err.contains("differs across devices", Qt::CaseInsensitive);
+          fail_ui(mismatch ? QString("The connected devices do not match!") : err, mismatch);
+        }
+        requestUsbRefresh_();
+        return;
+      }
       done_ui();
       requestUsbRefresh_();
     };

@@ -100,6 +100,7 @@ class BrokkrWrapper : public QWidget {
   void applyWindowHeightToContents_();
 
   bool canRunStart_(QString* whyNot = nullptr) const;
+  bool confirmOdinModeDevicesForStart_();
 
   void showBlocked_(const QString& title, const QString& msg) const;
 
