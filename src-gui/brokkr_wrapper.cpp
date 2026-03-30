@@ -217,7 +217,7 @@ static bool is_pit_drop_name(const QString& file_name) {
 
 static bool is_firmware_drop_name(const QString& file_name) {
   const QString name = file_name.trimmed().toLower();
-  return name.endsWith(".tar") || name.endsWith(".tar.md5");
+  return name.endsWith(".tar") || name.endsWith(".md5");
 }
 
 static bool is_token_char(QChar c) { return c.isLetterOrNumber(); }
@@ -1034,7 +1034,7 @@ bool BrokkrWrapper::assignDroppedFileToSlot_(int slotId, const QString& localPat
       if (slotId == kDropSlotPIT)
         *reason = "PIT slot accepts only .pit files.";
       else
-        *reason = "Firmware slots accept only .tar or .tar.md5 files.";
+        *reason = "Firmware slots accept only .tar or .md5 files.";
     }
     return false;
   }
@@ -2104,7 +2104,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
     QString file = QFileDialog::getOpenFileName(this, "Select Firmware File", lastDir,
-                                                "Firmware Archives (*.tar *.tar.md5);;All Files (*)", nullptr,
+                                                "Firmware Archives (*.tar *.md5);;All Files (*)", nullptr,
                                                 QFileDialog::DontUseNativeDialog);
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();

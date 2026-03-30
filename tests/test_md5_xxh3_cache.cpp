@@ -116,7 +116,8 @@ static void test_eviction_keeps_most_recent_65535() {
     return;
   }
 
-  auto newest = brokkr::app::lookup_md5_xxh3_cache(entries, make_md5(65539), 65539);
+  auto newest =
+      brokkr::app::lookup_md5_xxh3_cache(entries, make_md5(static_cast<unsigned char>(65539)), 65539);
   if (!newest || *newest != 0xABC00000ULL + 65539) {
     fail_msg("eviction_keeps_most_recent_65535", "newest entry missing after eviction");
     return;
