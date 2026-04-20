@@ -222,7 +222,8 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
                                    .disk_size = src->size()});
     }
 
-    out.reserve(dl->size());
+    out.reserve(dl->size() + 1);
+    std::unordered_set<std::string> emitted;
     for (const auto& name : *dl) {
       auto it = cands.find(name);
       if (it == cands.end()) {
@@ -231,6 +232,14 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
       }
 
       BRK_TRYV(spec, finalize(it->second, true));
+      emitted.insert(it->first);
+      out.push_back(std::move(spec));
+    }
+
+    for (const auto& [base, c] : cands) {
+      if (emitted.contains(base)) continue;
+      if (!brokkr::core::ends_with_ci(c.basename, ".pit")) continue;
+      BRK_TRYV(spec, finalize(c, true));
       out.push_back(std::move(spec));
     }
 
