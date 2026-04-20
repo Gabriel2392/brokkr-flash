@@ -19,6 +19,8 @@
 
 #include "app/md5_verify.hpp"
 #include "core/status.hpp"
+#include "core/str.hpp"
+#include "io/source.hpp"
 #include "platform/platform_all.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/group_flasher.hpp"
@@ -253,6 +255,48 @@ std::shared_ptr<const std::vector<std::byte>> load_pit_if_needed(const CliArgs& 
   return std::make_shared<const std::vector<std::byte>>(std::move(buf));
 }
 
+bool is_pit_name(std::string_view base) noexcept {
+  return brokkr::core::ends_with_ci(base, ".pit");
+}
+
+std::shared_ptr<const std::vector<std::byte>> pit_from_specs(
+    const std::vector<brokkr::odin::ImageSpec>& specs) {
+  const brokkr::odin::ImageSpec* pit = nullptr;
+  for (const auto& s : specs)
+    if (is_pit_name(s.basename)) pit = &s;
+  if (!pit) return {};
+
+  auto sr = pit->open();
+  if (!sr) {
+    spdlog::error("PIT open failed: {}", sr.error());
+    return {};
+  }
+  auto& src = **sr;
+
+  constexpr std::uint64_t kMaxPit = 256ull * 1024ull * 1024ull;
+  const auto sz64 = src.size();
+  if (sz64 > kMaxPit) {
+    spdlog::error("Embedded PIT too large: {}", src.display_name());
+    return {};
+  }
+
+  std::vector<std::byte> out(static_cast<std::size_t>(sz64));
+  for (std::size_t off = 0; off < out.size();) {
+    const std::size_t got = src.read({out.data() + off, out.size() - off});
+    if (!got) {
+      auto st = src.status();
+      if (!st)
+        spdlog::error("PIT read failed: {}", st.error());
+      else
+        spdlog::error("Short read on embedded PIT: {}", src.display_name());
+      return {};
+    }
+    off += got;
+  }
+
+  return std::make_shared<const std::vector<std::byte>>(std::move(out));
+}
+
 std::string map_global_error_to_cli_message(const std::string& err) {
   const auto has_ic = [&](std::string_view needle) {
     auto it = std::search(err.begin(), err.end(), needle.begin(), needle.end(), [](char a, char b) {
@@ -283,7 +327,7 @@ int list_devices_cli() {
   return 0;
 }
 
-brokkr::core::Result<Provider> make_provider(const CliArgs& args) {
+brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::odin::Cfg& cfg) {
   Provider p;
 
   if (args.wireless) {
@@ -343,6 +387,8 @@ brokkr::core::Result<Provider> make_provider(const CliArgs& args) {
     auto cst = ut->conn.open();
     if (!cst) return brokkr::core::fail(std::move(cst.error()));
 
+    ut->conn.set_timeout_ms(cfg.preflash_timeout_ms);
+
     p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
     p.ptrs.push_back(&p.owned.back());
     p.usb.push_back(std::move(ut));
@@ -394,7 +440,7 @@ int run_flash_cli(const CliArgs& args) {
     spdlog::error("{}", s);
   };
 
-  auto provider_r = make_provider(args);
+  auto provider_r = make_provider(args, cfg);
   if (!provider_r) {
     spdlog::error("{}", map_global_error_to_cli_message(provider_r.error()));
     return 1;
@@ -431,6 +477,21 @@ int run_flash_cli(const CliArgs& args) {
       return 1;
     }
     specs = std::move(*specsr);
+
+    if (!pit_to_upload) {
+      if (auto pit = pit_from_specs(specs)) pit_to_upload = std::move(pit);
+    }
+
+    std::vector<brokkr::odin::ImageSpec> filtered;
+    filtered.reserve(specs.size());
+    for (auto& s : specs)
+      if (!is_pit_name(s.basename)) filtered.push_back(std::move(s));
+    specs = std::move(filtered);
+
+    if (specs.empty() && !pit_to_upload) {
+      spdlog::error("No valid flashable files.");
+      return 1;
+    }
   }
 
   auto fst = brokkr::odin::flash(provider.ptrs, specs, pit_to_upload, cfg, ui);

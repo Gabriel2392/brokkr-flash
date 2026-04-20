@@ -2551,10 +2551,7 @@ void BrokkrWrapper::startWorkStart_() {
       return;
     }
 
-    const bool dl_mode = std::ranges::any_of(*specs,
-                                             [](const brokkr::odin::ImageSpec& s) { return s.download_list_mode; });
-
-    if (!pit_to_upload && !dl_mode) {
+    if (!pit_to_upload) {
       auto pit = pit_from_specs(*specs);
       if (pit) pit_to_upload = pit;
     }
