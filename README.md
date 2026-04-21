@@ -49,6 +49,68 @@ ninja
 
 The compiled executable will be located at `build/brokkr`
 
+## Linux Notes
+
+### USB device opened read-only
+
+Brokkr needs **read/write** access to the Samsung USB device node (`/dev/bus/usb/...`). If your user
+only has read access, Brokkr will fail with `UsbFsDevice: opened read-only` and the GUI will show a
+popup asking you to reopen as root.
+
+Two ways to fix it:
+
+1. **Quickest** — run as root:
+
+   ```bash
+   sudo ./<Executable>
+   ```
+
+2. **Recommended** — add a udev rule so your normal user can flash without `sudo`. Create
+   `/etc/udev/rules.d/51-brokkr-samsung.rules` with:
+
+   ```
+   # Samsung VID
+   SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+   ```
+
+   Then reload:
+
+   ```bash
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+
+   Make sure your user is in the `plugdev` group (`sudo usermod -aG plugdev $USER`, then log out
+   and back in). Replug the device after the rule is in place.
+
+### Wireless device not detected (firewall)
+
+The wireless listener binds TCP port **13579** on `0.0.0.0`. If your firewall blocks incoming
+connections, the connection won't happen.
+
+For `ufw`:
+
+```bash
+sudo ufw allow 13579/tcp
+sudo ufw reload
+```
+
+For `firewalld`:
+
+```bash
+sudo firewall-cmd --add-port=13579/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+For `iptables`:
+
+```bash
+sudo iptables -A INPUT -p tcp --dport 13579 -j ACCEPT
+```
+
+Both the host and the client must be on the same network (or at least be able to route TCP to
+each other on this port).
+
 ## Project Structure
 
 ```
