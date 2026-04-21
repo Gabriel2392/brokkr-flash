@@ -288,8 +288,10 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
       items[it->second] = FlashItem{.part = *part, .spec = s};
   }
 
-  if (items.empty()) return brokkr::core::fail("No flashable items after PIT mapping");
-  spdlog::debug("PIT mapping: {} items", items.size());
+  if (items.empty())
+    spdlog::warn("No flashable items after PIT mapping");
+  else
+    spdlog::debug("PIT mapping: {} items", items.size());
   return items;
 }
 

@@ -399,10 +399,9 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     BRK_TRYV(eff, sources_common_mapping_or_empty(active, sources));
     effective_sources = std::move(eff);
 
-    if (effective_sources.empty() && !has_pit)
-      return brokkr::core::fail("No sources matched any PIT partition — nothing to flash");
-
-    if (effective_sources.size() < sources.size())
+    if (effective_sources.empty() && !sources.empty())
+      spdlog::warn("No sources matched any PIT partition — nothing to flash from sources");
+    else if (effective_sources.size() < sources.size())
       spdlog::debug("{} of {} source(s) matched PIT entries", effective_sources.size(), sources.size());
 
     BRK_TRYV(items2, map_to_pit(active.front()->pit_table, effective_sources));
