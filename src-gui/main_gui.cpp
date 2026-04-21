@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
 
   auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");
   if (!lock) {
-    QMessageBox::critical(nullptr, "Brokkr Flasher", "Another instance is already running.");
+    QMessageBox::critical(nullptr, "Brokkr Flash", "Another instance is already running.");
     return 2;
   }
 

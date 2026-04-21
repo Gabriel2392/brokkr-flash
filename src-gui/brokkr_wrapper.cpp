@@ -601,8 +601,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   connect(btnPitBrowse, &QPushButton::clicked, this, [this]() {
     if (busy_) return;
     const QString file = QFileDialog::getOpenFileName(this, "Select PIT File", lastDir,
-                                                      "PIT Files (*.pit);;All Files (*)", nullptr,
-                                                      QFileDialog::DontUseNativeDialog);
+                                                      "PIT Files (*.pit);;All Files (*)");
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();
       editPit->setText(file);
@@ -910,7 +909,7 @@ void BrokkrWrapper::appendLogLineFromEngine(const QString& html) { appendLogLine
 
 void BrokkrWrapper::closeEvent(QCloseEvent* e) {
   if (busy_) {
-    QMessageBox::warning(this, "Brokkr Flasher", "An operation is in progress. Please wait for it to complete.");
+    QMessageBox::warning(this, "Brokkr Flash", "An operation is in progress. Please wait for it to complete.");
     e->ignore();
     return;
   }
@@ -1922,7 +1921,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
   auto show_odin_popup = [this](const QString& text, bool allowIgnore) {
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle("Brokkr Flasher");
+    box.setWindowTitle("Brokkr Flash");
     box.setText(text);
 
     auto* ok_btn = box.addButton(QMessageBox::Ok);
@@ -2023,7 +2022,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   if (busy_) return;
 
 #if !defined(BROKKR_PLATFORM_WINDOWS)
-  QMessageBox::information(this, "Brokkr Flasher", "This action is available only on Windows builds.");
+  QMessageBox::information(this, "Brokkr Flash", "This action is available only on Windows builds.");
   return;
 #else
 
@@ -2035,13 +2034,13 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   }
 
   if (nonOdinCount <= 0) {
-    QMessageBox::information(this, "Brokkr Flasher", "No connected device needs reboot into Download Mode.");
+    QMessageBox::information(this, "Brokkr Flash", "No connected device needs reboot into Download Mode.");
     return;
   }
 
   const auto r = brokkr::platform::send_suddlmod_to_samsung_serial(SAMSUNG_VID, nonOdinCount);
   if (r.ports_seen == 0) {
-    QMessageBox::warning(this, "Brokkr Flasher", "No Samsung serial port found.");
+    QMessageBox::warning(this, "Brokkr Flash", "No Samsung serial port found.");
     return;
   }
 
@@ -2051,7 +2050,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
       if (!detail.isEmpty()) detail += "\n";
       detail += QString::fromStdString(f);
     }
-    QMessageBox::warning(this, "Brokkr Flasher",
+    QMessageBox::warning(this, "Brokkr Flash",
                          detail.isEmpty() ? "Failed to send reboot command to Samsung serial ports."
                                           : QString("Failed to send reboot command to Samsung serial ports.\n%1")
                                                 .arg(detail));
@@ -2059,7 +2058,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   }
 
   if (r.failures.empty()) {
-    QMessageBox::information(this, "Brokkr Flasher",
+    QMessageBox::information(this, "Brokkr Flash",
                              QString("Reboot command sent to %1 Samsung serial port(s).")
                                  .arg(r.sent_ok));
   } else {
@@ -2068,7 +2067,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
       if (!detail.isEmpty()) detail += "\n";
       detail += QString::fromStdString(f);
     }
-    QMessageBox::warning(this, "Brokkr Flasher",
+    QMessageBox::warning(this, "Brokkr Flash",
                          QString("Reboot command sent to %1 port(s), but %2 failed.\n%3")
                              .arg(r.sent_ok)
                              .arg(static_cast<int>(r.failures.size()))
@@ -2104,8 +2103,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
     QString file = QFileDialog::getOpenFileName(this, "Select Firmware File", lastDir,
-                                                "Firmware Archives (*.tar *.md5);;All Files (*)", nullptr,
-                                                QFileDialog::DontUseNativeDialog);
+                                                "Firmware Archives (*.tar *.md5);;All Files (*)");
     if (!file.isEmpty()) {
       lastDir = QFileInfo(file).absolutePath();
       lineEdit->setText(file);
@@ -2201,7 +2199,7 @@ void BrokkrWrapper::startWorkStart_() {
             appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>").arg(z).arg(htmlEsc(msg)));
             setSquaresFinal_(false);
             setBusy_(false);
-            if (showPopup) QMessageBox::warning(this, "Brokkr Flasher", "The connected devices do not match!");
+            if (showPopup) QMessageBox::warning(this, "Brokkr Flash", "The connected devices do not match!");
           },
           Qt::QueuedConnection);
     };

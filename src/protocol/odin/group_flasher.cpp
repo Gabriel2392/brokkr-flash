@@ -243,7 +243,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   const auto sm_final = shutdown_mode_final(cfg);
 
   auto stage = [&](std::string_view s) {
-    spdlog::info("{}", s);
     if (ui.on_stage) ui.on_stage(std::string(s));
   };
 
