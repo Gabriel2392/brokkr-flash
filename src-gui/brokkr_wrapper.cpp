@@ -2465,7 +2465,23 @@ void BrokkrWrapper::startWorkStart_() {
 
         auto st = ut->dev.open_and_init();
         if (!st) {
-          fail_ui(QString::fromStdString(st.error()));
+          const QString err = QString::fromStdString(st.error());
+#ifdef Q_OS_LINUX
+          if (err.contains("opened read-only", Qt::CaseInsensitive)) {
+            QMetaObject::invokeMethod(
+                this,
+                [this]() {
+                  QMessageBox::warning(this, "Brokkr Flash",
+                                       "The USB device was opened read-only. Brokkr cannot flash without "
+                                       "write access to the device node.\n\n"
+                                       "Please close Brokkr and reopen it as root (e.g. via sudo), "
+                                       "or configure udev rules to grant your user write access to the "
+                                       "Samsung USB device.");
+                },
+                Qt::QueuedConnection);
+          }
+#endif
+          fail_ui(err);
           return std::nullopt;
         }
 
