@@ -66,6 +66,7 @@ class TcpConnection final : public brokkr::core::IByteTransport {
 
   std::string peer_ip_;
   std::uint16_t peer_port_ = 0;
+  bool wsa_init_ = false;
 };
 
 class TcpListener {

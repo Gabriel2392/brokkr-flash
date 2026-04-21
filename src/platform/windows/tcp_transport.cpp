@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <utility>
 
 // clang-format off
@@ -33,6 +34,42 @@
 
 namespace brokkr::windows {
 
+namespace {
+
+// Winsock requires WSAStartup before any socket call, and ref-counts the
+// startup/cleanup pairs. Both TcpListener and TcpConnection need WSA up for
+// their lifetime, but they have independent lifetimes (the listener may be
+// destroyed while a TcpConnection it produced is still in use). A single
+// process-wide ref-counted scope keeps WSA initialized as long as any of
+// them is alive.
+struct WsaScope {
+  static void acquire() noexcept {
+    static std::mutex m;
+    std::lock_guard lk(m);
+    if (refs_++ == 0) {
+      WSADATA d{};
+      const int err = WSAStartup(MAKEWORD(2, 2), &d);
+      if (err) {
+        spdlog::error("WSAStartup failed: {}", err);
+        // Keep refs_ bumped so we don't repeatedly retry; subsequent socket
+        // calls will surface the error.
+      }
+    }
+  }
+  static void release() noexcept {
+    static std::mutex m;
+    std::lock_guard lk(m);
+    if (refs_ > 0 && --refs_ == 0) {
+      WSACleanup();
+    }
+  }
+
+private:
+  static inline int refs_ = 0;
+};
+
+} // namespace
+
 static void set_nonblocking_(SOCKET s, bool on) noexcept {
   u_long mode = on ? 1UL : 0UL;
   (void)::ioctlsocket(s, FIONBIO, &mode);
@@ -40,6 +77,8 @@ static void set_nonblocking_(SOCKET s, bool on) noexcept {
 
 TcpConnection::TcpConnection(SOCKET fd, std::string peer_ip, std::uint16_t peer_port)
     : fd_(fd), peer_ip_(std::move(peer_ip)), peer_port_(peer_port) {
+  WsaScope::acquire();
+  wsa_init_ = true;
   if (fd_ != INVALID_SOCKET) set_nonblocking_(fd_, true);
 
   set_sock_timeouts_();
@@ -48,19 +87,25 @@ TcpConnection::TcpConnection(SOCKET fd, std::string peer_ip, std::uint16_t peer_
   (void)::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&one), sizeof(one));
 }
 
-TcpConnection::~TcpConnection() { close_(); }
+TcpConnection::~TcpConnection() {
+  close_();
+  if (wsa_init_) WsaScope::release();
+}
 
 TcpConnection::TcpConnection(TcpConnection&& o) noexcept { *this = std::move(o); }
 
 TcpConnection& TcpConnection::operator=(TcpConnection&& o) noexcept {
   if (this == &o) return *this;
   close_();
+  if (wsa_init_) WsaScope::release();
   fd_ = o.fd_;
   o.fd_ = INVALID_SOCKET;
   timeout_ms_ = o.timeout_ms_;
   peer_ip_ = std::move(o.peer_ip_);
   peer_port_ = o.peer_port_;
   o.peer_port_ = 0;
+  wsa_init_ = o.wsa_init_;
+  o.wsa_init_ = false;
   return *this;
 }
 
@@ -213,13 +258,12 @@ int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
 TcpListener::~TcpListener() {
   if (fd_ != INVALID_SOCKET) ::closesocket(fd_);
   fd_ = INVALID_SOCKET;
-  if (wsa_init_) WSACleanup();
+  if (wsa_init_) WsaScope::release();
 }
 
 brokkr::core::Status TcpListener::bind_and_listen(std::string bind_ip, std::uint16_t port, int backlog) noexcept {
   if (!wsa_init_) {
-    const int err = WSAStartup(MAKEWORD(2, 2), &ws_);
-    if (err) return brokkr::core::failf("WSAStartup failed: {}", err);
+    WsaScope::acquire();
     wsa_init_ = true;
   }
 
