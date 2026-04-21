@@ -323,9 +323,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   auto steps = std::vector<std::move_only_function<brokkr::core::Status()>>{};
 
   steps.emplace_back([&] {
+    spdlog::info("> Odin");
     stage(stage_label::kHandshake);
 
-    return fanout_keep([&](Target& d) -> brokkr::core::Status {
+    auto st = fanout_keep([&](Target& d) -> brokkr::core::Status {
       auto& c = link(d);
       c.set_timeout_ms(cfg.preflash_timeout_ms);
       OdinCommands odin(c);
@@ -337,6 +338,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
       d.proto = d.init.protocol();
       return {};
     });
+    if (st) spdlog::info("< Loke");
+    return st;
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
@@ -359,6 +362,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   if (has_pit) {
     steps.emplace_back([&] {
+      spdlog::info("Uploading PIT");
       stage(stage_label::kPitUp);
       return fanout_keep([&](Target& d) {
         return OdinCommands(link(d)).set_pit({pit_to_upload->data(), pit_to_upload->size()}, cfg.preflash_retries);
@@ -367,6 +371,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   }
 
   steps.emplace_back([&] {
+    spdlog::info("Get PIT for mapping");
     stage(stage_label::kPitDl);
     set_flash_timeout_active();
 
@@ -393,13 +398,14 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
+    spdlog::info("Verifying PIT mapping");
     stage(stage_label::kMapCheck);
 
     BRK_TRYV(eff, sources_common_mapping_or_empty(active, sources));
     effective_sources = std::move(eff);
 
     if (effective_sources.empty() && !sources.empty())
-      spdlog::warn("No sources matched any PIT partition — nothing to flash from sources");
+      spdlog::debug("No sources matched any PIT partition — nothing to flash from sources");
     else if (effective_sources.size() < sources.size())
       spdlog::debug("{} of {} source(s) matched PIT entries", effective_sources.size(), sources.size());
 
@@ -446,6 +452,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
                          });
 
     stage(use_lz4 ? stage_label::kFlashFast : stage_label::kFlashNorm);
+    spdlog::info("Flashing has begun!");
 
     const std::size_t ndevs = active.size();
     if (!ndevs) return brokkr::core::fail("No active devices");
