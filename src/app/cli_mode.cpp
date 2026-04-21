@@ -74,7 +74,7 @@ struct Provider {
   std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> usb;
   std::vector<brokkr::odin::Target> owned;
   std::vector<brokkr::odin::Target*> ptrs;
-  std::optional<brokkr::platform::TcpConnection> wireless_conn;
+  std::unique_ptr<brokkr::platform::TcpConnection> wireless_conn;
 };
 
 bool is_odin_product(std::uint16_t pid) {
@@ -339,14 +339,14 @@ brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::
     for (;;) {
       auto ar = listener.accept_one();
       if (ar) {
-        p.wireless_conn.emplace(std::move(*ar));
+        p.wireless_conn = std::make_unique<brokkr::platform::TcpConnection>(std::move(*ar));
         break;
       }
       if (ar.error() != "accept: timeout") return brokkr::core::fail(std::move(ar.error()));
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    p.owned.push_back(brokkr::odin::Target{.id = "wireless", .link = &*p.wireless_conn});
+    p.owned.push_back(brokkr::odin::Target{.id = "wireless", .link = p.wireless_conn.get()});
     p.ptrs.push_back(&p.owned.back());
     return p;
   }
