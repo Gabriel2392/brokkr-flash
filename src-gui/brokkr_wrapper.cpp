@@ -1444,6 +1444,14 @@ void BrokkrWrapper::startWirelessListener_() {
     for (;;) {
       if (st.stop_requested()) return;
 
+      // While the engine owns the socket, do not touch wireless_conn_.
+      // Otherwise we may reset() it out from under a raw pointer the engine
+      // is actively using, or contend with its recv() via MSG_PEEK probes.
+      if (wireless_watcher_paused_.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        continue;
+      }
+
       {
         bool connected = false;
         {
@@ -2179,11 +2187,16 @@ void BrokkrWrapper::startWorkStart_() {
   setSquaresText_("");
   setSquaresActiveColor_(false);
 
+  // Block the wireless watcher from touching the TcpConnection while the
+  // engine owns it. Cleared from done_ui / fail_ui below.
+  wireless_watcher_paused_.store(true, std::memory_order_release);
+
   worker_ = std::jthread([this, uiDevicesSnapshot](std::stop_token) {
     auto done_ui = [&] {
       QMetaObject::invokeMethod(
           this,
           [this]() {
+            wireless_watcher_paused_.store(false, std::memory_order_release);
             setSquaresText_("PASS");
             setSquaresFinal_(true);
             setBusy_(false);
@@ -2195,6 +2208,7 @@ void BrokkrWrapper::startWorkStart_() {
       QMetaObject::invokeMethod(
           this,
           [this, msg, showPopup]() {
+            wireless_watcher_paused_.store(false, std::memory_order_release);
             const int z = logDevCount_.load(std::memory_order_relaxed);
             appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>").arg(z).arg(htmlEsc(msg)));
             setSquaresFinal_(false);

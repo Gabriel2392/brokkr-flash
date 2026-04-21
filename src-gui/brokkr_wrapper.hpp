@@ -200,6 +200,10 @@ class BrokkrWrapper : public QWidget {
   std::optional<brokkr::platform::TcpListener> wireless_listener_;
   std::optional<brokkr::platform::TcpConnection> wireless_conn_;
   QString wireless_sysname_;
+  // While true the watcher thread must NOT touch wireless_conn_ (no
+  // connected() probes, no reset()), because the flash engine is using the
+  // underlying socket. Set during a flash run.
+  std::atomic_bool wireless_watcher_paused_{false};
 
   std::atomic_int logDevCount_{0};
   std::atomic_int progressVisualSteps_{1};
