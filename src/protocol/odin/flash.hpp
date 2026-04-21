@@ -53,7 +53,6 @@ struct ImageSpec {
   std::uint64_t disk_size = 0;
 
   bool lz4 = false;
-  bool download_list_mode = false;
 
   std::string display;
 

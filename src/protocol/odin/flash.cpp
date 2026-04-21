@@ -110,7 +110,7 @@ static brokkr::core::Result<std::uint64_t> lz4_content_size(const ImageSpec& spe
 
 static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::filesystem::path path, io::TarEntry entry,
                                                  std::string display, std::string source_basename,
-                                                 std::uint64_t disk_size, bool dl_mode) noexcept {
+                                                 std::uint64_t disk_size) noexcept {
   ImageSpec spec;
   spec.kind = kind;
   spec.path = std::move(path);
@@ -122,7 +122,6 @@ static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::file
 
   spec.lz4 = is_lz4_name(spec.source_basename);
   spec.basename = spec.lz4 ? strip_lz4_suffix(spec.source_basename) : spec.source_basename;
-  spec.download_list_mode = dl_mode;
 
   if (spec.lz4) {
     BRK_TRYV(sz, lz4_content_size(spec));
@@ -146,8 +145,8 @@ static void merge(std::unordered_map<std::string, SourceCandidate>& out, SourceC
   if (!c.basename.empty()) out.insert_or_assign(c.basename, std::move(c));
 }
 
-static brokkr::core::Result<ImageSpec> finalize(const SourceCandidate& c, bool dl_mode) noexcept {
-  return make_spec(c.kind, c.path, c.entry, c.display, c.source_basename, c.disk_size, dl_mode);
+static brokkr::core::Result<ImageSpec> finalize(const SourceCandidate& c) noexcept {
+  return make_spec(c.kind, c.path, c.entry, c.display, c.source_basename, c.disk_size);
 }
 
 } // namespace
@@ -231,7 +230,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         continue;
       }
 
-      BRK_TRYV(spec, finalize(it->second, true));
+      BRK_TRYV(spec, finalize(it->second));
       emitted.insert(it->first);
       out.push_back(std::move(spec));
     }
@@ -239,7 +238,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
     for (const auto& [base, c] : cands) {
       if (emitted.contains(base)) continue;
       if (!brokkr::core::ends_with_ci(c.basename, ".pit")) continue;
-      BRK_TRYV(spec, finalize(c, true));
+      BRK_TRYV(spec, finalize(c));
       out.push_back(std::move(spec));
     }
 
@@ -256,14 +255,14 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         if (sb.empty()) continue;
 
         BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, io::basename(e.name),
-                                 e.size, false));
+                                 e.size));
         out.push_back(std::move(spec));
       }
       continue;
     }
 
     BRK_TRYV(src, io::open_raw_file(p));
-    BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), io::basename(p.string()), src->size(), false));
+    BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), io::basename(p.string()), src->size()));
     out.push_back(std::move(spec));
   }
 
