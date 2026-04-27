@@ -2,6 +2,7 @@
 
 #include <QCloseEvent>
 #include <QChildEvent>
+#include <QApplication>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -587,6 +588,13 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   tabWidget_->addTab(pitTab, "Pit");
 
+#if defined(Q_OS_MACOS)
+  connect(tabWidget_, &QTabWidget::currentChanged, this, [this](int) {
+    if (auto* fw = QApplication::focusWidget()) fw->clearFocus();
+    if (tabWidget_) tabWidget_->setFocus(Qt::OtherFocusReason);
+  });
+#endif
+
   connect(chkUsePit, &QCheckBox::toggled, this, [this](bool checked) {
     if (busy_) {
       chkUsePit->setChecked(!checked);
@@ -617,7 +625,11 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   btnManyDevices_ = new QPushButton("Mass D/L", this);
   btnManyDevices_->setCheckable(true);
   btnManyDevices_->setMinimumWidth(135);
+#if defined(Q_OS_MACOS)
+  btnManyDevices_->setFixedHeight(32);
+#else
   btnManyDevices_->setFixedHeight(24);
+#endif
 
   connect(btnManyDevices_, &QPushButton::toggled, this, [this](bool checked) {
     if (busy_) {
@@ -763,7 +775,18 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   bottomLayout->addWidget(resetColWidget, 0, Qt::AlignBottom);
 
   bottomLayout->addSpacing(10);
+
+#if defined(Q_OS_MACOS)
+  auto* startColWidget = new QWidget(this);
+  auto* startColLayout = new QVBoxLayout(startColWidget);
+  startColLayout->setContentsMargins(0, 0, 0, 0);
+  startColLayout->setSpacing(6);
+  startColLayout->addSpacing(btnManyDevices_->sizeHint().height());
+  startColLayout->addWidget(btnRun);
+  bottomLayout->addWidget(startColWidget, 0, Qt::AlignBottom);
+#else
   bottomLayout->addWidget(btnRun, 0, Qt::AlignBottom);
+#endif
 
   mainLayout->addLayout(bottomLayout);
 
@@ -2098,7 +2121,11 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
 
   auto* btn = new QPushButton(label, this);
   btn->setMinimumWidth(95);
+#if defined(Q_OS_MACOS)
+  btn->setFixedHeight(32);
+#else
   btn->setFixedHeight(28);
+#endif
   layout->addWidget(btn, row, 1);
 
   lineEdit = new QLineEdit(this);
