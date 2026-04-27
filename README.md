@@ -111,6 +111,28 @@ sudo iptables -A INPUT -p tcp --dport 13579 -j ACCEPT
 Both the host and the client must be on the same network (or at least be able to route TCP to
 each other on this port).
 
+## macOS Notes
+
+### "Brokkr can't be opened because the developer cannot be verified"
+
+Brokkr is not notarized with Apple, so the system Gatekeeper will refuse to launch it on first
+run and may also tag it as "damaged" after download. This is not an actual problem with the
+binary — it's just the quarantine attribute Safari/Finder add to anything fetched from the
+internet.
+
+To clear the attribute and allow the app to run:
+
+```bash
+sudo xattr -rd com.apple.quarantine <Path to brokkr app>
+```
+
+(Adjust the path to the `.app`.) After this, Brokkr launches normally
+and the warning will not return.
+
+Alternatively, on the first launch attempt you can right-click the app, choose **Open**, and
+then click **Open** in the dialog — but the `xattr` command is faster and removes the warning
+permanently.
+
 ## Project Structure
 
 ```
