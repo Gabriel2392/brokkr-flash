@@ -21,9 +21,9 @@ A modern, cross-platform Samsung device flashing utility written in C++23.
 
 ### Runtime Requirements
 
-- **Windows**: Windows 7 or later
+- **Windows**: Windows 10 or later
 - **Linux**: Any modern Linux distribution with USB support
-- **macOS**: macOS 10.15 or later
+- **macOS**: macOS 11 or later
 
 ## Building
 
