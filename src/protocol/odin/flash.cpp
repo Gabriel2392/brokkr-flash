@@ -133,22 +133,6 @@ static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::file
   return spec;
 }
 
-struct SourceCandidate {
-  ImageSpec::Kind kind{};
-  std::filesystem::path path;
-  io::TarEntry entry{};
-  std::string basename, source_basename, display;
-  std::uint64_t disk_size = 0;
-};
-
-static void merge(std::unordered_map<std::string, SourceCandidate>& out, SourceCandidate c) {
-  if (!c.basename.empty()) out.insert_or_assign(c.basename, std::move(c));
-}
-
-static brokkr::core::Result<ImageSpec> finalize(const SourceCandidate& c) noexcept {
-  return make_spec(c.kind, c.path, c.entry, c.display, c.source_basename, c.disk_size);
-}
-
 } // namespace
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
@@ -162,9 +146,12 @@ brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const no
 brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
     const std::vector<std::filesystem::path>& inputs) noexcept {
   std::vector<ImageSpec> out;
+
+  std::vector<std::optional<io::TarArchive>> tars(inputs.size());
   std::optional<std::vector<std::string>> dl;
 
-  for (const auto& p : inputs) {
+  for (std::size_t i = 0; i < inputs.size(); ++i) {
+    const auto& p = inputs[i];
     if (!io::TarArchive::is_tar_file(p.string())) continue;
 
     BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
@@ -179,93 +166,116 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
       else if (!lists_equal(*dl, names))
         return brokkr::core::fail("Multiple download-list.txt files found with different contents");
     }
+
+    tars[i].emplace(std::move(tar));
   }
 
+  std::unordered_set<std::string> allow;
   if (dl) {
-    std::unordered_map<std::string, SourceCandidate> cands;
+    allow.reserve(dl->size());
+    for (const auto& n : *dl) allow.insert(n);
+  }
 
-    for (const auto& p : inputs) {
-      if (io::TarArchive::is_tar_file(p.string())) {
-        BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
+  auto compute_basename = [](std::string_view sb) -> std::string {
+    if (sb.empty() || sb.back() == '/') return {};
+    return is_lz4_name(sb) ? strip_lz4_suffix(std::string(sb)) : std::string(sb);
+  };
 
-        for (const auto& e : tar.entries()) {
-          if (is_download_list_name(e.name)) continue;
+  struct Coord { std::size_t inp; std::size_t ent; };
+  static constexpr std::size_t kRaw = static_cast<std::size_t>(-1);
+  std::unordered_map<std::string, Coord> last_of;
 
-          const std::string sb = io::basename(e.name);
-          if (sb.empty() || sb.back() == '/') continue;
+  auto record = [&](const std::string& base, std::size_t inp, std::size_t ent) {
+    auto [it, ins] = last_of.try_emplace(base, Coord{inp, ent});
+    if (!ins) {
+      spdlog::debug("Duplicate image '{}' across inputs \u2014 later occurrence wins", base);
+      it->second = Coord{inp, ent};
+    }
+  };
 
-          const bool lz4 = is_lz4_name(sb);
-          const std::string base = lz4 ? strip_lz4_suffix(sb) : sb;
+  for (std::size_t i = 0; i < inputs.size(); ++i) {
+    if (tars[i]) {
+      const auto& entries = tars[i]->entries();
+      for (std::size_t j = 0; j < entries.size(); ++j) {
+        if (is_download_list_name(entries[j].name)) continue;
+        const std::string sb = io::basename(entries[j].name);
+        const std::string base = compute_basename(sb);
+        if (base.empty()) continue;
+        record(base, i, j);
+      }
+    } else {
+      const std::string sb = io::basename(inputs[i].string());
+      const std::string base = compute_basename(sb);
+      if (base.empty()) continue;
+      record(base, i, kRaw);
+    }
+  }
 
-          merge(cands, SourceCandidate{.kind = ImageSpec::Kind::TarEntry,
-                                       .path = p,
-                                       .entry = e,
-                                       .basename = base,
-                                       .source_basename = sb,
-                                       .display = p.string() + ":" + e.name,
-                                       .disk_size = e.size});
+  std::vector<ImageSpec> pit_specs;
+  std::unordered_set<std::string> emitted;
+
+  for (std::size_t i = 0; i < inputs.size(); ++i) {
+    const auto& p = inputs[i];
+
+    if (tars[i]) {
+      const auto& entries = tars[i]->entries();
+      for (std::size_t j = 0; j < entries.size(); ++j) {
+        const auto& e = entries[j];
+        if (is_download_list_name(e.name)) continue;
+        const std::string sb = io::basename(e.name);
+        const std::string base = compute_basename(sb);
+        if (base.empty()) continue;
+
+        const auto lit = last_of.find(base);
+        if (lit == last_of.end() || lit->second.inp != i || lit->second.ent != j) continue;
+
+        const bool is_pit = brokkr::core::ends_with_ci(base, ".pit");
+        if (dl && !is_pit && !allow.contains(base)) {
+          spdlog::debug("Skipping {}: not in download-list.txt", sb);
+          continue;
         }
+
+        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, sb, e.size));
+        if (is_pit) {
+          pit_specs.push_back(std::move(spec));
+        } else {
+          emitted.insert(base);
+          out.push_back(std::move(spec));
+        }
+      }
+    } else {
+      const std::string sb = io::basename(p.string());
+      const std::string base = compute_basename(sb);
+      if (base.empty()) continue;
+
+      const auto lit = last_of.find(base);
+      if (lit == last_of.end() || lit->second.inp != i || lit->second.ent != kRaw) continue;
+
+      const bool is_pit = brokkr::core::ends_with_ci(base, ".pit");
+      if (dl && !is_pit && !allow.contains(base)) {
+        spdlog::debug("Skipping {}: not in download-list.txt", sb);
         continue;
       }
 
       BRK_TRYV(src, io::open_raw_file(p));
-      const std::string sb = io::basename(p.string());
-      const bool lz4 = is_lz4_name(sb);
-
-      merge(cands, SourceCandidate{.kind = ImageSpec::Kind::RawFile,
-                                   .path = p,
-                                   .entry = {},
-                                   .basename = lz4 ? strip_lz4_suffix(sb) : sb,
-                                   .source_basename = sb,
-                                   .display = p.string(),
-                                   .disk_size = src->size()});
-    }
-
-    out.reserve(dl->size() + 1);
-    std::unordered_set<std::string> emitted;
-    for (const auto& name : *dl) {
-      auto it = cands.find(name);
-      if (it == cands.end()) {
-        spdlog::debug("download-list.txt references missing file: {} (skipping)", name);
-        continue;
-      }
-
-      BRK_TRYV(spec, finalize(it->second));
-      emitted.insert(it->first);
-      out.push_back(std::move(spec));
-    }
-
-    for (const auto& [base, c] : cands) {
-      if (emitted.contains(base)) continue;
-      if (!brokkr::core::ends_with_ci(c.basename, ".pit")) continue;
-      BRK_TRYV(spec, finalize(c));
-      out.push_back(std::move(spec));
-    }
-
-    return out;
-  }
-
-  for (const auto& p : inputs) {
-    if (io::TarArchive::is_tar_file(p.string())) {
-      BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
-
-      for (const auto& e : tar.entries()) {
-        if (is_download_list_name(e.name)) continue;
-        const auto sb = io::basename(e.name);
-        if (sb.empty()) continue;
-
-        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, io::basename(e.name),
-                                 e.size));
+      BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), sb, src->size()));
+      if (is_pit) {
+        pit_specs.push_back(std::move(spec));
+      } else {
+        emitted.insert(base);
         out.push_back(std::move(spec));
       }
-      continue;
     }
-
-    BRK_TRYV(src, io::open_raw_file(p));
-    BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), io::basename(p.string()), src->size()));
-    out.push_back(std::move(spec));
   }
 
+  if (dl) {
+    for (const auto& name : *dl) {
+      if (!emitted.contains(name))
+        spdlog::debug("download-list.txt references missing file: {} (skipping)", name);
+    }
+  }
+
+  for (auto& s : pit_specs) out.push_back(std::move(s));
   return out;
 }
 
