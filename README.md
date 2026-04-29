@@ -6,7 +6,7 @@ A modern, cross-platform Samsung device flashing utility written in C++23.
 
 - **Multi-device support**: Flash multiple devices in parallel
 - **Wireless flashing support**: Support for TCP-based flashing for Galaxy Watch
-- **Cross-platform**: Native support for Windows, Linux and MacOS
+- **Cross-platform**: Native support for Windows, Linux, MacOS and Android
 - **Compressed download support**; Samsung's Odin decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compressed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
 
 ## Requirements
@@ -24,6 +24,7 @@ A modern, cross-platform Samsung device flashing utility written in C++23.
 - **Windows**: Windows 10 or later
 - **Linux**: Any modern Linux distribution with USB support
 - **macOS**: macOS 11 or later
+- **Android**: Android 7.0 or later with USB host support
 
 ## Building
 
@@ -133,25 +134,6 @@ Alternatively, on the first launch attempt you can right-click the app, choose *
 then click **Open** in the dialog — but the `xattr` command is faster and removes the warning
 permanently.
 
-## Project Structure
-
-```
-brokkr-flash/
-├── src/
-│   ├── app/              # Application layer (CLI, main logic)
-│   ├── core/             # Core utilities (bytes, threading)
-│   ├── crypto/           # Cryptographic functions (MD5)
-│   ├── io/               # I/O operations (TAR, LZ4)
-│   ├── platform/         # Platform-specific code (Windows/Linux)
-│   │   ├── linux/        # Linux implementations
-│   │   |─- windows/      # Windows implementations
-|   |   └── macos/        # macOS implementations
-│   └── protocol/         # Device communication protocols
-│       └── odin/         # ODIN protocol implementation
-├── CMakeLists.txt        # Build configuration
-└── LICENSE               # GNU General Public License v3
-```
-
 ## License
 
 This project is licensed under the GNU General Public License v3 - see the [LICENSE](LICENSE) file for details.
@@ -173,18 +155,18 @@ This tool is provided as-is for firmware flashing operations. Users assume full 
 
 Flashing custom firmware may void device warranties and violate terms of service. Use at your own risk.
 
-## Technical Details
-
-### Build Configuration
-
-- **Optimization**: LTO (Link Time Optimization) enabled when supported
-- **Target Architecture**: Native architecture optimization
-- **Debug Information**: Full debug symbols with hot reload support on MSVC
-
 ### Dependencies
 
-- **Threads**: Standard C++ threading library
-- **Platform Libraries**: Windows API (Windows) or none (Linux)
+- **Compiler**: C++23-capable toolchain (recent GCC, Clang, or MSVC).
+- **CMake**: 3.21 or newer.
+- **Qt 6.7.3 or newer**
+
+### USB backends
+
+- **Linux**: `usbfs`
+- **macOS**: `IOKit/IOUSBLib`
+- **Windows**: VCOM (like original Odin, same driver)
+- **Android**: `libusb` (as of 2.4.5)
 
 ## Telegram Community
 - https://t.me/BrokkrCommunity
