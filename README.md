@@ -134,6 +134,11 @@ Alternatively, on the first launch attempt you can right-click the app, choose *
 then click **Open** in the dialog — but the `xattr` command is faster and removes the warning
 permanently.
 
+## Android Notes
+
+Not all devices are supported to be flashed in the Android version. For problematic devices,
+please use the Windows version instead.
+
 ## License
 
 This project is licensed under the GNU General Public License v3 - see the [LICENSE](LICENSE) file for details.
