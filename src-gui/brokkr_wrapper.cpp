@@ -609,7 +609,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   connect(btnPitBrowse, &QPushButton::clicked, this, [this]() {
     if (busy_) return;
     QFileDialog::Options opts;
-#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX)
     opts |= QFileDialog::DontUseNativeDialog;
 #endif
     const QString file = QFileDialog::getOpenFileName(this, "Select PIT File", lastDir,
@@ -2143,7 +2143,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
     QFileDialog::Options opts;
-#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX)
     opts |= QFileDialog::DontUseNativeDialog;
 #endif
     QString file = QFileDialog::getOpenFileName(this, "Select Firmware File", lastDir,

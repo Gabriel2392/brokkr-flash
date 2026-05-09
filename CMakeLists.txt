@@ -259,6 +259,8 @@ if (WIN32)
     )
 elseif (APPLE)
    set(MACOSX_BUNDLE_ICON_FILE brokkr.icns)
+   set(MACOSX_BUNDLE_GUI_IDENTIFIER "com.brokkr.flash")
+   set(MACOSX_BUNDLE_BUNDLE_NAME "Brokkr")
    set_source_files_properties(assets/brokkr.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     add_executable(brokkr MACOSX_BUNDLE
         src-gui/main_gui.cpp
@@ -379,7 +381,7 @@ target_compile_definitions(brokkr PRIVATE
 
 qt_generate_deploy_app_script(
     TARGET brokkr
-    FILENAME_VARIABLE deploy_script
+    OUTPUT_SCRIPT deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
