@@ -377,11 +377,19 @@ target_compile_definitions(brokkr PRIVATE
     BROKKR_VERSION=\"${PROJECT_VERSION}\"
 )
 
-qt_generate_deploy_app_script(
-    TARGET brokkr
-    FILENAME_VARIABLE deploy_script
-    NO_UNSUPPORTED_PLATFORM_ERROR
-)
+if(Qt6Core_VERSION VERSION_GREATER_EQUAL "6.9.0")
+  qt_generate_deploy_app_script(
+      TARGET brokkr
+      OUTPUT_SCRIPT deploy_script
+      NO_UNSUPPORTED_PLATFORM_ERROR
+  )
+else()
+  qt_generate_deploy_app_script(
+      TARGET brokkr
+      FILENAME_VARIABLE deploy_script
+      NO_UNSUPPORTED_PLATFORM_ERROR
+  )
+endif()
 install(SCRIPT ${deploy_script})
 install(TARGETS brokkr
     RUNTIME DESTINATION bin
