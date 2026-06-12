@@ -40,6 +40,10 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
+#if defined(Q_OS_LINUX)
+  QApplication::setStyle("Fusion");
+#endif
+
   QApplication app(argc, argv);
 
   auto lock = brokkr::platform::SingleInstanceLock::try_acquire("brokkr-engine");

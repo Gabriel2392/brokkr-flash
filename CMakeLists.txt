@@ -310,6 +310,10 @@ target_link_libraries(brokkr PRIVATE
 
 set_target_properties(brokkr PROPERTIES AUTOMOC ON AUTORCC ON)
 
+if (WIN32)
+    target_link_libraries(brokkr PRIVATE dwmapi)
+endif()
+
 if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
 endif()
@@ -372,7 +376,7 @@ if(WIN32)
 endif()
 qt_generate_deploy_app_script(
     TARGET brokkr
-    FILENAME_VARIABLE deploy_script
+    OUTPUT_SCRIPT deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
     ${BROKKR_DEPLOY_TOOL_OPTIONS}
 )

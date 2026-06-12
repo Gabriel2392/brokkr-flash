@@ -66,6 +66,7 @@
 
 #if defined(Q_OS_WIN)
   #include <dbt.h>
+  #include <dwmapi.h>
   #include <shellapi.h>
   #include <windows.h>
 #endif
@@ -158,8 +159,7 @@ class DeviceSquare final : public QWidget {
     p.drawRect(r);
 
     if (!text_.isEmpty()) {
-      QFont f("Arial");
-      f.setStyleHint(QFont::SansSerif);
+      QFont f = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
       f.setBold(true);
 
       int pt = 10;
@@ -261,6 +261,12 @@ static QString drop_file_identity_key(const QString& path_like) {
 }
 
 #if defined(Q_OS_WIN)
+static void apply_windows_titlebar_theme(HWND hwnd, bool dark) {
+  if (!hwnd) return;
+  const BOOL value = dark ? TRUE : FALSE;
+  (void)DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &value, sizeof(value));
+}
+
 static void allow_windows_drop_messages(HWND hwnd) {
   if (!hwnd) return;
   (void)ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, nullptr);
@@ -468,13 +474,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   setAcceptDrops(true);
 #if defined(Q_OS_WIN)
   allow_windows_drop_messages(reinterpret_cast<HWND>(winId()));
+  apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
+                               palette().color(QPalette::Window).lightness() < 128);
 #endif
   baseWindowHeight_ = height();
 
   spdlog::set_default_logger(make_qt_logger(this));
 
   auto* mainLayout = new QVBoxLayout(this);
-  mainLayout->setContentsMargins(10, 10, 10, 10);
+  mainLayout->setContentsMargins(12, 12, 12, 12);
+  mainLayout->setSpacing(10);
 
   headerWidget_ = new QWidget(this);
   headerWidget_->setObjectName("headerBanner");
@@ -484,12 +493,19 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* headerLayout = new QHBoxLayout(headerWidget_);
   headerLayout->setContentsMargins(24, 0, 24, 0);
 
+  QFont titleFont = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
+  const qreal titleBasePt = titleFont.pointSizeF() > 0 ? titleFont.pointSizeF() : 9.0;
+  titleFont.setBold(true);
+  titleFont.setPointSizeF(titleBasePt * 1.8);
+
   auto* titleLabel =
-      new QLabel(QString(R"(<span style="color:#4da6ff; font-size:22px; font-weight:bold;">BROKKR</span>)"
-                         R"(<span style="color:#ff9900; font-size:22px; font-weight:bold;">&nbsp; FLASH TOOL</span>)"
-                         R"(<span style="color:#4da6ff; font-size:11px; font-weight:bold;">&nbsp; v%1</span>)")
+      new QLabel(QString(R"(<span style="color:#4da6ff;">BROKKR</span>)"
+                         R"(<span style="color:#ff9900;">&nbsp; FLASH</span>)"
+                         R"(<span style="color:#4da6ff; font-size:%1pt;">&nbsp; v%2</span>)")
+                     .arg(QString::number(titleBasePt, 'f', 1))
                      .arg(QString::fromStdString(brokkr::app::version_string())),
                  headerWidget_);
+  titleLabel->setFont(titleFont);
   headerLayout->addWidget(titleLabel);
   headerLayout->addStretch();
 
@@ -511,20 +527,21 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     idComGroup_->setAutoFillBackground(true);
   }
   idComLayout_ = new QGridLayout(idComGroup_);
-  idComLayout_->setSpacing(4);
-  idComLayout_->setContentsMargins(5, 5, 5, 5);
+  idComLayout_->setSpacing(6);
+  idComLayout_->setContentsMargins(8, 8, 8, 8);
 
   rebuildDeviceBoxes_(kBoxesNormal, true);
   mainLayout->addWidget(idComGroup_);
 
   auto* middleLayout = new QHBoxLayout();
+  middleLayout->setSpacing(10);
 
   tabWidget_ = new QTabWidget(this);
   tabWidget_->setFixedWidth(360);
 
   consoleOutput = new QTextEdit(this);
   consoleOutput->setReadOnly(true);
-  consoleOutput->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+  consoleOutput->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   QFont logFont = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
   logFont.setPointSize(9);
   consoleOutput->setFont(logFont);
@@ -545,7 +562,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   optLayout->addWidget(chkWireless);
 
 #if defined(BROKKR_PLATFORM_WINDOWS)
-  btnRebootDownloadMode_ = new QPushButton("Try to Reboot them into Download Mode", this);
+  btnRebootDownloadMode_ = new QPushButton("Try to Reboot the device(s) into Download Mode", this);
   btnRebootDownloadMode_->setEnabled(false);
   optLayout->addWidget(btnRebootDownloadMode_);
 
@@ -708,7 +725,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       "  OLD model : Download one binary ...\n"
       "  NEW model : Download BL + AP + CP + CSC",
       this);
-  tipsLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Sunken);
+  tipsLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
   tipsLabel->setMargin(6);
   QFont tipsFont = tipsLabel->font();
   tipsFont.setPointSize(9);
@@ -746,6 +763,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   const int bottomH = 32;
   btnRun->setMinimumSize(bottomW, bottomH);
   btnReset_->setMinimumSize(bottomW, bottomH);
+  btnRun->setDefault(true);
 
   auto* footerLabel = new QLabel(
       R"(<a href="https://github.com/Gabriel2392/brokkr-flash" style="color: #4c8ddc;">GitHub Repo</a>)", this);
@@ -1288,6 +1306,11 @@ void BrokkrWrapper::changeEvent(QEvent* e) {
   QWidget::changeEvent(e);
   if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
     applyHeaderStyle_();
+
+#if defined(Q_OS_WIN)
+    apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
+                                 palette().color(QPalette::Window).lightness() < 128);
+#endif
 
     {
       auto pal = palette();
