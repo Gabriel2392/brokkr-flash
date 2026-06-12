@@ -28,7 +28,53 @@ A modern, cross-platform Samsung device flashing utility written in C++23.
 
 ## Building
 
-### On Windows
+### Linux (Ubuntu / Debian)
+
+```bash
+# Install dependencies
+sudo apt-get install -y gcc-14 g++-14 ninja-build cmake \
+    qt6-base-dev libgl1-mesa-dev
+
+# Build
+mkdir build && cd build
+cmake .. -G Ninja
+ninja
+```
+
+The compiled executable will be located at `build/brokkr`.
+
+### Linux (Fedora / RHEL)
+
+```bash
+# Install dependencies
+sudo dnf install -y ninja-build cmake gcc-c++ \
+    qt6-qtbase-devel mesa-libGL-devel
+
+# Build
+mkdir build && cd build
+cmake .. -G Ninja
+ninja
+```
+
+The compiled executable will be located at `build/brokkr`.
+
+**Verified on:** Ubuntu 24.04 (GCC 14, Qt 6.7.3) and Fedora 43 (GCC 15.2, Qt 6.10.3).
+
+### macOS
+
+```bash
+# Install dependencies
+brew install ninja cmake qt@6
+
+# Build
+mkdir build && cd build
+cmake .. -G Ninja
+ninja
+```
+
+The compiled app bundle will be at `build/brokkr.app`.
+
+### Windows
 
 ```bash
 mkdir build
@@ -37,18 +83,54 @@ cmake .. -G Ninja
 ninja
 ```
 
-The compiled executable will be located at `build/brokkr.exe`
+The compiled executable will be located at `build/brokkr.exe`.
 
-### On Linux / macOS
+## Build Troubleshooting
+
+### `ninja: command not found`
+
+Ninja is not installed. Install it:
 
 ```bash
-mkdir build
-cd build
-cmake .. -G Ninja
-ninja
+# Ubuntu/Debian
+sudo apt-get install -y ninja-build
+
+# Fedora/RHEL
+sudo dnf install -y ninja-build
+
+# macOS
+brew install ninja
 ```
 
-The compiled executable will be located at `build/brokkr`
+On some systems the package is named `ninja-build` but the binary is `ninja`.
+
+### `Unexpected arguments: FILENAME_VARIABLE` (Qt ≥ 6.9)
+
+Qt 6.9 renamed the `qt_generate_deploy_app_script` parameter from
+`FILENAME_VARIABLE` to `OUTPUT_SCRIPT`. The CMakeLists.txt already handles
+both — if you see this error, your Qt version is newer than the version-guard
+threshold. Adjust the `VERSION_GREATER_EQUAL "6.9.0"` check in CMakeLists.txt.
+
+### `test_md5_xxh3_cache` appears to hang
+
+The LRU eviction test inserts 65,540 cache entries and each insertion does
+a linear scan for the next touch counter plus a sort-and-deduplicate pass.
+On slow CPUs this can take several minutes. It is not a bug — let it run,
+or skip it:
+
+```bash
+ctest -E md5_xxh3_cache
+```
+
+### `AGL.framework not found` (macOS)
+
+macOS 14+/15+ SDKs removed AGL.framework but Qt 6.3 `.prl` files may still
+reference it. CMakeLists.txt automatically strips these references. If you
+still see linker errors, run the manual fixup used in CI:
+
+```bash
+sed -i '' 's/ -framework AGL//g; s/-framework AGL //g; s/-framework AGL//g' build/build.ninja
+```
 
 ## Linux Notes
 
