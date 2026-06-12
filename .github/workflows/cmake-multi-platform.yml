@@ -22,7 +22,7 @@ permissions:
   contents: write
 
 env:
-  QT_VERSION: "6.7.3"
+  QT_VERSION: "6.8.3"
 
 jobs:
   # ═══════════════════════════════════════════════════
@@ -92,7 +92,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.build_type }}
+          cache-key-prefix: install-qt-action-${{ github.job }}-${{ env.QT_VERSION }}-${{ matrix.build_type }}
           arch: linux_gcc_64
 
       - name: Configure
@@ -199,7 +199,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.build_type }}
+          cache-key-prefix: install-qt-action-${{ github.job }}-${{ env.QT_VERSION }}-${{ matrix.build_type }}
           arch: linux_gcc_arm64
 
       - name: Configure
@@ -286,25 +286,29 @@ jobs:
           - runner: windows-2022
             artifact_arch: x64
             msvc_arch: x64
-            qt_arch: win64_msvc2019_64
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
             build_type: Release
             suffix: ""
           - runner: windows-2022
             artifact_arch: x64
             msvc_arch: x64
-            qt_arch: win64_msvc2019_64
+            qt_host: windows
+            qt_arch: win64_msvc2022_64
             build_type: Debug
             suffix: "-dbg"
           - runner: windows-11-arm
             artifact_arch: arm64
             msvc_arch: arm64
-            qt_arch: win64_msvc2019_arm64
+            qt_host: windows_arm64
+            qt_arch: win64_msvc2022_arm64
             build_type: Release
             suffix: ""
           - runner: windows-11-arm
             artifact_arch: arm64
             msvc_arch: arm64
-            qt_arch: win64_msvc2019_arm64
+            qt_host: windows_arm64
+            qt_arch: win64_msvc2022_arm64
             build_type: Debug
             suffix: "-dbg"
 
@@ -326,8 +330,8 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.artifact_arch }}-${{ matrix.build_type }}
-          host: windows
+          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.artifact_arch }}-${{ env.QT_VERSION }}-${{ matrix.build_type }}
+          host: ${{ matrix.qt_host }}
           arch: ${{ matrix.qt_arch }}
 
       - name: Configure
@@ -365,6 +369,31 @@ jobs:
           cmake --install build --prefix "$install_root" --config ${{ matrix.build_type }}
           cd portable
           7z a -tzip ../Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip brokkr/
+
+      - name: Verify deployed binary architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - ${{ matrix.artifact_arch }} <<'EOF'
+          import struct, sys
+          from pathlib import Path
+
+          expected = {"x64": 0x8664, "arm64": 0xAA64}[sys.argv[1]]
+          bad = []
+          for p in sorted(Path("portable/brokkr").rglob("*")):
+              # vc_redist bootstrappers are legitimately x86 stubs
+              if p.suffix.lower() not in (".exe", ".dll") or p.name.startswith("vc_redist"):
+                  continue
+              data = p.read_bytes()
+              pe_off = struct.unpack_from("<I", data, 0x3C)[0]
+              machine = struct.unpack_from("<H", data, pe_off + 4)[0]
+              ok = machine == expected
+              print(f"{'ok ' if ok else 'BAD'} {machine:#06x} {p}")
+              if not ok:
+                  bad.append(str(p))
+          if bad:
+              sys.exit(f"{len(bad)} binaries do not match {sys.argv[1]} ({expected:#06x}): {', '.join(bad)}")
+          EOF
 
       - uses: actions/upload-artifact@v4
         with:
@@ -409,7 +438,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.build_type }}
+          cache-key-prefix: install-qt-action-${{ github.job }}-${{ env.QT_VERSION }}-${{ matrix.build_type }}
           arch: clang_64
 
       - name: Configure
@@ -484,7 +513,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           cache: true
-          cache-key-prefix: install-qt-action-${{ github.job }}-${{ matrix.build_type }}
+          cache-key-prefix: install-qt-action-${{ github.job }}-${{ env.QT_VERSION }}-${{ matrix.build_type }}
           arch: clang_64
 
       - name: Configure
