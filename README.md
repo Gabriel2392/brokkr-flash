@@ -164,7 +164,7 @@ Flashing custom firmware may void device warranties and violate terms of service
 
 - **Compiler**: C++23-capable toolchain (recent GCC, Clang, or MSVC).
 - **CMake**: 3.21 or newer.
-- **Qt 6.7.3 or newer**
+- **Qt 6.8.3 or newer**
 
 ### USB backends
 
