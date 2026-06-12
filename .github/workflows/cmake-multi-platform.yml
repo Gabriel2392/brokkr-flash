@@ -107,6 +107,19 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Capture screenshot
+        if: matrix.build_type == 'Release'
+        run: |
+          set -euo pipefail
+          QT_QPA_PLATFORM=offscreen BROKKR_SCREENSHOT="$PWD/screenshot-linux.png" timeout 60 ./build/brokkr
+          test -f screenshot-linux.png
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.build_type == 'Release'
+        with:
+          name: screenshot-linux
+          path: screenshot-linux.png
+
       - name: Stage AppDir
         run: |
           set -euo pipefail
@@ -347,6 +360,22 @@ jobs:
         shell: bash
         run: cmake --build build --parallel
 
+      - name: Capture screenshot
+        if: matrix.build_type == 'Release' && matrix.artifact_arch == 'x64'
+        shell: powershell
+        run: |
+          $env:BROKKR_SCREENSHOT = "$PWD\screenshot-windows.png"
+          $p = Start-Process -FilePath "build\brokkr.exe" -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); exit 1 }
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          if (!(Test-Path screenshot-windows.png)) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.build_type == 'Release' && matrix.artifact_arch == 'x64'
+        with:
+          name: screenshot-windows
+          path: screenshot-windows.png
+
       - name: Package (NSIS installer)
         shell: bash
         run: |
@@ -458,6 +487,19 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Capture screenshot
+        if: matrix.build_type == 'Release'
+        run: |
+          set -euo pipefail
+          BROKKR_SCREENSHOT="$PWD/screenshot-macos.png" ./build/brokkr.app/Contents/MacOS/brokkr
+          test -f screenshot-macos.png
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.build_type == 'Release'
+        with:
+          name: screenshot-macos
+          path: screenshot-macos.png
+
       - name: Deploy + Zip
         if: matrix.build_type == 'Release'
         run: |
@@ -559,6 +601,42 @@ jobs:
   # ═══════════════════════════════════════════════════
   #  Publish GitHub Release  (release only)
   # ═══════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════
+  #  README screenshots (committed to assets/screenshots)
+  # ═══════════════════════════════════════════════════
+  screenshots:
+    name: Update README screenshots
+    needs: [linux_appimage, windows_installer, macos_app]
+    if: >-
+      always() &&
+      needs.linux_appimage.result == 'success' &&
+      needs.windows_installer.result == 'success' &&
+      needs.macos_app.result == 'success' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || inputs.new_tag != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: screenshot-*
+          path: assets/screenshots
+          merge-multiple: true
+
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          git add assets/screenshots
+          git diff --cached --quiet && { echo "Screenshots unchanged"; exit 0; }
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update screenshots [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
   release:
     name: Publish release
     if: inputs.new_tag != ''

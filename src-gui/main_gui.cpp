@@ -17,6 +17,7 @@
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QTimer>
 
 #include "app/cli_mode.hpp"
 #include "platform/platform_all.hpp"
@@ -54,5 +55,13 @@ int main(int argc, char* argv[]) {
 
   BrokkrWrapper window;
   window.show();
+
+  if (const QByteArray shotPath = qgetenv("BROKKR_SCREENSHOT"); !shotPath.isEmpty()) {
+    QTimer::singleShot(1500, &window, [&app, &window, shotPath]() {
+      const bool ok = window.grab().save(QString::fromLocal8Bit(shotPath));
+      app.exit(ok ? 0 : 1);
+    });
+  }
+
   return app.exec();
 }
