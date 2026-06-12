@@ -26,6 +26,13 @@
 
 #include <charconv>
 
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <filesystem>
+#include <thread>
+#include <set>
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/usb/IOUSBLib.h>
@@ -210,6 +217,98 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   info.vendor = static_cast<std::uint16_t>(*vid_opt);
   info.product = static_cast<std::uint16_t>(*pid_opt);
   return info;
+}
+
+} // namespace brokkr::macos
+
+namespace {
+constexpr std::string_view kSuddlmod = "AT+SUDDLMOD=0,0\r";
+
+std::optional<std::string> send_suddlmod_posix(const std::string& path) {
+  int fd = open(path.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+  if (fd == -1) return std::string("open failed: ") + std::to_string(errno);
+
+  struct termios tty{};
+  if (tcgetattr(fd, &tty) != 0) {
+    close(fd);
+    return std::string("tcgetattr failed: ") + std::to_string(errno);
+  }
+
+  cfsetospeed(&tty, B115200);
+  cfsetispeed(&tty, B115200);
+
+  tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+  tty.c_iflag &= ~IGNBRK;                         // disable break processing
+  tty.c_lflag = 0;                                // no signaling chars, no echo, no canonical processing
+  tty.c_oflag = 0;                                // no remapping, no delays
+  tty.c_cc[VMIN]  = 0;                            // read doesn't block
+  tty.c_cc[VTIME] = 5;                            // 0.5 seconds read timeout
+
+  tty.c_iflag &= ~(IXON | IXOFF | IXANY);         // shut off xon/xoff ctrl
+  tty.c_cflag |= (CLOCAL | CREAD);                // ignore modem controls, enable reading
+  tty.c_cflag &= ~(PARENB | PARODD);              // shut off parity
+  tty.c_cflag &= ~CSTOPB;                         // 1 stop bit
+  tty.c_cflag &= ~CRTSCTS;                        // no hw flow control
+
+  if (tcsetattr(fd, TCSANOW, &tty) != 0) {
+    close(fd);
+    return std::string("tcsetattr failed: ") + std::to_string(errno);
+  }
+
+  ssize_t wrote = write(fd, kSuddlmod.data(), kSuddlmod.size());
+  if (wrote != static_cast<ssize_t>(kSuddlmod.size())) {
+    close(fd);
+    return std::string("write failed: ") + std::to_string(errno);
+  }
+
+  tcdrain(fd);
+  close(fd);
+  return std::nullopt;
+}
+} // namespace
+
+namespace brokkr::macos {
+
+SuddlmodResult send_suddlmod_to_samsung_serial(std::uint16_t vendor, int maxTargets) {
+  SuddlmodResult out;
+  (void)vendor; // macOS serial ports are dynamic, we just rely on the name cu.usbmodem
+  
+  std::set<std::string> uniquePorts;
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator("/dev", ec)) {
+    if (!entry.is_character_file() && !entry.is_symlink()) continue;
+    std::string filename = entry.path().filename().string();
+    if (filename.find("cu.usbmodem") == 0) {
+      uniquePorts.insert(entry.path().string());
+    }
+  }
+
+  std::vector<std::string> ports(uniquePorts.begin(), uniquePorts.end());
+  if (maxTargets > 0 && static_cast<int>(ports.size()) > maxTargets) {
+    ports.resize(static_cast<std::size_t>(maxTargets));
+  }
+  out.ports_seen = static_cast<int>(ports.size());
+
+  std::vector<std::optional<std::string>> errors(ports.size());
+  std::vector<std::thread> workers;
+  workers.reserve(ports.size());
+
+  for (std::size_t i = 0; i < ports.size(); ++i) {
+    workers.emplace_back([&, i]() { errors[i] = send_suddlmod_posix(ports[i]); });
+  }
+  for (auto& t : workers) {
+    if (t.joinable()) t.join();
+  }
+
+  for (std::size_t i = 0; i < ports.size(); ++i) {
+    if (errors[i]) {
+      out.failures.push_back(ports[i] + ": " + *errors[i]);
+      continue;
+    }
+    ++out.sent_ok;
+  }
+
+  return out;
 }
 
 } // namespace brokkr::macos

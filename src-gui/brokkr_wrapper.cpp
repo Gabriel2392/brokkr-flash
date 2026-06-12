@@ -544,7 +544,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   chkWireless = new QCheckBox("Wireless", this);
   optLayout->addWidget(chkWireless);
 
-#if defined(BROKKR_PLATFORM_WINDOWS)
+#if defined(BROKKR_PLATFORM_WINDOWS) || defined(BROKKR_PLATFORM_MACOS)
   btnRebootDownloadMode_ = new QPushButton("Try to Reboot them into Download Mode", this);
   btnRebootDownloadMode_->setEnabled(false);
   optLayout->addWidget(btnRebootDownloadMode_);
@@ -609,7 +609,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   connect(btnPitBrowse, &QPushButton::clicked, this, [this]() {
     if (busy_) return;
     QFileDialog::Options opts;
-#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX)
     opts |= QFileDialog::DontUseNativeDialog;
 #endif
     const QString file = QFileDialog::getOpenFileName(this, "Select PIT File", lastDir,
@@ -1961,7 +1961,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     box.setText(text);
 
     auto* ok_btn = box.addButton(QMessageBox::Ok);
-  #if defined(BROKKR_PLATFORM_WINDOWS)
+  #if defined(BROKKR_PLATFORM_WINDOWS) || defined(BROKKR_PLATFORM_MACOS)
     auto* reboot_btn = box.addButton("Try to Reboot them into Download Mode", QMessageBox::ActionRole);
   #endif
     QAbstractButton* ignore_btn = nullptr;
@@ -1970,7 +1970,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     box.setDefaultButton(qobject_cast<QPushButton*>(ok_btn));
     box.exec();
 
-#if defined(BROKKR_PLATFORM_WINDOWS)
+#if defined(BROKKR_PLATFORM_WINDOWS) || defined(BROKKR_PLATFORM_MACOS)
     if (box.clickedButton() == reboot_btn) {
       tryRebootIntoDownloadMode_();
       return false;
@@ -2029,7 +2029,7 @@ void BrokkrWrapper::updateActionButtons_() {
 
 void BrokkrWrapper::updateRebootDownloadButton_() {
   if (!btnRebootDownloadMode_) return;
-#if !defined(BROKKR_PLATFORM_WINDOWS)
+#if !defined(BROKKR_PLATFORM_WINDOWS) && !defined(BROKKR_PLATFORM_MACOS)
   btnRebootDownloadMode_->setEnabled(false);
   btnRebootDownloadMode_->hide();
   return;
@@ -2057,8 +2057,8 @@ void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const
 void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   if (busy_) return;
 
-#if !defined(BROKKR_PLATFORM_WINDOWS)
-  QMessageBox::information(this, "Brokkr Flash", "This action is available only on Windows builds.");
+#if !defined(BROKKR_PLATFORM_WINDOWS) && !defined(BROKKR_PLATFORM_MACOS)
+  QMessageBox::information(this, "Brokkr Flash", "This action is available only on Windows and macOS builds.");
   return;
 #else
 
@@ -2143,7 +2143,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   connect(btn, &QPushButton::clicked, this, [this, lineEdit, chk]() {
     if (busy_) return;
     QFileDialog::Options opts;
-#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+#if defined(Q_OS_LINUX)
     opts |= QFileDialog::DontUseNativeDialog;
 #endif
     QString file = QFileDialog::getOpenFileName(this, "Select Firmware File", lastDir,
