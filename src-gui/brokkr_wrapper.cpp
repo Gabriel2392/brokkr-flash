@@ -2140,7 +2140,10 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
 void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {
   auto* chk = new QCheckBox(this);
   chk->setEnabled(false);
-  layout->addWidget(chk, row, 0);
+#if defined(Q_OS_WIN)
+  chk->setStyleSheet("QCheckBox::indicator { width: 16px; height: 16px; }");
+#endif
+  layout->addWidget(chk, row, 0, Qt::AlignCenter);
 
   auto* btn = new QPushButton(label, this);
   btn->setMinimumWidth(95);
