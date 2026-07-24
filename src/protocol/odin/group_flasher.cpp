@@ -564,7 +564,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         if (ui.on_item_active) ui.on_item_active(plan_idx);
 
         const u64 item_total = item.spec.size;
-        const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes);
+        const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes, pkt);
         u64 item_done = 0;
 
         bool stream_lz4 = item.spec.lz4 && use_lz4;

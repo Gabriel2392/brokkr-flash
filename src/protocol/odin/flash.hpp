@@ -97,23 +97,32 @@ inline std::size_t lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept
   return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
 }
 
-inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes) noexcept {
+inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes,
+                                       std::uint64_t pkt) noexcept {
+  std::uint64_t win = default_bytes;
+
   switch (part.dev_type) {
     case 1:
     case 2:
-    case 8: return 30ull * kOneMiB;
-    case 6: return 4ull * kOneMiB;
-    case 7: return kOneMiB;
+    case 8: win = 30ull * kOneMiB; break;
+    case 6: win = 4ull * kOneMiB; break;
+    case 7: win = kOneMiB; break;
     case 0: {
       const auto blk = static_cast<std::uint64_t>(part.wire_block_size > 0 ? part.wire_block_size : 0);
       const std::uint64_t units = blk >> 7;
-      if (units == 0) return default_bytes;
+      if (units == 0) break;
       const std::uint64_t base = blk + ((part.attribute == 1) ? units * 4 : 0);
-      const std::uint64_t win = base * 1024ull * (800ull / units);
-      return win ? win : default_bytes;
+      const std::uint64_t computed = base * 1024ull * (800ull / units);
+      if (computed) win = computed;
+      break;
     }
-    default: return default_bytes;
+    default: break;
   }
+
+  if (pkt == 0 || win == 0) return win;
+
+  const std::uint64_t floored = win - (win % pkt);
+  return floored ? floored : pkt;
 }
 
 } // namespace detail
