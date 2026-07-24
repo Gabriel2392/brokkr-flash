@@ -24,6 +24,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 
 #include <spdlog/spdlog.h>
 #include <fmt/ranges.h>
@@ -38,13 +39,59 @@ inline brokkr::core::Status require_connected(brokkr::core::IByteTransport& c) n
   return c.connected() ? brokkr::core::Status{} : brokkr::core::fail("transport not connected");
 }
 
+static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
+  switch (ack) {
+    case -1: return "partition not found in PIT, or unsupported binary type";
+    case -2: return "write protection failure";
+    case -3: return "failed to clear write protection";
+    case -4: return "write failed";
+    case -5: return "secure check failed";
+    case -6: return "size check failed";
+    case -7: return "ext4 image handling failed";
+    case -8: return "image exceeds the 112MiB staging limit";
+
+    case -127: return "unknown partition";
+    case -126: return "PIT entry has no file name";
+    case -125: return "m9kefs3 cannot be downloaded";
+    case -124: return "image is too big for the partition";
+    case -123: return "BL1 check failed";
+    case -122: return "partition ID mismatch";
+    case -121: return "partition is not UFS on a UFS device";
+    case -120: return "partition device type is not supported";
+    case -119: return "block write failed";
+    case -118: return "block read failed";
+    case -117: return "block erase failed";
+    case -116: return "unsupported filesystem type";
+    case -115: return "filesystem is not supported";
+    case -114: return "all binaries are not allowed to be flashed due to KG locked";
+    case -113: return "MDM MODE, cannot download";
+    case -112: return "Knox Guard prevents flashing factory binaries";
+    case -111: return "SECURE CHECK FAIL (signature verification failed)";
+    case -110: return "only official released binaries are allowed to be flashed (Knox Guard)";
+    case -109: return "only official released binaries are allowed to be flashed (Knox Guard v2.0)";
+    case -108: return "custom binary blocked by R/L";
+    case -107: return "custom binary blocked by OEM lock";
+    case -106: return "kernel rollback protection check failed";
+    case -105: return "cross-verify (kill switch) lock";
+    case -104: return "system rollback protection check failed";
+    case -103: return "this is an ENG binary, please use a USER binary";
+    case -102: return "TOKEN size is too big";
+    case -101: return "unsupported version (rollback protection)";
+    case -100: return "LDFW region erase failed";
+    case -99: return "LDFW region write failed";
+    case -98: return "UL_KEYS write failed";
+    case -97: return "bootloader token install failed";
+
+    default: return {};
+  }
+}
+
 inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseBox& r, std::int32_t* out_ack) noexcept {
   if (r.id == BOOTLOADER_FAIL) {
-#ifndef NDEBUG
-    return brokkr::core::failf("Bootloader returned FAIL (ack={} / 0x{:08X})", r.ack, static_cast<std::uint32_t>(r.ack));
-#else
-    return brokkr::core::fail("Bootloader returned FAIL");
-#endif
+    const auto why = bootloader_fail_text(r.ack);
+    if (!why.empty()) return brokkr::core::failf("Bootloader returned FAIL: {} ({})", why, r.ack);
+    return brokkr::core::failf("Bootloader returned FAIL (ack={} / 0x{:08X})", r.ack,
+                               static_cast<std::uint32_t>(r.ack));
   }
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
   if (r.id != expected_id) {
