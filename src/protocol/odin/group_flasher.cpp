@@ -201,6 +201,9 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
     const u64 rounded = static_cast<u64>(w.rounded);
     const u64 packets = rounded / pkt64;
 
+    spdlog::debug("XMIT window: comp={} part_id={} begin_size={} rounded={} packets={} pkt={} end_size={} last={}",
+                  comp, part_id, w.begin, rounded, packets, pkt, w.end, w.last);
+
     emit(st_begin(comp, w.begin));
     auto contrib = make_contrib(w, packets);
 
@@ -495,6 +498,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           if (!quit && !dead_local) {
             auto rst = exec(odin, s);
             if (!rst) {
+              spdlog::debug(
+                  "Device {}: step failed: op={} comp={} size_arg={} data_off={} data_len={} part_id={} dev_type={} "
+                  "last={}: {}",
+                  orig, static_cast<int>(s.op), s.comp, s.a, s.off, s.n, s.part_id, s.dev_type, s.last, rst.error());
               dead[i] = 1;
               failed_count.fetch_add(1, std::memory_order_relaxed);
               const auto msg = rst.error();
@@ -552,6 +559,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           BRK_TRYV(ph, io::parse_lz4_frame_header(*probe));
           stream_lz4 = (ph.max_block_size == static_cast<std::size_t>(detail::kOneMiB));
         }
+
+        spdlog::debug("Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} lz4={} mode={}",
+                      item.part.id, item.part.dev_type, item.part.name, item.part.file_name, item.spec.display,
+                      item.spec.size, item.spec.lz4, stream_lz4 ? "compressed-stream" : "raw");
 
         if (stream_lz4) {
           struct Slot {

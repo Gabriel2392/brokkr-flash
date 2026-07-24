@@ -153,7 +153,11 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
     }
 
     p += bytesRead;
-    if (bytesRead < xfer) break;
+    if (bytesRead < xfer) {
+      spdlog::debug("UsbFs recv: short read ({} of {} bytes, total {} of {})", bytesRead, xfer,
+                    static_cast<std::size_t>(p - begin), data.size());
+      break;
+    }
   }
 
   return static_cast<int>(p - begin);

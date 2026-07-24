@@ -39,9 +39,22 @@ inline brokkr::core::Status require_connected(brokkr::core::IByteTransport& c) n
 }
 
 inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseBox& r, std::int32_t* out_ack) noexcept {
-  if (r.id == BOOTLOADER_FAIL) return brokkr::core::fail("Bootloader returned FAIL");
+  if (r.id == BOOTLOADER_FAIL) {
+#ifndef NDEBUG
+    return brokkr::core::failf("Bootloader returned FAIL (ack={} / 0x{:08X})", r.ack, static_cast<std::uint32_t>(r.ack));
+#else
+    return brokkr::core::fail("Bootloader returned FAIL");
+#endif
+  }
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
-  if (r.id != expected_id) return brokkr::core::fail("Unexpected response id");
+  if (r.id != expected_id) {
+#ifndef NDEBUG
+    return brokkr::core::failf("Unexpected response id (expected {}, got {}, ack={} / 0x{:08X})", expected_id, r.id,
+                               r.ack, static_cast<std::uint32_t>(r.ack));
+#else
+    return brokkr::core::fail("Unexpected response id");
+#endif
+  }
   if (out_ack)
     *out_ack = r.ack;
   else if (r.ack < 0)
@@ -96,6 +109,12 @@ brokkr::core::Status OdinCommands::recv_raw(std::span<std::byte> data, unsigned 
 }
 
 brokkr::core::Status OdinCommands::send_request(const RequestBox& rq, unsigned retries) noexcept {
+  if (spdlog::should_log(spdlog::level::debug)) {
+    std::array<std::int32_t, RequestBox::DATA_INT_SIZE> ints{};
+    for (std::size_t i = 0; i < RequestBox::DATA_INT_SIZE; ++i) ints[i] = brokkr::core::le_to_host(rq.intData[i]);
+    spdlog::debug("ODIN >> id={} data={} ints=[{}]", brokkr::core::le_to_host(rq.id), brokkr::core::le_to_host(rq.data),
+                  fmt::join(ints, ", "));
+  }
   return send_raw(std::as_bytes(std::span{&rq, 1}), retries);
 }
 
@@ -106,6 +125,9 @@ brokkr::core::Result<ResponseBox> OdinCommands::recv_checked_response(std::int32
   if (!st) return brokkr::core::fail(std::move(st.error()));
 
   response_from_le(r);
+
+  spdlog::debug("ODIN << id={} ack={} (0x{:08X}), expected id={}", r.id, r.ack, static_cast<std::uint32_t>(r.ack),
+                expected_id);
 
   st = check_resp(expected_id, r, out_ack);
   if (!st) return brokkr::core::fail(std::move(st.error()));
@@ -129,9 +151,11 @@ brokkr::core::Status OdinCommands::handshake(unsigned retries) noexcept {
   if (conn_.kind() == brokkr::core::IByteTransport::Kind::UsbBulk) {
     static constexpr std::array<std::byte, 5> ping{std::byte{'O'}, std::byte{'D'}, std::byte{'I'}, std::byte{'N'},
                                                    std::byte{0}};
+    spdlog::debug("ODIN >> handshake ping 'ODIN\\0' (5 bytes, USB)");
     st = send_raw(ping, retries);
   } else {
     static constexpr std::array<std::byte, 4> ping{std::byte{'O'}, std::byte{'D'}, std::byte{'I'}, std::byte{'N'}};
+    spdlog::debug("ODIN >> handshake ping 'ODIN' (4 bytes, TCP)");
     st = send_raw(ping, retries);
   }
   if (!st) return st;
@@ -255,6 +279,9 @@ brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsig
   if (!st) return st;
 
   response_from_le(ack);
+
+  spdlog::debug("ODIN: PIT upload data-phase response id={} ack={} (0x{:08X})", ack.id, ack.ack,
+                static_cast<std::uint32_t>(ack.ack));
 
   return to_status(rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {},
                         nullptr, retries));
