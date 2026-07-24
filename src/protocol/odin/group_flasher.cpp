@@ -252,12 +252,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   if (!has_sources && !has_pit) return brokkr::core::fail("flash: nothing to do (no sources, no PIT)");
 
-  u64 init_total = 0;
-  for (const auto& s : sources) {
-    if (is_pit_name(s.basename)) continue;
-    BRK_TRY(detail::checked_add_u64(init_total, s.size, "TOTALSIZE"));
-  }
-
   const std::size_t total_devices = devs.size();
   std::size_t failed_total = 0;
 
@@ -381,13 +375,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     return {};
   });
 
-  steps.emplace_back([&] -> brokkr::core::Status {
-    if (!init_total) return {};
-    stage(stage_label::kTotalSend);
-    return fanout_keep(
-        [&](Target& d) { return OdinCommands(link(d)).send_total_size(init_total, cfg.preflash_retries); });
-  });
-
   if (has_pit) {
     steps.emplace_back([&] {
       spdlog::info("Uploading PIT");
@@ -465,6 +452,13 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
     if (ui.on_plan) ui.on_plan(plan, total);
     return {};
+  });
+
+  steps.emplace_back([&] -> brokkr::core::Status {
+    if (items.empty()) return {};
+    stage(stage_label::kTotalSend);
+    return fanout_keep(
+        [&](Target& d) { return OdinCommands(link(d)).send_total_size(total, cfg.preflash_retries); });
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
