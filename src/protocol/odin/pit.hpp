@@ -65,6 +65,7 @@ static_assert(sizeof(PartitionInfoWire) == 4 * 9 + 32 * 3);
 
 struct Partition {
   std::int32_t id = 0;
+  std::int32_t bin_type = 0;
   std::int32_t dev_type = 0;
   std::int32_t attribute = 0;
 

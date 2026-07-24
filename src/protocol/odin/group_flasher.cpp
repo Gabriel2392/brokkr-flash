@@ -167,6 +167,7 @@ struct Step {
   std::size_t n = 0;
 
   std::int32_t part_id = 0;
+  std::int32_t bin_type = 0;
   std::int32_t dev_type = 0;
   bool last = false;
 };
@@ -177,16 +178,24 @@ static Step st_begin(bool comp, u64 begin_sz, u64 decomp_sz) {
 static Step st_data(bool comp, const std::byte* base, u64 off, std::size_t n) {
   return {.op = Step::Op::Data, .comp = comp, .base = base, .off = off, .n = n};
 }
-static Step st_end(bool comp, u64 end_sz, std::int32_t part_id, std::int32_t dev_type, bool last) {
-  return Step{.op = Step::Op::End, .comp = comp, .a = end_sz, .part_id = part_id, .dev_type = dev_type, .last = last};
+static Step st_end(bool comp, u64 end_sz, std::int32_t part_id, std::int32_t bin_type, std::int32_t dev_type,
+                   bool last) {
+  return Step{.op = Step::Op::End,
+              .comp = comp,
+              .a = end_sz,
+              .part_id = part_id,
+              .bin_type = bin_type,
+              .dev_type = dev_type,
+              .last = last};
 }
 
 template <class PF, class MakeContrib>
 static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& cur, const std::size_t pkt,
-                                            const bool comp, const std::int32_t part_id, const std::int32_t dev_type,
-                                            const u64 total_bytes, const u64 item_total, u64& overall_done,
-                                            u64& item_done, const Ui& ui, std::atomic_uint32_t& failed_count,
-                                            const std::size_t ndevs, MakeContrib make_contrib) noexcept {
+                                            const bool comp, const std::int32_t part_id, const std::int32_t bin_type,
+                                            const std::int32_t dev_type, const u64 total_bytes, const u64 item_total,
+                                            u64& overall_done, u64& item_done, const Ui& ui,
+                                            std::atomic_uint32_t& failed_count, const std::size_t ndevs,
+                                            MakeContrib make_contrib) noexcept {
   const u64 pkt64 = static_cast<u64>(pkt);
 
   auto emit = [&](Step s) {
@@ -222,7 +231,7 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
       if (ui.on_progress) ui.on_progress(overall_done, total_bytes, item_done, item_total);
     }
 
-    emit(st_end(comp, w.end, part_id, dev_type, w.last));
+    emit(st_end(comp, w.end, part_id, bin_type, dev_type, w.last));
     if (w.last || (failed_count.load(std::memory_order_relaxed) >= ndevs)) break;
   }
 
@@ -483,8 +492,9 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         return odin.recv_data_ack();
       }
       if (s.op == Step::Op::End)
-        return s.comp ? odin.end_download_compressed(static_cast<std::int32_t>(s.a), s.part_id, s.dev_type, s.last)
-                      : odin.end_download(static_cast<std::int32_t>(s.a), s.part_id, s.dev_type, s.last);
+        return s.comp ? odin.end_download_compressed(static_cast<std::int32_t>(s.a), s.part_id, s.dev_type, s.last,
+                                                     s.bin_type)
+                      : odin.end_download(static_cast<std::int32_t>(s.a), s.part_id, s.dev_type, s.last, s.bin_type);
       return {};
     };
 
@@ -626,8 +636,9 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
           if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
 
-          BRK_TRY(send_prefetched(pf, sync, cur, pkt, true, item.part.id, item.part.dev_type, total, item_total,
-                                  overall_done, item_done, ui, failed_count, ndevs, [&](const Slot& w, u64 packets) {
+          BRK_TRY(send_prefetched(pf, sync, cur, pkt, true, item.part.id, item.part.bin_type, item.part.dev_type, total,
+                                  item_total, overall_done, item_done, ui, failed_count, ndevs,
+                                  [&](const Slot& w, u64 packets) {
                                     return [end = w.end, packets](u64 p) {
                                       const auto c1 = ((p + 1) * end) / packets;
                                       const auto c0 = (p * end) / packets;
@@ -692,8 +703,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
           if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
 
-          BRK_TRY(send_prefetched(pf, sync, cur, pkt, false, item.part.id, item.part.dev_type, total, item_total,
-                                  overall_done, item_done, ui, failed_count, ndevs,
+          BRK_TRY(send_prefetched(pf, sync, cur, pkt, false, item.part.id, item.part.bin_type, item.part.dev_type,
+                                  total, item_total, overall_done, item_done, ui, failed_count, ndevs,
                                   [&](const Slot& w, u64 /*packets*/) {
                                     u64 rem2 = w.end;
                                     const u64 pkt64 = static_cast<u64>(pkt);

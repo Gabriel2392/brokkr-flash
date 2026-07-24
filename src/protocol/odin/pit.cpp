@@ -126,6 +126,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
 
     Partition p;
     p.id = r.w.id;
+    p.bin_type = r.w.binType;
     p.dev_type = r.w.devType;
     p.attribute = r.w.attribute;
     p.wire_block_size = r.w.blockSize;
