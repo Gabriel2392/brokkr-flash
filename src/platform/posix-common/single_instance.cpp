@@ -88,6 +88,20 @@ std::optional<SingleInstanceLock> SingleInstanceLock::try_acquire(std::string na
 #endif
 
   if (do_bind(fd, reinterpret_cast<const sockaddr*>(&addr), len) != 0) {
+#if defined(__APPLE__)
+    if (errno == EADDRINUSE) {
+      FileHandle probe{do_socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0)};
+      const bool stale = probe.valid() &&
+                         ::connect(probe.fd, reinterpret_cast<const sockaddr*>(&addr), len) != 0 &&
+                         errno == ECONNREFUSED;
+      probe.close();
+      if (stale) {
+        ::unlink(path.c_str());
+        if (do_bind(fd, reinterpret_cast<const sockaddr*>(&addr), len) == 0)
+          return SingleInstanceLock{std::move(fd), std::move(name)};
+      }
+    }
+#endif
     fd.close();
     return std::nullopt;
   }

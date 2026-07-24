@@ -155,9 +155,10 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
 
       if (k + 1 < idxs.size()) {
         const std::size_t j = idxs[k + 1];
-        const auto next_begin = out.partitions[j].begin_block;
-        const auto cur_begin = p.begin_block;
-        if (next_begin > cur_begin) blocks = next_begin - cur_begin;
+        const auto next_begin = static_cast<std::int64_t>(out.partitions[j].begin_block);
+        const auto cur_begin = static_cast<std::int64_t>(p.begin_block);
+        const std::int64_t diff = next_begin - cur_begin;
+        if (diff > 0 && diff <= std::numeric_limits<std::int32_t>::max()) blocks = static_cast<std::int32_t>(diff);
       } else {
         const auto pit_len = raw[i].w.blockLength;
         if (pit_len > 0) blocks = pit_len;

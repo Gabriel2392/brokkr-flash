@@ -45,6 +45,13 @@ struct UsbTarget {
   pit::PitTable pit_table{};
 
   explicit UsbTarget(std::string devnode_path) : devnode(std::move(devnode_path)), dev(devnode), conn(dev) {}
+
+  brokkr::core::Status open_and_connect(int timeout_ms) noexcept {
+    BRK_TRY(dev.open_and_init());
+    BRK_TRY(conn.open());
+    conn.set_timeout_ms(timeout_ms);
+    return {};
+  }
 };
 
 struct Target {

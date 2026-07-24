@@ -108,6 +108,24 @@ static brokkr::core::Result<std::uint64_t> lz4_content_size(const ImageSpec& spe
   return h.content_size;
 }
 
+static brokkr::core::Result<std::vector<std::byte>> read_all_source(io::ByteSource& src) noexcept {
+  constexpr std::uint64_t kMax = 256ull * 1024ull * 1024ull;
+  const auto sz64 = src.size();
+  if (sz64 > kMax) return brokkr::core::fail("Source too large: " + src.display_name());
+
+  std::vector<std::byte> out(static_cast<std::size_t>(sz64));
+  for (std::size_t off = 0; off < out.size();) {
+    const std::size_t got = src.read({out.data() + off, out.size() - off});
+    if (!got) {
+      auto st = src.status();
+      if (!st) return brokkr::core::fail(std::move(st.error()));
+      return brokkr::core::fail("Short read: " + src.display_name());
+    }
+    off += got;
+  }
+  return out;
+}
+
 static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::filesystem::path path, io::TarEntry entry,
                                                  std::string display, std::string source_basename,
                                                  std::uint64_t disk_size) noexcept {
@@ -134,6 +152,29 @@ static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::file
 }
 
 } // namespace
+
+bool is_pit_name(std::string_view base) noexcept { return brokkr::core::ends_with_ci(base, ".pit"); }
+
+std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<ImageSpec>& specs) {
+  const ImageSpec* pit = nullptr;
+  for (const auto& s : specs)
+    if (is_pit_name(s.basename)) pit = &s;
+  if (!pit) return {};
+
+  auto sr = pit->open();
+  if (!sr) {
+    spdlog::error("PIT open failed: {}", sr.error());
+    return {};
+  }
+
+  auto rr = read_all_source(**sr);
+  if (!rr) {
+    spdlog::error("PIT read failed: {}", rr.error());
+    return {};
+  }
+
+  return std::make_shared<const std::vector<std::byte>>(std::move(*rr));
+}
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
   switch (kind) {
@@ -229,7 +270,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         const auto lit = last_of.find(base);
         if (lit == last_of.end() || lit->second.inp != i || lit->second.ent != j) continue;
 
-        const bool is_pit = brokkr::core::ends_with_ci(base, ".pit");
+        const bool is_pit = is_pit_name(base);
         if (dl && !is_pit && !allow.contains(base)) {
           spdlog::debug("Skipping {}: not in download-list.txt", sb);
           continue;
@@ -251,7 +292,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
       const auto lit = last_of.find(base);
       if (lit == last_of.end() || lit->second.inp != i || lit->second.ent != kRaw) continue;
 
-      const bool is_pit = brokkr::core::ends_with_ci(base, ".pit");
+      const bool is_pit = is_pit_name(base);
       if (dl && !is_pit && !allow.contains(base)) {
         spdlog::debug("Skipping {}: not in download-list.txt", sb);
         continue;

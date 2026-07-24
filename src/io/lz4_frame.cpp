@@ -150,6 +150,7 @@ brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_
     if (raw_sz == 0) return brokkr::core::fail("LZ4: encountered endmark unexpectedly");
 
     const std::uint32_t payload = raw_sz & 0x7FFFFFFFu;
+    if (payload > hdr_.max_block_size) return brokkr::core::fail("LZ4: block size exceeds frame max block size");
 
     const std::size_t off = out.size();
     out.resize(out.size() + 4 + payload);
@@ -190,7 +191,8 @@ brokkr::core::Status Lz4DecompressedSource::fill_next_block_() noexcept {
   if (!st_) return st_;
 
   const std::uint64_t remaining = total_out_ - produced_;
-  const std::size_t expected_out = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, LZ4_ONE_MIB));
+  const std::size_t expected_out =
+      static_cast<std::size_t>(std::min<std::uint64_t>(remaining, hdr_.max_block_size));
 
   std::array<std::byte, 4> szb{};
   auto st = read_exact_({szb.data(), szb.size()});
@@ -201,6 +203,7 @@ brokkr::core::Status Lz4DecompressedSource::fill_next_block_() noexcept {
 
   const bool uncompressed = (raw_sz & 0x80000000u) != 0;
   const std::uint32_t payload = raw_sz & 0x7FFFFFFFu;
+  if (payload > hdr_.max_block_size) return brokkr::core::fail("LZ4: block size exceeds frame max block size");
 
   comp_payload_.resize(payload);
   if (payload) {

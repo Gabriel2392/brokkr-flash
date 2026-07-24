@@ -104,9 +104,7 @@ class TwoSlotPrefetcher {
 
   std::optional<Lease> next() noexcept {
     std::unique_lock lk(m_);
-    cv_can_take_.wait(lk, [&] {
-      return stopping_ || error_.has_value() || filled_[read_idx_] || (done_ && !filled_[read_idx_]);
-    });
+    cv_can_take_.wait(lk, [&] { return stopping_ || error_.has_value() || filled_[read_idx_] || done_; });
 
     if (stopping_ || error_.has_value() || !filled_[read_idx_]) return std::nullopt;
 

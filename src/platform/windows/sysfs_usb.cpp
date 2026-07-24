@@ -189,10 +189,14 @@ std::optional<std::string> send_suddlmod_win32(std::string_view comPort) {
 
   DWORD wrote = 0;
   const BOOL ok = WriteFile(h, kSuddlmod.data(), static_cast<DWORD>(kSuddlmod.size()), &wrote, nullptr);
-  if (!ok || wrote != static_cast<DWORD>(kSuddlmod.size())) {
+  if (!ok) {
     const auto e = GetLastError();
     CloseHandle(h);
     return std::string("write failed: ") + std::to_string(e);
+  }
+  if (wrote != static_cast<DWORD>(kSuddlmod.size())) {
+    CloseHandle(h);
+    return std::string("write timed out (short write)");
   }
 
   (void)FlushFileBuffers(h);

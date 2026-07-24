@@ -50,7 +50,7 @@ class BrokkrWrapper : public QWidget {
  public:
   explicit BrokkrWrapper(QWidget* parent = nullptr);
   ~BrokkrWrapper() override;
-  
+
   int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
 
  public slots:
@@ -185,15 +185,13 @@ class BrokkrWrapper : public QWidget {
 #if defined(BROKKR_PLATFORM_LINUX)
   int uevent_fd_ = -1;
   QSocketNotifier* uevent_notifier_ = nullptr;
-#endif 
+#endif
 #if defined(Q_OS_MACOS)
   IONotificationPortRef mac_notify_port_ = nullptr;
   io_iterator_t mac_added_iter_ = 0;
   io_iterator_t mac_removed_iter_ = 0;
   static void macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator);
 #endif
-
-  std::jthread worker_;
 
   std::jthread wireless_thread_;
   mutable std::mutex wireless_mtx_;
@@ -204,6 +202,8 @@ class BrokkrWrapper : public QWidget {
   // connected() probes, no reset()), because the flash engine is using the
   // underlying socket. Set during a flash run.
   std::atomic_bool wireless_watcher_paused_{false};
+
+  std::jthread worker_;
 
   std::atomic_int logDevCount_{0};
   std::atomic_int progressVisualSteps_{1};

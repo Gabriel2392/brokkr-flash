@@ -19,6 +19,7 @@
 
 #include "core/endian.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -118,13 +119,13 @@ inline RequestBox make_request(RqtCommandType type, RqtCommandParam param, std::
   r.data = brokkr::core::host_to_le(static_cast<std::int32_t>(param));
 
   if (!ints.empty()) {
-    const auto n = (ints.size() > RequestBox::DATA_INT_SIZE) ? RequestBox::DATA_INT_SIZE : ints.size();
+    const std::size_t n = std::min(ints.size(), RequestBox::DATA_INT_SIZE);
     for (std::size_t i = 0; i < n; ++i) r.intData[i] = brokkr::core::host_to_le(ints[i]);
   }
 
   if (!chars.empty()) {
-    const auto n = (chars.size() > RequestBox::DATA_CHAR_SIZE) ? RequestBox::DATA_CHAR_SIZE : chars.size();
-    std::memcpy(r.charData, chars.data(), n * sizeof(std::int8_t));
+    const std::size_t n = std::min(chars.size(), RequestBox::DATA_CHAR_SIZE);
+    std::memcpy(r.charData, chars.data(), n);
   }
 
   return r;

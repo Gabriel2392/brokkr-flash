@@ -40,11 +40,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -52,8 +52,9 @@
 #include <spdlog/spdlog.h>
 
 #include "app/md5_verify.hpp"
+#include "app/pit_file.hpp"
+#include "app/samsung_usb.hpp"
 #include "app/version.hpp"
-#include "core/str.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/group_flasher.hpp"
 
@@ -200,17 +201,7 @@ class DeviceSquare final : public QWidget {
 
 namespace {
 
-static constexpr std::uint16_t SAMSUNG_VID = 0x04E8;
-static constexpr std::uint16_t ODIN_PIDS[] = {0x6601, 0x685D, 0x68C3};
-
-static std::vector<std::uint16_t> default_pids() { return {std::begin(ODIN_PIDS), std::end(ODIN_PIDS)}; }
-
-static bool is_odin_product(std::uint16_t pid) {
-  const auto pids = default_pids();
-  return std::ranges::find(pids, pid) != pids.end();
-}
-
-static bool is_pit_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".pit"); }
+using brokkr::app::is_odin_product;
 
 static bool is_pit_drop_name(const QString& file_name) {
   return file_name.trimmed().toLower().endsWith(".pit");
@@ -379,71 +370,12 @@ static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrWrapper* w) {
   return log;
 }
 
-static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_samsung_target(QString sysname_q) {
-  const std::string sysname = sysname_q.trimmed().toStdString();
-  if (sysname.empty()) return {};
-
-  auto info = brokkr::platform::find_by_sysname(sysname);
-  if (!info) return {};
-
-  if (info->vendor != SAMSUNG_VID) return {};
-  return info;
+static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_samsung_target(const QString& sysname_q) {
+  return brokkr::app::select_samsung_target(sysname_q.trimmed().toStdString());
 }
 
-static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_odin_target(QString sysname_q) {
-  auto info = select_samsung_target(std::move(sysname_q));
-  if (!info) return {};
-  if (!is_odin_product(info->product)) return {};
-  return info;
-}
-
-static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_samsung_targets() {
-  brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID};
-  return brokkr::platform::enumerate_usb_devices_sysfs(f);
-}
-
-static std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_odin_targets() {
-  brokkr::platform::EnumerateFilter f{.vendor = SAMSUNG_VID, .products = default_pids()};
-  return brokkr::platform::enumerate_usb_devices_sysfs(f);
-}
-
-static brokkr::core::Result<std::vector<std::byte>> read_all_source(brokkr::io::ByteSource& src) noexcept {
-  constexpr std::uint64_t kMax = 256ull * 1024ull * 1024ull;
-  const auto sz64 = src.size();
-  if (sz64 > kMax) return brokkr::core::fail("Source too large: " + src.display_name());
-
-  std::vector<std::byte> out(static_cast<std::size_t>(sz64));
-  for (std::size_t off = 0; off < out.size();) {
-    const std::size_t got = src.read({out.data() + off, out.size() - off});
-    if (!got) {
-      auto st = src.status();
-      if (!st) return brokkr::core::fail(std::move(st.error()));
-      return brokkr::core::fail("Short read: " + src.display_name());
-    }
-    off += got;
-  }
-  return out;
-}
-
-static std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<brokkr::odin::ImageSpec>& specs) {
-  const brokkr::odin::ImageSpec* pit = nullptr;
-  for (const auto& s : specs)
-    if (is_pit_name(s.basename)) pit = &s;
-  if (!pit) return {};
-
-  auto sr = pit->open();
-  if (!sr) {
-    spdlog::error("PIT open failed: {}", sr.error());
-    return {};
-  }
-
-  auto rr = read_all_source(**sr);
-  if (!rr) {
-    spdlog::error("PIT read failed: {}", rr.error());
-    return {};
-  }
-
-  return std::make_shared<const std::vector<std::byte>>(std::move(*rr));
+static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_odin_target(const QString& sysname_q) {
+  return brokkr::app::select_odin_target(sysname_q.trimmed().toStdString());
 }
 
 } // namespace
@@ -1382,7 +1314,7 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   QStringList shown;
   QStringList physicalUsb;
 
-  for (const auto& d : enumerate_samsung_targets()) physicalUsb << QString::fromStdString(d.sysname);
+  for (const auto& d : brokkr::app::enumerate_samsung_targets()) physicalUsb << QString::fromStdString(d.sysname);
 
   bool physicalWireless = false;
   QString physicalWirelessId;
@@ -1390,7 +1322,10 @@ void BrokkrWrapper::refreshConnectedDevices_() {
     std::lock_guard lk(wireless_mtx_);
     const bool wantWireless = (chkWireless && chkWireless->isChecked());
     if (wantWireless) {
-      if (wireless_conn_ && wireless_conn_->connected() && !wireless_sysname_.isEmpty()) {
+      if (wireless_watcher_paused_.load(std::memory_order_acquire)) {
+        physicalWireless = !wireless_sysname_.isEmpty();
+        physicalWirelessId = wireless_sysname_;
+      } else if (wireless_conn_ && wireless_conn_->connected() && !wireless_sysname_.isEmpty()) {
         physicalWireless = true;
         physicalWirelessId = wireless_sysname_;
       } else {
@@ -1477,9 +1412,9 @@ void BrokkrWrapper::startWirelessListener_() {
 
   stopWirelessListener_();
 
-  wireless_sysname_.clear();
   {
     std::lock_guard lk(wireless_mtx_);
+    wireless_sysname_.clear();
     wireless_conn_.reset();
     wireless_listener_.emplace();
     auto st = wireless_listener_->bind_and_listen("0.0.0.0", 13579);
@@ -1504,12 +1439,14 @@ void BrokkrWrapper::startWirelessListener_() {
       }
 
       {
-        bool connected = false;
+        bool wait_and_retry = false;
         {
           std::lock_guard lk(wireless_mtx_);
-          if (wireless_conn_) {
+          if (wireless_watcher_paused_.load(std::memory_order_acquire)) {
+            wait_and_retry = true;
+          } else if (wireless_conn_) {
             if (wireless_conn_->connected())
-              connected = true;
+              wait_and_retry = true;
             else {
               wireless_conn_.reset();
               wireless_sysname_.clear();
@@ -1517,7 +1454,7 @@ void BrokkrWrapper::startWirelessListener_() {
             }
           }
         }
-        if (connected) {
+        if (wait_and_retry) {
           std::this_thread::sleep_for(std::chrono::milliseconds(200));
           continue;
         }
@@ -1543,6 +1480,7 @@ void BrokkrWrapper::startWirelessListener_() {
 
       {
         std::lock_guard lk(wireless_mtx_);
+        if (wireless_watcher_paused_.load(std::memory_order_acquire)) continue;
         wireless_conn_.emplace(std::move(*ar));
         wireless_sysname_ = sys;
       }
@@ -1654,8 +1592,6 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
 
   if (btnManyDevices_) btnManyDevices_->setEnabled(enabled && !wireless);
 
-  for (auto* chk : fileChecks_)
-    (void)chk;
   for (int i = 0; i < fileChecks_.size(); ++i) {
     auto* chk = fileChecks_[i];
     auto* edit = (i < fileLineEdits_.size()) ? fileLineEdits_[i] : nullptr;
@@ -1875,6 +1811,12 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     return box->fontMetrics().elidedText(s, Qt::ElideMiddle, w);
   };
 
+  QString wirelessSys;
+  {
+    std::lock_guard lk(wireless_mtx_);
+    wirelessSys = wireless_sysname_;
+  }
+
   const int shown = std::min<int>(connectedDevices_.size(), comBoxes.size());
   for (int i = 0; i < shown; ++i) {
     const QString sysname = connectedDevices_[i].trimmed();
@@ -1883,7 +1825,7 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     comBoxes[i]->setToolTip(sysname);
 
     bool odin_mode = false;
-    if (chkWireless && chkWireless->isChecked() && !wireless_sysname_.isEmpty() && sysname == wireless_sysname_) {
+    if (chkWireless && chkWireless->isChecked() && !wirelessSys.isEmpty() && sysname == wirelessSys) {
       odin_mode = true;
     } else if (auto info = select_samsung_target(sysname)) {
       odin_mode = is_odin_product(info->product);
@@ -2009,7 +1951,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     }
   }
 
-  const auto all_samsung = enumerate_samsung_targets();
+  const auto all_samsung = brokkr::app::enumerate_samsung_targets();
   if (all_samsung.empty()) return true;
 
   QStringList not_odin;
@@ -2052,11 +1994,6 @@ void BrokkrWrapper::updateActionButtons_() {
 
 void BrokkrWrapper::updateRebootDownloadButton_() {
   if (!btnRebootDownloadMode_) return;
-#if !defined(BROKKR_PLATFORM_WINDOWS)
-  btnRebootDownloadMode_->setEnabled(false);
-  btnRebootDownloadMode_->hide();
-  return;
-#endif
   if (busy_) {
     btnRebootDownloadMode_->setEnabled(false);
     return;
@@ -2097,7 +2034,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
     return;
   }
 
-  const auto r = brokkr::platform::send_suddlmod_to_samsung_serial(SAMSUNG_VID, nonOdinCount);
+  const auto r = brokkr::platform::send_suddlmod_to_samsung_serial(brokkr::app::kSamsungVid, nonOdinCount);
   if (r.ports_seen == 0) {
     QMessageBox::warning(this, "Brokkr Flash", "No Samsung serial port found.");
     return;
@@ -2222,14 +2159,19 @@ void BrokkrWrapper::startWorkStart_() {
   slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
   slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
   {
+    QString wirelessSys;
+    {
+      std::lock_guard lk(wireless_mtx_);
+      wirelessSys = wireless_sysname_;
+    }
+
     const int activeCount = std::min<int>(uiDevicesSnapshot.size(), devSquares_.size());
     for (int i = 0; i < activeCount; ++i) {
       bool active = false;
       const QString sysname = uiDevicesSnapshot[i].trimmed();
-      if (chkWireless && chkWireless->isChecked() && !wireless_sysname_.isEmpty() && sysname == wireless_sysname_) {
+      if (chkWireless && chkWireless->isChecked() && !wirelessSys.isEmpty() && sysname == wirelessSys) {
         active = true;
-      } else if (auto info = select_odin_target(sysname)) {
-        (void)info;
+      } else if (select_odin_target(sysname)) {
         active = true;
       }
       slotActive_[static_cast<std::size_t>(i)] = active ? 1 : 0;
@@ -2250,17 +2192,36 @@ void BrokkrWrapper::startWorkStart_() {
   setSquaresText_("");
   setSquaresActiveColor_(false);
 
+  const int actionIndex = cmbRebootAction->currentIndex();
+  const QString tgt = editTarget->text().trimmed();
+  const bool wireless = chkWireless->isChecked();
+  const bool usePit = chkUsePit->isChecked() && !editPit->text().isEmpty();
+  const std::filesystem::path pitPath = editPit->text().toStdString();
+
+  std::vector<std::filesystem::path> inputs;
+  auto push_if_selected = [&](int idx, QLineEdit* e) {
+    if (!e) return;
+    const bool checked = (idx < fileChecks_.size() && fileChecks_[idx] && fileChecks_[idx]->isChecked());
+    if (checked && !e->text().trimmed().isEmpty()) inputs.emplace_back(e->text().toStdString());
+  };
+
+  push_if_selected(0, editBL);
+  push_if_selected(1, editAP);
+  push_if_selected(2, editCP);
+  push_if_selected(3, editCSC);
+  push_if_selected(4, editUserData);
+
   // Block the wireless watcher from touching the TcpConnection while the
   // engine owns it. Cleared from done_ui / fail_ui below.
   wireless_watcher_paused_.store(true, std::memory_order_release);
 
-  worker_ = std::jthread([this, uiDevicesSnapshot](std::stop_token) {
+  worker_ = std::jthread([this, uiDevicesSnapshot, actionIndex, tgt, wireless, usePit, pitPath,
+                          inputs](std::stop_token) {
     auto done_ui = [&] {
       QMetaObject::invokeMethod(
           this,
           [this]() {
             wireless_watcher_paused_.store(false, std::memory_order_release);
-            setSquaresText_("PASS");
             setSquaresFinal_(true);
             setBusy_(false);
           },
@@ -2281,10 +2242,6 @@ void BrokkrWrapper::startWorkStart_() {
           Qt::QueuedConnection);
     };
 
-    const int actionIndex = cmbRebootAction->currentIndex();
-
-    const QString tgt = editTarget->text().trimmed();
-    const bool wireless = chkWireless->isChecked();
     if (wireless && !tgt.isEmpty()) {
       fail_ui("Wireless cannot be used together with Target Sysname.");
       return;
@@ -2297,6 +2254,8 @@ void BrokkrWrapper::startWorkStart_() {
 
     brokkr::odin::Ui ui;
     std::atomic_bool sawPerDeviceFail{false};
+    std::mutex devfailMtx;
+    std::unordered_set<std::string> devfailReasons;
     std::vector<int> targetToUiSlots;
 
     auto findUiIndexBySysname = [&](const QString& sysname) {
@@ -2376,7 +2335,14 @@ void BrokkrWrapper::startWorkStart_() {
     };
 
     ui.on_error = [&](const std::string& s) {
-      if (s.rfind("DEVFAIL idx=", 0) == 0) sawPerDeviceFail.store(true, std::memory_order_relaxed);
+      if (s.rfind("DEVFAIL idx=", 0) == 0) {
+        sawPerDeviceFail.store(true, std::memory_order_relaxed);
+        const auto sp = s.find(' ');
+        if (sp != std::string::npos) {
+          std::lock_guard lk(devfailMtx);
+          devfailReasons.insert(s.substr(sp + 1));
+        }
+      }
       const std::vector<int> mapSnapshot = targetToUiSlots;
       QMetaObject::invokeMethod(
           this,
@@ -2435,43 +2401,14 @@ void BrokkrWrapper::startWorkStart_() {
     };
 
     std::shared_ptr<const std::vector<std::byte>> pit_to_upload;
-    if (chkUsePit->isChecked() && !editPit->text().isEmpty()) {
-      const std::filesystem::path p = editPit->text().toStdString();
-      std::error_code ec;
-      const auto sz = std::filesystem::file_size(p, ec);
-      if (ec) {
-        fail_ui("Cannot stat PIT file.");
+    if (usePit) {
+      auto pr = brokkr::app::read_pit_file(pitPath);
+      if (!pr) {
+        fail_ui(QString::fromStdString(pr.error()));
         return;
       }
-
-      std::vector<std::byte> buf(static_cast<std::size_t>(sz));
-      std::ifstream in(p, std::ios::binary);
-      if (!in.is_open()) {
-        fail_ui("Cannot open PIT file.");
-        return;
-      }
-      if (!buf.empty()) {
-        in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
-        if (!in.good()) {
-          fail_ui("Failed to read PIT file.");
-          return;
-        }
-      }
-      pit_to_upload = std::make_shared<const std::vector<std::byte>>(std::move(buf));
+      pit_to_upload = std::make_shared<const std::vector<std::byte>>(std::move(*pr));
     }
-
-    std::vector<std::filesystem::path> inputs;
-    auto push_if_selected = [&](int idx, QLineEdit* e) {
-      if (!e) return;
-      const bool checked = (idx < fileChecks_.size() && fileChecks_[idx] && fileChecks_[idx]->isChecked());
-      if (checked && !e->text().trimmed().isEmpty()) inputs.emplace_back(e->text().toStdString());
-    };
-
-    push_if_selected(0, editBL);
-    push_if_selected(1, editAP);
-    push_if_selected(2, editCP);
-    push_if_selected(3, editCSC);
-    push_if_selected(4, editUserData);
 
     struct Provider {
       std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> usb; // owns USB transports
@@ -2485,18 +2422,22 @@ void BrokkrWrapper::startWorkStart_() {
 
       if (wireless) {
         brokkr::platform::TcpConnection* connp = nullptr;
+        QString wsys;
         {
           std::lock_guard lk(wireless_mtx_);
-          if (wireless_conn_) connp = &*wireless_conn_;
+          if (wireless_conn_) {
+            connp = &*wireless_conn_;
+            wsys = wireless_sysname_;
+          }
         }
         if (!connp || !connp->connected()) {
           fail_ui("No wireless device connected.");
           return std::nullopt;
         }
 
-        p.owned.push_back(brokkr::odin::Target{.id = wireless_sysname_.toStdString(), .link = connp});
+        p.owned.push_back(brokkr::odin::Target{.id = wsys.toStdString(), .link = connp});
         p.ptrs.push_back(&p.owned.back());
-        int uiIdx = findUiIndexBySysname(wireless_sysname_);
+        int uiIdx = findUiIndexBySysname(wsys);
         if (uiIdx < 0 && !devSquares_.isEmpty()) uiIdx = 0;
         targetToUiSlots.push_back(uiIdx);
         return p;
@@ -2520,7 +2461,7 @@ void BrokkrWrapper::startWorkStart_() {
           }
         }
         if (targets.empty()) {
-          targets = enumerate_odin_targets();
+          targets = brokkr::app::enumerate_odin_targets();
           targetToUiSlots.clear();
           for (const auto& td : targets) {
             targetToUiSlots.push_back(findUiIndexBySysname(QString::fromStdString(td.sysname)));
@@ -2540,7 +2481,7 @@ void BrokkrWrapper::startWorkStart_() {
       for (const auto& td : targets) {
         auto ut = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
 
-        auto st = ut->dev.open_and_init();
+        auto st = ut->open_and_connect(cfg.preflash_timeout_ms);
         if (!st) {
           const QString err = QString::fromStdString(st.error());
 #ifdef Q_OS_LINUX
@@ -2562,14 +2503,6 @@ void BrokkrWrapper::startWorkStart_() {
           return std::nullopt;
         }
 
-        auto cst = ut->conn.open();
-        if (!cst) {
-          fail_ui(QString::fromStdString(cst.error()));
-          return std::nullopt;
-        }
-
-        ut->conn.set_timeout_ms(cfg.preflash_timeout_ms);
-
         p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
         p.ptrs.push_back(&p.owned.back());
         p.usb.push_back(std::move(ut));
@@ -2584,7 +2517,12 @@ void BrokkrWrapper::startWorkStart_() {
 
       auto st = brokkr::odin::flash(prov->ptrs, srcs, pit_to_upload, cfg, ui);
       if (!st) {
+        bool alreadyShown = false;
         if (sawPerDeviceFail.load(std::memory_order_relaxed)) {
+          std::lock_guard lk(devfailMtx);
+          alreadyShown = devfailReasons.contains(st.error());
+        }
+        if (alreadyShown) {
           done_ui();
         } else {
           const QString err = QString::fromStdString(st.error());
@@ -2643,13 +2581,13 @@ void BrokkrWrapper::startWorkStart_() {
     }
 
     if (!pit_to_upload) {
-      auto pit = pit_from_specs(*specs);
+      auto pit = brokkr::odin::pit_from_specs(*specs);
       if (pit) pit_to_upload = pit;
     }
 
     std::vector<brokkr::odin::ImageSpec> srcs;
     for (auto& s : *specs)
-      if (!is_pit_name(s.basename)) srcs.push_back(std::move(s));
+      if (!brokkr::odin::is_pit_name(s.basename)) srcs.push_back(std::move(s));
     if (srcs.empty() && !pit_to_upload) {
       fail_ui("No valid flashable files.");
       return;

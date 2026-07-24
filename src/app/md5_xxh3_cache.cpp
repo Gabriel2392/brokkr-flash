@@ -295,21 +295,12 @@ brokkr::core::Result<std::vector<Md5Xxh3CacheEntry>> load_md5_xxh3_cache(
     const std::filesystem::path& cache_file) noexcept {
   const std::array candidates = {cache_file, backup_cache_file(cache_file), temporary_cache_file(cache_file)};
 
-  bool saw_corruption = false;
   for (const auto& candidate : candidates) {
     auto parsed = parse_cache_file(candidate);
     if (!parsed) return brokkr::core::fail(std::move(parsed.error()));
-
-    if (!parsed->has_header) {
-      saw_corruption = saw_corruption || parsed->saw_corruption;
-      continue;
-    }
-
-    if (parsed->saw_corruption) saw_corruption = true;
-    return parsed->entries;
+    if (parsed->has_header) return parsed->entries;
   }
 
-  if (saw_corruption) return std::vector<Md5Xxh3CacheEntry>{};
   return std::vector<Md5Xxh3CacheEntry>{};
 }
 

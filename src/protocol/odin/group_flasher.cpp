@@ -103,7 +103,7 @@ static void log_shutdown_action(OdinCommands::ShutdownMode m) {
 }
 
 static void emit_devfail(const Ui& ui, std::size_t orig_idx, const std::string& msg) {
-  if (ui.on_error) 
+  if (ui.on_error)
     ui.on_error("DEVFAIL idx=" + std::to_string(orig_idx) + " " + msg);
   else
     spdlog::error("DEVFAIL idx={} {}", orig_idx, msg);
@@ -112,13 +112,13 @@ static void emit_devfail(const Ui& ui, std::size_t orig_idx, const std::string& 
 static brokkr::core::IByteTransport& link(Target& d) { return *d.link; }
 
 static std::size_t choose_pkt(const std::vector<Target*>& devs, const Cfg& cfg) {
-  return std::any_of(devs.begin(), devs.end(), [](Target* d) { return d->proto < ProtocolVersion::PROTOCOL_VER2; })
+  return std::ranges::any_of(devs, [](Target* d) { return d->proto < ProtocolVersion::PROTOCOL_VER2; })
              ? cfg.pkt_any_old
              : cfg.pkt_all_v2plus;
 }
 
 static bool any_lz4(const std::vector<ImageSpec>& v) {
-  return std::any_of(v.begin(), v.end(), [](const ImageSpec& s) { return s.lz4; });
+  return std::ranges::any_of(v, [](const ImageSpec& s) { return s.lz4; });
 }
 
 static brokkr::core::Result<std::vector<ImageSpec>> sources_common_mapping_or_empty(
@@ -135,19 +135,20 @@ static brokkr::core::Result<std::vector<ImageSpec>> sources_common_mapping_or_em
       continue;
     }
 
+    bool missing = false;
     for (auto* d : devs) {
       const auto* p = d->pit_table.find_by_file_name(s.basename);
       if (!p) {
         spdlog::debug("Source '{}' missing on one or more devices — skipped", s.basename);
-        goto next;
+        missing = true;
+        break;
       }
       if (p->id != ref->id || p->dev_type != ref->dev_type)
         return brokkr::core::fail("PIT mapping differs across devices");
     }
+    if (missing) continue;
 
     out.push_back(s);
-  next:
-    (void)0;
   }
 
   return out;
@@ -218,8 +219,7 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
     if (w.last || (failed_count.load(std::memory_order_relaxed) >= ndevs)) break;
   }
 
-  auto pst = pf.status();
-  return pst ? brokkr::core::Status{} : pst;
+  return pf.status();
 }
 
 } // namespace
@@ -292,16 +292,15 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     return {};
   };
 
-  auto finish = [&](brokkr::core::Status st, bool call_done_always) -> brokkr::core::Status {
+  auto finish = [&](brokkr::core::Status st) -> brokkr::core::Status {
     if (!st) {
       log_summary(total_devices, total_devices);
       return st;
     }
-    if (call_done_always && ui.on_done) ui.on_done();
     log_summary(total_devices, failed_total);
-    return (failed_total > 0 || first_err.has_error())
-               ? first_err.status_or_ok()
-               : (ui.on_done ? (ui.on_done(), brokkr::core::Status{}) : brokkr::core::Status{});
+    if (failed_total > 0 || first_err.has_error()) return first_err.status_or_ok();
+    if (ui.on_done) ui.on_done();
+    return {};
   };
 
   auto set_flash_timeout_active = [&] {
@@ -447,9 +446,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
-    const bool use_lz4 = any_lz4(effective_sources) && std::all_of(active.begin(), active.end(), [](Target* d) {
-                           return d->init.supports_compressed_download();
-                         });
+    const bool use_lz4 = any_lz4(effective_sources) &&
+                         std::ranges::all_of(active, [](Target* d) { return d->init.supports_compressed_download(); });
 
     stage(use_lz4 ? stage_label::kFlashFast : stage_label::kFlashNorm);
     spdlog::info("Flashing has begun!");
@@ -548,7 +546,14 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         const u64 item_total = item.spec.size;
         u64 item_done = 0;
 
-        if (item.spec.lz4 && use_lz4) {
+        bool stream_lz4 = item.spec.lz4 && use_lz4;
+        if (stream_lz4) {
+          BRK_TRYV(probe, item.spec.open());
+          BRK_TRYV(ph, io::parse_lz4_frame_header(*probe));
+          stream_lz4 = (ph.max_block_size == static_cast<std::size_t>(detail::kOneMiB));
+        }
+
+        if (stream_lz4) {
           struct Slot {
             std::vector<std::byte> stream;
             u64 begin = 0, end = 0, rounded = 0;
@@ -693,7 +698,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
     const std::size_t bad_in_flash = static_cast<std::size_t>(failed_count.load(std::memory_order_relaxed));
     failed_total += bad_in_flash;
-    if (bad_in_flash) first_err.set(berr.status_or_ok());
+    first_err.set(berr.status_or_ok());
 
     {
       std::vector<Target*> survivors;
@@ -728,10 +733,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   for (auto& fn : steps) {
     auto st = fn();
-    if (!st) return finish(st, false);
+    if (!st) return finish(std::move(st));
   }
 
-  return finish({}, false);
+  return finish({});
 }
 
 } // namespace brokkr::odin

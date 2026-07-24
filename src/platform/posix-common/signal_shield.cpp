@@ -19,7 +19,6 @@
 
 #include <pthread.h>
 #include <signal.h>
-#include <unistd.h>
 
 #include <utility>
 
@@ -79,7 +78,7 @@ void SignalShield::stop_and_restore_() noexcept {
   if (active_) {
     watcher_.request_stop();
 
-    ::kill(::getpid(), SIGTERM);
+    ::pthread_kill(watcher_.native_handle(), SIGTERM);
 
     if (watcher_.joinable()) watcher_.join();
     active_ = false;

@@ -44,8 +44,7 @@ namespace {
 // them is alive.
 struct WsaScope {
   static void acquire() noexcept {
-    static std::mutex m;
-    std::lock_guard lk(m);
+    std::lock_guard lk(mutex_());
     if (refs_++ == 0) {
       WSADATA d{};
       const int err = WSAStartup(MAKEWORD(2, 2), &d);
@@ -57,14 +56,17 @@ struct WsaScope {
     }
   }
   static void release() noexcept {
-    static std::mutex m;
-    std::lock_guard lk(m);
+    std::lock_guard lk(mutex_());
     if (refs_ > 0 && --refs_ == 0) {
       WSACleanup();
     }
   }
 
 private:
+  static std::mutex& mutex_() noexcept {
+    static std::mutex m;
+    return m;
+  }
   static inline int refs_ = 0;
 };
 

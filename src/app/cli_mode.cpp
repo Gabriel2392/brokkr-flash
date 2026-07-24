@@ -18,8 +18,9 @@
 #include "app/cli_mode.hpp"
 
 #include "app/md5_verify.hpp"
+#include "app/pit_file.hpp"
+#include "app/samsung_usb.hpp"
 #include "core/status.hpp"
-#include "core/str.hpp"
 #include "io/source.hpp"
 #include "platform/platform_all.hpp"
 #include "protocol/odin/flash.hpp"
@@ -35,9 +36,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,8 +51,6 @@ namespace brokkr::app {
 
 namespace {
 
-constexpr std::uint16_t kSamsungVid = 0x04E8;
-constexpr std::uint16_t kOdinPids[] = {0x6601, 0x685D, 0x68C3};
 constexpr std::uint16_t kWirelessPort = 13579;
 
 struct CliArgs {
@@ -76,10 +75,6 @@ struct Provider {
   std::vector<brokkr::odin::Target*> ptrs;
   std::unique_ptr<brokkr::platform::TcpConnection> wireless_conn;
 };
-
-bool is_odin_product(std::uint16_t pid) {
-  return std::find(std::begin(kOdinPids), std::end(kOdinPids), pid) != std::end(kOdinPids);
-}
 
 bool is_cli_trigger(std::string_view arg) {
   static const std::unordered_set<std::string_view> kTriggers = {
@@ -193,24 +188,6 @@ brokkr::core::Result<CliArgs> parse_cli_args(int argc, char* argv[]) {
   return out;
 }
 
-std::vector<brokkr::platform::UsbDeviceSysfsInfo> enumerate_samsung_targets() {
-  brokkr::platform::EnumerateFilter f{.vendor = kSamsungVid};
-  return brokkr::platform::enumerate_usb_devices_sysfs(f);
-}
-
-std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_samsung_target(std::string_view sysname) {
-  if (sysname.empty()) return std::nullopt;
-  auto info = brokkr::platform::find_by_sysname(sysname);
-  if (!info || info->vendor != kSamsungVid) return std::nullopt;
-  return info;
-}
-
-std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_odin_target(std::string_view sysname) {
-  auto info = select_samsung_target(sysname);
-  if (!info || !is_odin_product(info->product)) return std::nullopt;
-  return info;
-}
-
 std::vector<std::filesystem::path> collect_inputs_in_gui_order(const CliArgs& args) {
   std::vector<std::filesystem::path> out;
   if (args.bl) out.emplace_back(*args.bl);
@@ -229,72 +206,13 @@ bool has_any_file_selected(const CliArgs& args) {
 std::shared_ptr<const std::vector<std::byte>> load_pit_if_needed(const CliArgs& args) {
   if (!args.pit) return {};
 
-  const std::filesystem::path p = *args.pit;
-  std::error_code ec;
-  const auto sz = std::filesystem::file_size(p, ec);
-  if (ec) {
-    spdlog::error("Cannot stat PIT file.");
+  auto r = read_pit_file(*args.pit);
+  if (!r) {
+    spdlog::error("{}", r.error());
     return {};
   }
 
-  std::vector<std::byte> buf(static_cast<std::size_t>(sz));
-  std::ifstream in(p, std::ios::binary);
-  if (!in.is_open()) {
-    spdlog::error("Cannot open PIT file.");
-    return {};
-  }
-
-  if (!buf.empty()) {
-    in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
-    if (!in.good()) {
-      spdlog::error("Failed to read PIT file.");
-      return {};
-    }
-  }
-
-  return std::make_shared<const std::vector<std::byte>>(std::move(buf));
-}
-
-bool is_pit_name(std::string_view base) noexcept {
-  return brokkr::core::ends_with_ci(base, ".pit");
-}
-
-std::shared_ptr<const std::vector<std::byte>> pit_from_specs(
-    const std::vector<brokkr::odin::ImageSpec>& specs) {
-  const brokkr::odin::ImageSpec* pit = nullptr;
-  for (const auto& s : specs)
-    if (is_pit_name(s.basename)) pit = &s;
-  if (!pit) return {};
-
-  auto sr = pit->open();
-  if (!sr) {
-    spdlog::error("PIT open failed: {}", sr.error());
-    return {};
-  }
-  auto& src = **sr;
-
-  constexpr std::uint64_t kMaxPit = 256ull * 1024ull * 1024ull;
-  const auto sz64 = src.size();
-  if (sz64 > kMaxPit) {
-    spdlog::error("Embedded PIT too large: {}", src.display_name());
-    return {};
-  }
-
-  std::vector<std::byte> out(static_cast<std::size_t>(sz64));
-  for (std::size_t off = 0; off < out.size();) {
-    const std::size_t got = src.read({out.data() + off, out.size() - off});
-    if (!got) {
-      auto st = src.status();
-      if (!st)
-        spdlog::error("PIT read failed: {}", st.error());
-      else
-        spdlog::error("Short read on embedded PIT: {}", src.display_name());
-      return {};
-    }
-    off += got;
-  }
-
-  return std::make_shared<const std::vector<std::byte>>(std::move(out));
+  return std::make_shared<const std::vector<std::byte>>(std::move(*r));
 }
 
 std::string map_global_error_to_cli_message(const std::string& err) {
@@ -381,13 +299,8 @@ brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::
   for (const auto& td : targets) {
     auto ut = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
 
-    auto st = ut->dev.open_and_init();
+    auto st = ut->open_and_connect(cfg.preflash_timeout_ms);
     if (!st) return brokkr::core::fail(std::move(st.error()));
-
-    auto cst = ut->conn.open();
-    if (!cst) return brokkr::core::fail(std::move(cst.error()));
-
-    ut->conn.set_timeout_ms(cfg.preflash_timeout_ms);
 
     p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
     p.ptrs.push_back(&p.owned.back());
@@ -417,6 +330,8 @@ int run_flash_cli(const CliArgs& args) {
   cfg.reboot_after = !args.no_reboot;
 
   std::atomic_bool saw_per_device_fail{false};
+  std::mutex devfail_mtx;
+  std::unordered_set<std::string> devfail_reasons;
   std::optional<brokkr::core::SignalShield> sig_guard;
   bool flash_signal_shield_attempted = false;
   brokkr::odin::Ui ui;
@@ -436,7 +351,14 @@ int run_flash_cli(const CliArgs& args) {
     // CLI intentionally suppresses percentage/progress bars.
   };
   ui.on_error = [&](const std::string& s) {
-    if (s.rfind("DEVFAIL idx=", 0) == 0) saw_per_device_fail.store(true, std::memory_order_relaxed);
+    if (s.rfind("DEVFAIL idx=", 0) == 0) {
+      saw_per_device_fail.store(true, std::memory_order_relaxed);
+      const auto sp = s.find(' ');
+      if (sp != std::string::npos) {
+        std::lock_guard lk(devfail_mtx);
+        devfail_reasons.insert(s.substr(sp + 1));
+      }
+    }
     spdlog::error("{}", s);
   };
 
@@ -479,13 +401,13 @@ int run_flash_cli(const CliArgs& args) {
     specs = std::move(*specsr);
 
     if (!pit_to_upload) {
-      if (auto pit = pit_from_specs(specs)) pit_to_upload = std::move(pit);
+      if (auto pit = brokkr::odin::pit_from_specs(specs)) pit_to_upload = std::move(pit);
     }
 
     std::vector<brokkr::odin::ImageSpec> filtered;
     filtered.reserve(specs.size());
     for (auto& s : specs)
-      if (!is_pit_name(s.basename)) filtered.push_back(std::move(s));
+      if (!brokkr::odin::is_pit_name(s.basename)) filtered.push_back(std::move(s));
     specs = std::move(filtered);
 
     if (specs.empty() && !pit_to_upload) {
@@ -496,7 +418,12 @@ int run_flash_cli(const CliArgs& args) {
 
   auto fst = brokkr::odin::flash(provider.ptrs, specs, pit_to_upload, cfg, ui);
   if (!fst) {
-    if (!saw_per_device_fail.load(std::memory_order_relaxed)) {
+    bool already_shown = false;
+    if (saw_per_device_fail.load(std::memory_order_relaxed)) {
+      std::lock_guard lk(devfail_mtx);
+      already_shown = devfail_reasons.contains(fst.error());
+    }
+    if (!already_shown) {
       spdlog::error("{}", map_global_error_to_cli_message(fst.error()));
     }
     return 1;

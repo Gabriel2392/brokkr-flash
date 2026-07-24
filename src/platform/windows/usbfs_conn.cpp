@@ -115,7 +115,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
           spdlog::error("WriteFile timed out, retries exhausted");
           return -1;
         }
-        spdlog::warn("WriteFile timed out, retrying (attempt {}/{})", attempt + 1, retries);
+        spdlog::warn("WriteFile timed out, retrying (attempt {}/{})", attempt, retries);
         backoff_10ms();
         continue;
       }
@@ -192,7 +192,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
           spdlog::error("ReadFile timed out, no data read, retries exhausted");
           return -1;
         }
-        spdlog::warn("ReadFile timed out, retrying (attempt {}/{})", attempt + 1, retries);
+        spdlog::warn("ReadFile timed out, retrying (attempt {}/{})", attempt, retries);
         backoff_10ms();
         continue;
       }
