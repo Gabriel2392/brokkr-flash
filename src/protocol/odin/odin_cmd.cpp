@@ -89,9 +89,8 @@ static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
 inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseBox& r, std::int32_t* out_ack) noexcept {
   if (r.id == BOOTLOADER_FAIL) {
     const auto why = bootloader_fail_text(r.ack);
-    if (!why.empty()) return brokkr::core::failf("Bootloader returned FAIL: {} ({})", why, r.ack);
-    return brokkr::core::failf("Bootloader returned FAIL (ack={} / 0x{:08X})", r.ack,
-                               static_cast<std::uint32_t>(r.ack));
+    if (!why.empty()) return brokkr::core::failf("FAIL: {} ({})", why, r.ack);
+    return brokkr::core::failf("FAIL (ack={} / 0x{:08X})", r.ack, static_cast<std::uint32_t>(r.ack));
   }
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
   if (r.id != expected_id) {
@@ -322,6 +321,11 @@ brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsig
 
   return to_status(rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {},
                         nullptr, retries));
+}
+
+brokkr::core::Status OdinCommands::declare_super_used_blocks(std::int32_t blocks, unsigned retries) noexcept {
+  const std::int32_t ints[] = {blocks};
+  return to_status(rpc_(RqtCommandType::RQT_SUPER, RqtCommandParam::RQT_SUPER_USED_BLOCKS, ints, {}, nullptr, retries));
 }
 
 brokkr::core::Status OdinCommands::begin_download(std::int32_t rounded_total_size, unsigned retries) noexcept {

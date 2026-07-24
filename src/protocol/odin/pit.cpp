@@ -18,6 +18,7 @@
 #include "protocol/odin/pit.hpp"
 
 #include "core/endian.hpp"
+#include "core/str.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -183,6 +184,16 @@ const Partition* PitTable::find_by_file_name(std::string_view basename) const no
   if (basename.empty()) return nullptr;
   auto it = std::ranges::find_if(partitions, [&](const Partition& p) { return p.file_name == basename; });
   return (it == partitions.end()) ? nullptr : &*it;
+}
+
+const Partition* PitTable::find_by_name(std::string_view name) const noexcept {
+  if (name.empty()) return nullptr;
+  auto it = std::ranges::find_if(partitions, [&](const Partition& p) { return brokkr::core::equals_ci(p.name, name); });
+  return (it == partitions.end()) ? nullptr : &*it;
+}
+
+bool PitTable::is_ab() const noexcept {
+  return find_by_name("VBMETA_A") != nullptr && find_by_name("VBMETA_B") != nullptr;
 }
 
 std::optional<std::int32_t> PitTable::common_block_size() const noexcept {

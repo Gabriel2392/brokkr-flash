@@ -61,6 +61,8 @@ class OdinCommands {
   brokkr::core::Status get_pit(std::span<std::byte> out, unsigned retries = 8) noexcept;
   brokkr::core::Status set_pit(std::span<const std::byte> pit, unsigned retries = 8) noexcept;
 
+  brokkr::core::Status declare_super_used_blocks(std::int32_t blocks, unsigned retries = 8) noexcept;
+
   brokkr::core::Status begin_download(std::int32_t rounded_total_size, unsigned retries = 8) noexcept;
   brokkr::core::Status begin_download_compressed(std::int32_t comp_size, std::int32_t decomp_size,
                                                  unsigned retries = 8) noexcept;

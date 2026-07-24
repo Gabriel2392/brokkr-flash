@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -71,6 +72,8 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
 
 bool is_pit_name(std::string_view base) noexcept;
 std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<ImageSpec>& specs);
+
+std::optional<std::uint32_t> super_used_blocks(const ImageSpec& spec) noexcept;
 
 namespace detail {
 

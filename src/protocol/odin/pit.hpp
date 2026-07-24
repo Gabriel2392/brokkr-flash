@@ -87,7 +87,9 @@ struct PitTable {
   std::vector<Partition> partitions;
 
   const Partition* find_by_file_name(std::string_view basename) const noexcept;
+  const Partition* find_by_name(std::string_view name) const noexcept;
   std::optional<std::int32_t> common_block_size() const noexcept;
+  bool is_ab() const noexcept;
 };
 
 brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept;

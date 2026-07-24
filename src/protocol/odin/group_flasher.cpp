@@ -18,6 +18,7 @@
 #include "protocol/odin/group_flasher.hpp"
 
 #include "core/prefetcher.hpp"
+#include "core/str.hpp"
 #include "io/lz4_frame.hpp"
 #include "io/read_exact.hpp"
 #include "protocol/odin/pit_transfer.hpp"
@@ -67,22 +68,8 @@ struct FirstError {
   }
 };
 
-namespace stage_label {
-constexpr std::string_view kHandshake = "ODIN handshake";
-constexpr std::string_view kPktFlash = "Negotiating transfer options";
-constexpr std::string_view kPitDl = "Downloading PIT(s)";
-constexpr std::string_view kPitUp = "Uploading PIT";
-constexpr std::string_view kCpuCheck = "Checking if devices are equal";
-constexpr std::string_view kMapCheck = "Verifying PIT mapping";
-constexpr std::string_view kTotalSend = "Sending total size";
-constexpr std::string_view kFlashFast = "Flashing (Speed: Enhanced)";
-constexpr std::string_view kFlashNorm = "Flashing (Speed: Normal)";
-constexpr std::string_view kFinalize = "Finalizing";
-constexpr std::string_view kFinalizeReboot = "Finalizing + reboot";
-} // namespace stage_label
-
 static std::string_view final_stage(OdinCommands::ShutdownMode m) {
-  return m == OdinCommands::ShutdownMode::Reboot ? stage_label::kFinalizeReboot : stage_label::kFinalize;
+  return m == OdinCommands::ShutdownMode::Reboot ? "Finalizing + reboot" : "Finalizing";
 }
 
 static OdinCommands::ShutdownMode shutdown_mode_final(const Cfg& cfg) {
@@ -339,7 +326,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   steps.emplace_back([&] {
     spdlog::info("> Odin");
-    stage(stage_label::kHandshake);
+    stage("ODIN handshake");
 
     auto st = fanout_keep([&](Target& d) -> brokkr::core::Status {
       auto& c = link(d);
@@ -361,7 +348,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     if (active.empty()) return brokkr::core::fail("No active devices");
 
     pkt = choose_pkt(active, cfg);
-    stage(stage_label::kPktFlash);
+    stage("Negotiating transfer options");
 
     auto st = fanout_keep([&](Target& d) -> brokkr::core::Status {
       if (d.proto < ProtocolVersion::PROTOCOL_VER2) return {};
@@ -378,7 +365,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   if (has_pit) {
     steps.emplace_back([&] {
       spdlog::info("Uploading PIT");
-      stage(stage_label::kPitUp);
+      stage("Uploading PIT");
       return fanout_keep([&](Target& d) {
         return OdinCommands(link(d)).set_pit({pit_to_upload->data(), pit_to_upload->size()}, cfg.preflash_retries);
       });
@@ -387,7 +374,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   steps.emplace_back([&] {
     spdlog::info("Get PIT for mapping");
-    stage(stage_label::kPitDl);
+    stage("Downloading PIT(s)");
     set_flash_timeout_active();
 
     return fanout_keep([&](Target& d) -> brokkr::core::Status {
@@ -403,7 +390,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   steps.emplace_back([&] -> brokkr::core::Status {
     if (active.empty()) return brokkr::core::fail("No active devices");
 
-    stage(stage_label::kCpuCheck);
+    stage("Checking if devices are equal");
     const std::string ref = active.front()->pit_table.cpu_bl_id;
     if (ref.empty()) return brokkr::core::fail("PIT cpu_bl_id missing");
     for (auto* d : active)
@@ -414,7 +401,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   steps.emplace_back([&] -> brokkr::core::Status {
     spdlog::info("Verifying PIT mapping");
-    stage(stage_label::kMapCheck);
+    stage("Verifying PIT mapping");
 
     BRK_TRYV(eff, sources_common_mapping_or_empty(active, sources));
     effective_sources = std::move(eff);
@@ -456,16 +443,50 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
   steps.emplace_back([&] -> brokkr::core::Status {
     if (items.empty()) return {};
-    stage(stage_label::kTotalSend);
+    stage("Sending total size");
     return fanout_keep(
         [&](Target& d) { return OdinCommands(link(d)).send_total_size(total, cfg.preflash_retries); });
+  });
+
+  steps.emplace_back([&] -> brokkr::core::Status {
+    if (has_pit || items.empty()) return {};
+
+    const FlashItem* super = nullptr;
+    for (const auto& it : items)
+      if (brokkr::core::equals_ci(it.part.name, "SUPER")) {
+        super = &it;
+        break;
+      }
+    if (!super) return {};
+
+    if (!std::ranges::all_of(active, [](Target* d) { return d->pit_table.is_ab(); })) {
+      spdlog::debug("Not declaring super size: device is not A/B");
+      return {};
+    }
+
+    const auto blocks = super_used_blocks(super->spec);
+    if (!blocks || *blocks == 0) {
+      spdlog::debug("Not declaring super size: no usable used-blocks value");
+      return {};
+    }
+    if (super->part.block_size > 0 && *blocks >= static_cast<std::uint32_t>(super->part.block_size)) {
+      spdlog::debug("Not declaring super size: used blocks {} >= partition blocks {}", *blocks,
+                    super->part.block_size);
+      return {};
+    }
+
+    spdlog::debug("Declaring super used blocks: {}", *blocks);
+    stage("Declaring super size");
+    return fanout_keep([&](Target& d) {
+      return OdinCommands(link(d)).declare_super_used_blocks(static_cast<std::int32_t>(*blocks), cfg.preflash_retries);
+    });
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
     const bool use_lz4 = any_lz4(effective_sources) &&
                          std::ranges::all_of(active, [](Target* d) { return d->init.supports_compressed_download(); });
 
-    stage(use_lz4 ? stage_label::kFlashFast : stage_label::kFlashNorm);
+    stage(use_lz4 ? "Flashing (Speed: Enhanced)" : "Flashing (Speed: Normal)");
     spdlog::info("Flashing has begun!");
 
     const std::size_t ndevs = active.size();

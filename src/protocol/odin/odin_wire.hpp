@@ -35,6 +35,9 @@ enum class RqtCommandType : std::int32_t {
   RQT_PIT = 101,
   RQT_XMIT = 102,
   RQT_CLOSE = 103,
+  RQT_DDI = 104,
+  RQT_DEVINFO = 105,
+  RQT_SUPER = 106,
   RQT_EMPTY = 0
 };
 
@@ -65,6 +68,9 @@ enum class RqtCommandParam : std::int32_t {
   RQT_XMIT_COMPRESSED_DOWNLOAD = 5,
   RQT_XMIT_COMPRESSED_START = 6,
   RQT_XMIT_COMPRESSED_COMPLETE = 7,
+
+  // SUPER
+  RQT_SUPER_USED_BLOCKS = 0,
 
   // CLOSE
   RQT_CLOSE_END = 0,

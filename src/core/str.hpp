@@ -25,6 +25,13 @@ constexpr unsigned char ascii_lower(unsigned char c) noexcept {
   return (c >= 'A' && c <= 'Z') ? static_cast<unsigned char>(c - 'A' + 'a') : c;
 }
 
+constexpr bool equals_ci(std::string_view a, std::string_view b) noexcept {
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (ascii_lower(static_cast<unsigned char>(a[i])) != ascii_lower(static_cast<unsigned char>(b[i]))) return false;
+  return true;
+}
+
 constexpr bool ends_with_ci(std::string_view s, std::string_view suf) noexcept {
   if (s.size() < suf.size()) return false;
   const std::size_t off = s.size() - suf.size();
