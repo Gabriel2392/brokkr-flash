@@ -55,7 +55,7 @@ static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
     case -125: return "m9kefs3 cannot be downloaded";
     case -124: return "image is too big for the partition";
     case -123: return "BL1 check failed";
-    case -122: return "partition ID mismatch";
+    case -122: return "partition ID mismatch, or SUPER write rejected (upload a PIT first)";
     case -121: return "partition is not UFS on a UFS device";
     case -120: return "partition device type is not supported";
     case -119: return "block write failed";
@@ -81,6 +81,8 @@ static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
     case -99: return "LDFW region write failed";
     case -98: return "UL_KEYS write failed";
     case -97: return "bootloader token install failed";
+    case -96: return "image write failed";
+    case -94: return "AUTO BLOCKER is on, cannot download";
 
     default: return {};
   }
