@@ -66,11 +66,13 @@ static_assert(sizeof(PartitionInfoWire) == 4 * 9 + 32 * 3);
 struct Partition {
   std::int32_t id = 0;
   std::int32_t dev_type = 0;
+  std::int32_t attribute = 0;
 
   std::int32_t begin_block = 0;
   std::int32_t block_bytes = 0;
   std::int32_t block_size = 0;
   std::uint64_t file_size = 0;
+  std::int32_t wire_block_size = 0;
 
   std::string name;
   std::string file_name;

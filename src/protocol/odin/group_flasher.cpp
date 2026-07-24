@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <barrier>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -160,6 +161,7 @@ struct Step {
   bool comp = false;
 
   u64 a = 0;
+  u64 b = 0;
   const std::byte* base = nullptr;
   u64 off = 0;
   std::size_t n = 0;
@@ -169,7 +171,9 @@ struct Step {
   bool last = false;
 };
 
-static Step st_begin(bool comp, u64 begin_sz) { return {.op = Step::Op::Begin, .comp = comp, .a = begin_sz}; }
+static Step st_begin(bool comp, u64 begin_sz, u64 decomp_sz) {
+  return {.op = Step::Op::Begin, .comp = comp, .a = begin_sz, .b = decomp_sz};
+}
 static Step st_data(bool comp, const std::byte* base, u64 off, std::size_t n) {
   return {.op = Step::Op::Data, .comp = comp, .base = base, .off = off, .n = n};
 }
@@ -204,7 +208,7 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
     spdlog::debug("XMIT window: comp={} part_id={} begin_size={} rounded={} packets={} pkt={} end_size={} last={}",
                   comp, part_id, w.begin, rounded, packets, pkt, w.end, w.last);
 
-    emit(st_begin(comp, w.begin));
+    emit(st_begin(comp, w.begin, w.end));
     auto contrib = make_contrib(w, packets);
 
     for (u64 p = 0; p < packets; ++p) {
@@ -238,6 +242,12 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   const bool has_pit = pit_to_upload && !pit_to_upload->empty();
 
   if (!has_sources && !has_pit) return brokkr::core::fail("flash: nothing to do (no sources, no PIT)");
+
+  u64 init_total = 0;
+  for (const auto& s : sources) {
+    if (is_pit_name(s.basename)) continue;
+    BRK_TRY(detail::checked_add_u64(init_total, s.size, "TOTALSIZE"));
+  }
 
   const std::size_t total_devices = devs.size();
   std::size_t failed_total = 0;
@@ -362,6 +372,13 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     return {};
   });
 
+  steps.emplace_back([&] -> brokkr::core::Status {
+    if (!init_total) return {};
+    stage(stage_label::kTotalSend);
+    return fanout_keep(
+        [&](Target& d) { return OdinCommands(link(d)).send_total_size(init_total, cfg.preflash_retries); });
+  });
+
   if (has_pit) {
     steps.emplace_back([&] {
       spdlog::info("Uploading PIT");
@@ -442,13 +459,6 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
-    if (items.empty()) return {};
-    stage(stage_label::kTotalSend);
-    return fanout_keep(
-        [&](Target& d) { return OdinCommands(link(d)).send_total_size(total, d.proto, cfg.preflash_retries); });
-  });
-
-  steps.emplace_back([&] -> brokkr::core::Status {
     const bool use_lz4 = any_lz4(effective_sources) &&
                          std::ranges::all_of(active, [](Target* d) { return d->init.supports_compressed_download(); });
 
@@ -466,12 +476,11 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
     auto exec = [&](OdinCommands& odin, const Step& s) -> brokkr::core::Status {
       if (s.op == Step::Op::Begin)
-        return s.comp ? odin.begin_download_compressed(static_cast<std::int32_t>(s.a))
+        return s.comp ? odin.begin_download_compressed(static_cast<std::int32_t>(s.a), static_cast<std::int32_t>(s.b))
                       : odin.begin_download(static_cast<std::int32_t>(s.a));
       if (s.op == Step::Op::Data) {
         BRK_TRY(odin.send_raw({s.base + static_cast<std::ptrdiff_t>(s.off), s.n}));
-        BRK_TRYV(_, odin.recv_checked_response(static_cast<std::int32_t>(RqtCommandType::RQT_EMPTY), nullptr));
-        return {};
+        return odin.recv_data_ack();
       }
       if (s.op == Step::Op::End)
         return s.comp ? odin.end_download_compressed(static_cast<std::int32_t>(s.a), s.part_id, s.dev_type, s.last)
@@ -551,6 +560,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         if (ui.on_item_active) ui.on_item_active(plan_idx);
 
         const u64 item_total = item.spec.size;
+        const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes);
         u64 item_done = 0;
 
         bool stream_lz4 = item.spec.lz4 && use_lz4;
@@ -560,9 +570,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           stream_lz4 = (ph.max_block_size == static_cast<std::size_t>(detail::kOneMiB));
         }
 
-        spdlog::debug("Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} lz4={} mode={}",
-                      item.part.id, item.part.dev_type, item.part.name, item.part.file_name, item.spec.display,
-                      item.spec.size, item.spec.lz4, stream_lz4 ? "compressed-stream" : "raw");
+        spdlog::debug(
+            "Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} window={} lz4={} mode={}",
+            item.part.id, item.part.dev_type, item.part.name, item.part.file_name, item.spec.display, item.spec.size,
+            window, item.spec.lz4, stream_lz4 ? "compressed-stream" : "raw");
 
         if (stream_lz4) {
           struct Slot {
@@ -578,7 +589,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           const u64 total_decomp = reader.content_size();
           if (!total_decomp) return brokkr::core::fail("LZ4 content size is zero: " + item.spec.display);
 
-          const std::size_t max_blocks = detail::lz4_nonfinal_block_limit(cfg.buffer_bytes);
+          const std::size_t max_blocks = detail::lz4_nonfinal_block_limit(window);
           if (!max_blocks)
             return brokkr::core::fail("buffer_bytes too small for compressed download (needs >= 1MiB)");
 
@@ -648,7 +659,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           if (!file_sz) return brokkr::core::fail("Empty source: " + item.spec.display);
 
           const std::size_t max_rounded =
-              static_cast<std::size_t>(detail::round_up64(static_cast<u64>(cfg.buffer_bytes), static_cast<u64>(pkt)));
+              static_cast<std::size_t>(detail::round_up64(window, static_cast<u64>(pkt)));
           u64 sent = 0;
 
           brokkr::core::TwoSlotPrefetcher<Slot> pf(
@@ -656,7 +667,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
                 if (stt.stop_requested() || sent >= file_sz) return false;
 
                 const u64 rem = file_sz - sent;
-                const u64 actual = std::min<u64>(rem, cfg.buffer_bytes);
+                const u64 actual = std::min<u64>(rem, window);
                 const u64 rounded_u64 = detail::round_up64(actual, pkt);
                 const auto rounded = static_cast<std::size_t>(rounded_u64);
 
@@ -670,7 +681,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
                               rounded - static_cast<std::size_t>(actual));
 
                 s.rounded = rounded;
-                s.begin = rounded_u64;
+                s.begin = detail::round_up64(actual, detail::kXmitStartAlign);
                 s.end = actual;
                 s.last = (sent + actual >= file_sz);
 
@@ -738,6 +749,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         failed_total += active.size();
         return st;
       }
+      if (cfg.post_close_delay_ms > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(cfg.post_close_delay_ms));
     }
     return {};
   });
@@ -745,6 +758,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   for (auto& fn : steps) {
     auto st = fn();
     if (!st) return finish(std::move(st));
+    if (cfg.step_delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(cfg.step_delay_ms));
   }
 
   return finish({});

@@ -62,19 +62,6 @@ inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseB
   return {};
 }
 
-static std::int32_t lo32(std::uint64_t v) {
-  return static_cast<std::int32_t>(static_cast<std::uint32_t>(v & 0xFFFFFFFFull));
-}
-static std::int32_t hi32(std::uint64_t v) {
-  return static_cast<std::int32_t>(static_cast<std::uint32_t>((v >> 32) & 0xFFFFFFFFull));
-}
-
-static brokkr::core::Result<std::int32_t> require_i32_total(std::uint64_t v) noexcept {
-  constexpr std::uint64_t max = static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max());
-  if (v > max) return brokkr::core::fail("TOTALSIZE exceeds ODIN int32 limit on protocol v0/v1");
-  return static_cast<std::int32_t>(v);
-}
-
 static brokkr::core::Status to_status(brokkr::core::Result<ResponseBox> r) noexcept {
   if (r) return {};
   return brokkr::core::fail(std::move(r.error()));
@@ -133,6 +120,19 @@ brokkr::core::Result<ResponseBox> OdinCommands::recv_checked_response(std::int32
   if (!st) return brokkr::core::fail(std::move(st.error()));
 
   return r;
+}
+
+brokkr::core::Status OdinCommands::recv_data_ack(unsigned retries) noexcept {
+  ResponseBox r{};
+  auto st = recv_raw(std::as_writable_bytes(std::span{&r, 1}), retries);
+  if (!st) return st;
+
+  response_from_le(r);
+
+  if (r.id != static_cast<std::int32_t>(RqtCommandType::RQT_EMPTY) || r.ack < 0)
+    spdlog::debug("ODIN << data ack id={} ack={} (0x{:08X})", r.id, r.ack, static_cast<std::uint32_t>(r.ack));
+
+  return {};
 }
 
 brokkr::core::Result<ResponseBox> OdinCommands::rpc_(RqtCommandType type, RqtCommandParam param,
@@ -213,16 +213,12 @@ brokkr::core::Status OdinCommands::setup_transfer_options(std::int32_t packet_si
   return {};
 }
 
-brokkr::core::Status OdinCommands::send_total_size(std::uint64_t total_size, ProtocolVersion proto,
-                                                   unsigned retries) noexcept {
-  if (proto <= ProtocolVersion::PROTOCOL_VER1) {
-    auto v = require_i32_total(total_size);
-    if (!v) return brokkr::core::fail(std::move(v.error()));
-    const std::int32_t ints[] = {*v};
-    return to_status(rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_TOTALSIZE, ints, {}, nullptr, retries));
-  }
-
-  const std::int32_t ints[] = {lo32(total_size), hi32(total_size)};
+brokkr::core::Status OdinCommands::send_total_size(std::uint64_t total_size, unsigned retries) noexcept {
+  constexpr std::uint64_t kSplit = 0xFFFFFFFFull;
+  const std::int32_t ints[] = {
+      static_cast<std::int32_t>(static_cast<std::uint32_t>(total_size % kSplit)),
+      static_cast<std::int32_t>(static_cast<std::uint32_t>(total_size / kSplit)),
+  };
   return to_status(rpc_(RqtCommandType::RQT_INIT, RqtCommandParam::RQT_INIT_TOTALSIZE, ints, {}, nullptr, retries));
 }
 
@@ -274,14 +270,8 @@ brokkr::core::Status OdinCommands::set_pit(std::span<const std::byte> pit, unsig
   auto st = send_raw(pit, retries);
   if (!st) return st;
 
-  ResponseBox ack{};
-  st = recv_raw(std::as_writable_bytes(std::span{&ack, 1}), retries);
+  st = recv_data_ack(retries);
   if (!st) return st;
-
-  response_from_le(ack);
-
-  spdlog::debug("ODIN: PIT upload data-phase response id={} ack={} (0x{:08X})", ack.id, ack.ack,
-                static_cast<std::uint32_t>(ack.ack));
 
   return to_status(rpc_(RqtCommandType::RQT_PIT, RqtCommandParam::RQT_PIT_COMPLETE, std::span{&pitSize32, 1}, {},
                         nullptr, retries));
@@ -294,11 +284,14 @@ brokkr::core::Status OdinCommands::begin_download(std::int32_t rounded_total_siz
                         {}, nullptr, retries));
 }
 
-brokkr::core::Status OdinCommands::begin_download_compressed(std::int32_t comp_size, unsigned retries) noexcept {
+brokkr::core::Status OdinCommands::begin_download_compressed(std::int32_t comp_size, std::int32_t decomp_size,
+                                                             unsigned retries) noexcept {
   auto r1 = rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_DOWNLOAD, {}, {}, nullptr, retries);
   if (!r1) return brokkr::core::fail(std::move(r1.error()));
-  return to_status(rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_START, std::span{&comp_size, 1},
-                        {}, nullptr, retries));
+
+  const std::int32_t ints[] = {comp_size, decomp_size};
+  return to_status(
+      rpc_(RqtCommandType::RQT_XMIT, RqtCommandParam::RQT_XMIT_COMPRESSED_START, ints, {}, nullptr, retries));
 }
 
 brokkr::core::Status OdinCommands::end_download_impl_(RqtCommandParam complete_param, std::int32_t size_to_flash,

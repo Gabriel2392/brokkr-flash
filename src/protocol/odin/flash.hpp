@@ -90,17 +90,31 @@ constexpr std::uint64_t round_up64(std::uint64_t n, std::uint64_t base) noexcept
 inline constexpr std::uint64_t kOneMiB = 1024ull * 1024ull;
 inline constexpr std::size_t kMaxNonFinalLz4Blocks = 31;
 
+inline constexpr std::uint64_t kXmitStartAlign = 128ull * 1024ull;
+
 inline std::size_t lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
   const auto want = static_cast<std::size_t>(buffer_bytes / kOneMiB);
   return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
 }
 
-struct PreparedLz4Window {
-  std::uint64_t comp_size = 0;
-  std::uint64_t rounded_size = 0;
-  std::uint64_t decomp_size = 0;
-  bool last = false;
-};
+inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes) noexcept {
+  switch (part.dev_type) {
+    case 1:
+    case 2:
+    case 8: return 30ull * kOneMiB;
+    case 6: return 4ull * kOneMiB;
+    case 7: return kOneMiB;
+    case 0: {
+      const auto blk = static_cast<std::uint64_t>(part.wire_block_size > 0 ? part.wire_block_size : 0);
+      const std::uint64_t units = blk >> 7;
+      if (units == 0) return default_bytes;
+      const std::uint64_t base = blk + ((part.attribute == 1) ? units * 4 : 0);
+      const std::uint64_t win = base * 1024ull * (800ull / units);
+      return win ? win : default_bytes;
+    }
+    default: return default_bytes;
+  }
+}
 
 } // namespace detail
 } // namespace brokkr::odin

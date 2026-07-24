@@ -86,6 +86,9 @@ struct Cfg {
 
   int flash_timeout_ms = 45'000;
 
+  int step_delay_ms = 100;
+  int post_close_delay_ms = 1000;
+
   bool reboot_after = true;
 };
 
