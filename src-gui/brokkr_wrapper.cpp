@@ -2034,7 +2034,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
     return;
   }
 
-  const auto r = brokkr::platform::send_suddlmod_to_samsung_serial(brokkr::app::kSamsungVid, nonOdinCount);
+  const auto r = brokkr::platform::send_atcmd_to_samsung_serial(brokkr::app::kSamsungVid, nonOdinCount);
   if (r.ports_seen == 0) {
     QMessageBox::warning(this, "Brokkr Flash", "No Samsung serial port found.");
     return;

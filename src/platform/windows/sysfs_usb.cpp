@@ -51,7 +51,7 @@ struct UsbDeviceInfo {
 
 namespace {
 
-constexpr std::string_view kSuddlmod = "AT+SUDDLMOD=0,0\r";
+constexpr std::string_view kAtCmd = "AT+SUDDLMOD=0,0\r";
 constexpr std::uint16_t kOdinPids[] = {0x6601, 0x685D, 0x68C3};
 
 bool is_odin_pid(std::uint16_t pid) {
@@ -147,7 +147,7 @@ std::string normalize_com_path(std::string port) {
   return {};
 }
 
-std::optional<std::string> send_suddlmod_win32(std::string_view comPort) {
+std::optional<std::string> send_atcmd_win32(std::string_view comPort) {
   const std::string path = normalize_com_path(std::string(comPort));
   if (path.empty()) return std::string("invalid port name");
 
@@ -188,13 +188,13 @@ std::optional<std::string> send_suddlmod_win32(std::string_view comPort) {
   (void)SetCommTimeouts(h, &to);
 
   DWORD wrote = 0;
-  const BOOL ok = WriteFile(h, kSuddlmod.data(), static_cast<DWORD>(kSuddlmod.size()), &wrote, nullptr);
+  const BOOL ok = WriteFile(h, kAtCmd.data(), static_cast<DWORD>(kAtCmd.size()), &wrote, nullptr);
   if (!ok) {
     const auto e = GetLastError();
     CloseHandle(h);
     return std::string("write failed: ") + std::to_string(e);
   }
-  if (wrote != static_cast<DWORD>(kSuddlmod.size())) {
+  if (wrote != static_cast<DWORD>(kAtCmd.size())) {
     CloseHandle(h);
     return std::string("write timed out (short write)");
   }
@@ -236,8 +236,8 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   return std::nullopt;
 }
 
-SuddlmodResult send_suddlmod_to_samsung_serial(std::uint16_t vendor, int maxTargets) {
-  SuddlmodResult out;
+AtCmdResult send_atcmd_to_samsung_serial(std::uint16_t vendor, int maxTargets) {
+  AtCmdResult out;
   const auto devices = enumerate_usb_devices_windows(vendor, {});
 
   std::set<std::string> uniquePorts;
@@ -257,7 +257,7 @@ SuddlmodResult send_suddlmod_to_samsung_serial(std::uint16_t vendor, int maxTarg
   workers.reserve(ports.size());
 
   for (std::size_t i = 0; i < ports.size(); ++i) {
-    workers.emplace_back([&, i]() { errors[i] = send_suddlmod_win32(ports[i]); });
+    workers.emplace_back([&, i]() { errors[i] = send_atcmd_win32(ports[i]); });
   }
   for (auto& t : workers)
     if (t.joinable()) t.join();
