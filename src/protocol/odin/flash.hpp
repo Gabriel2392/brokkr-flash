@@ -53,6 +53,7 @@ struct ImageSpec {
   std::uint64_t disk_size = 0;
 
   bool lz4 = false;
+  std::size_t lz4_block_size = 0;
 
   std::string display;
 
@@ -99,8 +100,7 @@ inline std::uint64_t lz4_window_decomp_bytes(std::uint64_t window_bytes, std::si
   return cap - (cap % block_size);
 }
 
-inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes,
-                                       std::uint64_t pkt) noexcept {
+inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes) noexcept {
   std::uint64_t win = default_bytes;
 
   switch (part.dev_type) {
@@ -121,10 +121,7 @@ inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t
     default: break;
   }
 
-  if (pkt == 0 || win == 0) return win;
-
-  const std::uint64_t floored = win - (win % pkt);
-  return floored ? floored : pkt;
+  return win;
 }
 
 } // namespace detail

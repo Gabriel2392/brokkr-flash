@@ -568,10 +568,12 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         if (ui.on_item_active) ui.on_item_active(plan_idx);
 
         const u64 item_total = item.spec.size;
-        const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes, pkt);
+        const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes);
         u64 item_done = 0;
 
-        const bool stream_lz4 = item.spec.lz4 && use_lz4;
+        const bool stream_lz4 = item.spec.lz4 && use_lz4 &&
+                                (item.spec.lz4_block_size == static_cast<std::size_t>(detail::kOneMiB) ||
+                                 item.spec.size <= item.spec.lz4_block_size);
 
         spdlog::debug(
             "Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} window={} lz4={} mode={}",
@@ -593,6 +595,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           if (!total_decomp) return brokkr::core::fail("LZ4 content size is zero: " + item.spec.display);
 
           const std::size_t block_sz = reader.block_size();
+          if (block_sz != static_cast<std::size_t>(detail::kOneMiB) && total_decomp > block_sz)
+            return brokkr::core::fail("LZ4 stream needs 1MiB blocks unless the image fits in one block: " +
+                                      item.spec.display);
+
           const u64 window_decomp = detail::lz4_window_decomp_bytes(window, block_sz);
           if (!window_decomp)
             return brokkr::core::fail("Transfer window smaller than one LZ4 block: " + item.spec.display);

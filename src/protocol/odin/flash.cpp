@@ -102,10 +102,9 @@ static bool lists_equal(const std::vector<std::string>& a, const std::vector<std
   return true;
 }
 
-static brokkr::core::Result<std::uint64_t> lz4_content_size(const ImageSpec& spec) noexcept {
+static brokkr::core::Result<io::Lz4FrameHeaderInfo> lz4_header(const ImageSpec& spec) noexcept {
   BRK_TRYV(src, spec.open());
-  BRK_TRYV(h, io::parse_lz4_frame_header(*src));
-  return h.content_size;
+  return io::parse_lz4_frame_header(*src);
 }
 
 static brokkr::core::Result<std::vector<std::byte>> read_all_source(io::ByteSource& src) noexcept {
@@ -142,8 +141,9 @@ static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::file
   spec.basename = spec.lz4 ? strip_lz4_suffix(spec.source_basename) : spec.source_basename;
 
   if (spec.lz4) {
-    BRK_TRYV(sz, lz4_content_size(spec));
-    spec.size = sz;
+    BRK_TRYV(h, lz4_header(spec));
+    spec.size = h.content_size;
+    spec.lz4_block_size = h.max_block_size;
   } else {
     spec.size = spec.disk_size;
   }
