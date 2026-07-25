@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,7 +64,14 @@ namespace {
 constexpr std::size_t kTrailerMaxBytes = 16 * 1024;
 constexpr std::size_t kMd5HexChars = 32;
 constexpr std::size_t kMd5Xxh3CacheMaxEntries = 100;
+
+#if defined(BROKKR_PLATFORM_ANDROID)
+constexpr std::size_t kHashBufBytes = 16 * 1024 * 1024;
+constexpr std::size_t kMaxVerifyThreads = 2;
+#else
 constexpr std::size_t kHashBufBytes = 32 * 1024 * 1024;
+constexpr std::size_t kMaxVerifyThreads = std::numeric_limits<std::size_t>::max();
+#endif
 
 struct CombinedDigest {
   std::array<unsigned char, 16> md5{};
@@ -184,6 +192,20 @@ class HashFileReader {
 #endif
 };
 
+class PathHashReader final : public HashReader {
+ public:
+  explicit PathHashReader(std::filesystem::path path) noexcept : reader_(std::move(path)) {}
+
+  brokkr::core::Status open() noexcept override { return reader_.open(); }
+
+  brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept override {
+    return reader_.read_some(data, want);
+  }
+
+ private:
+  HashFileReader reader_;
+};
+
 static bool is_hex(unsigned char c) noexcept {
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
@@ -227,7 +249,7 @@ static std::int64_t session_identity_write_time(std::filesystem::file_time_type 
 
 static SessionVerifyKey make_session_verify_key(const Md5Job& job) {
   SessionVerifyKey key;
-  key.identity_path = job.identity_path.generic_string();
+  key.identity_path = job.identity_path;
   key.identity_size = job.identity_size;
   key.identity_write_time = job.identity_write_time;
   key.bytes_to_hash = job.bytes_to_hash;
@@ -307,28 +329,34 @@ struct Md5Xxh3Consumer {
 };
 
 template <class Consumer>
-static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const std::filesystem::path& path,
-                                                                     std::uint64_t bytes_to_hash,
-                                                                     std::atomic_uint64_t& done,
-                                                                     std::uint64_t total,
-                                                                     const brokkr::odin::Ui& ui) noexcept {
+static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const Md5Job& job, std::uint64_t bytes_to_hash,
+                                                                     std::atomic_uint64_t& done, std::uint64_t total,
+                                                                     const brokkr::odin::Ui& ui,
+                                                                     std::atomic<bool>* cancel) noexcept {
   struct Slot {
     std::vector<unsigned char> buf;
     std::size_t n = 0;
   };
 
-  HashFileReader reader(path);
-  BRK_TRY(reader.open());
+  auto cancelled = [&]() noexcept { return cancel != nullptr && cancel->load(std::memory_order_acquire); };
+
+  if (cancelled()) return brokkr::core::fail("Verification cancelled");
+
+  if (!job.open_reader) return brokkr::core::fail("Hash reader is not configured");
+
+  BRK_TRYV(reader, job.open_reader());
+  BRK_TRY(reader->open());
 
   std::uint64_t remaining = bytes_to_hash;
 
   brokkr::core::TwoSlotPrefetcher<Slot> pf(
       [&](Slot& s, std::stop_token st) -> brokkr::core::Result<bool> {
         if (st.stop_requested() || !remaining) return false;
+        if (cancelled()) return brokkr::core::fail("Verification cancelled");
 
         const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, kHashBufBytes));
-        BRK_TRYV(got, reader.read_some(s.buf.data(), want));
-        if (got != want) return brokkr::core::failf("Short read while hashing: {}", path.string());
+        BRK_TRYV(got, reader->read_some(s.buf.data(), want));
+        if (got != want) return brokkr::core::failf("Short read while hashing: {}", job.display_name);
 
         s.n = got;
         remaining -= static_cast<std::uint64_t>(got);
@@ -338,10 +366,10 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const std::
 
   Consumer consumer;
   if constexpr (Consumer::kUsesMd5) {
-    spdlog::debug("MD5 start: {} bytes from {}", bytes_to_hash, path.string());
+    spdlog::debug("MD5 start: {} bytes from {}", bytes_to_hash, job.display_name);
   }
   if constexpr (Consumer::kUsesXxh3) {
-    spdlog::debug("XXH3 start: {} bytes from {}", bytes_to_hash, path.string());
+    spdlog::debug("XXH3 start: {} bytes from {}", bytes_to_hash, job.display_name);
   }
   BRK_TRY(consumer.init());
 
@@ -365,16 +393,16 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const std::
   if (!pst) return brokkr::core::fail(std::move(pst.error()));
 
   if (processed != bytes_to_hash) {
-    return brokkr::core::failf("Hashing terminated early: {} (processed {}, expected {})", path.string(), processed,
+    return brokkr::core::failf("Hashing terminated early: {} (processed {}, expected {})", job.display_name, processed,
                                bytes_to_hash);
   }
 
   auto digest = consumer.finish();
   if constexpr (Consumer::kUsesMd5) {
-    spdlog::debug("MD5 finish: {} bytes from {}", bytes_to_hash, path.string());
+    spdlog::debug("MD5 finish: {} bytes from {}", bytes_to_hash, job.display_name);
   }
   if constexpr (Consumer::kUsesXxh3) {
-    spdlog::debug("XXH3 finish: {} bytes from {}", bytes_to_hash, path.string());
+    spdlog::debug("XXH3 finish: {} bytes from {}", bytes_to_hash, job.display_name);
   }
   return digest;
 }
@@ -432,12 +460,15 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::fil
   if (file_size - bytes_to_hash > kTrailerMaxBytes) return brokkr::core::failf("MD5 trailer too large: {}", p.string());
 
   Md5Job j;
-  j.path = p;
-  j.identity_path = session_identity_path(p);
+  j.display_name = p.string();
+  j.identity_path = session_identity_path(p).generic_string();
   j.identity_size = file_size;
   j.identity_write_time = session_identity_write_time(write_time);
   j.bytes_to_hash = bytes_to_hash;
   j.expected = expected;
+  j.open_reader = [path = p]() -> brokkr::core::Result<std::unique_ptr<HashReader>> {
+    return std::unique_ptr<HashReader>(std::make_unique<PathHashReader>(path));
+  };
   return std::optional<Md5Job>(std::move(j));
 }
 
@@ -476,8 +507,11 @@ std::string_view md5_verify_name(const std::vector<Md5Job>& jobs) noexcept {
   return all_jobs_cached ? "XXH3" : "MD5";
 }
 
-brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui) noexcept {
+brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui,
+                                std::atomic<bool>* cancel) noexcept {
   if (jobs.empty()) return {};
+
+  auto cancelled = [&]() noexcept { return cancel != nullptr && cancel->load(std::memory_order_acquire); };
 
   std::uint64_t total = 0;
   for (const auto& j : jobs) total += j.bytes_to_hash;
@@ -527,7 +561,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     if (session_verify_cache_contains(j)) {
       const auto new_done = done.fetch_add(j.bytes_to_hash, std::memory_order_relaxed) + j.bytes_to_hash;
       if (ui.on_progress) ui.on_progress(new_done, total, new_done, total);
-      spdlog::debug("Session verify cache hit: {}", j.path.string());
+      spdlog::debug("Session verify cache hit: {}", j.display_name);
       continue;
     }
     pending_jobs.push_back(j);
@@ -539,8 +573,10 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     return {};
   }
 
-  const std::size_t threads = std::min<std::size_t>(pending_jobs.size(),
-                                                    std::max<std::size_t>(1, std::thread::hardware_concurrency()));
+  const std::size_t threads =
+      std::min<std::size_t>(pending_jobs.size(),
+                            std::min<std::size_t>(kMaxVerifyThreads,
+                                                  std::max<std::size_t>(1, std::thread::hardware_concurrency())));
 
   brokkr::core::ThreadPool pool(threads);
 
@@ -562,6 +598,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
   for (const auto& j : pending_jobs) {
     auto st = pool.submit([&, j]() -> brokkr::core::Status {
       if (pool.cancelled()) return {};
+      if (cancelled()) return brokkr::core::fail("Verification cancelled");
 
       std::optional<std::uint64_t> cached_xxh3;
       if (cache_enabled) {
@@ -571,20 +608,21 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
       }
 
       if (cached_xxh3) {
-        auto xxh3 = hash_prefetch<Xxh3Consumer>(j.path, j.bytes_to_hash, done, total, ui);
+        auto xxh3 = hash_prefetch<Xxh3Consumer>(j, j.bytes_to_hash, done, total, ui, cancel);
         if (!xxh3) {
           if (cache_enabled) {
             std::lock_guard lk(cache_mtx);
             if (forget_md5_xxh3_cache(cache_entries, j.expected, j.bytes_to_hash)) {
               cache_dirty = true;
-              spdlog::warn("Removed MD5/XXH3 cache entry after XXH3 failure: {}", j.path.string());
+              spdlog::warn("Removed MD5/XXH3 cache entry after XXH3 failure: {}", j.display_name);
             }
           }
           return brokkr::core::fail(std::move(xxh3.error()));
         }
 
         if (*xxh3 == *cached_xxh3) {
-          spdlog::debug("MD5/XXH3 cache hit: {}", j.path.string());
+          spdlog::debug("MD5/XXH3 cache hit: {}", j.display_name);
+          if (cancelled()) return brokkr::core::fail("Verification cancelled");
           remember_session_verify_cache(j);
           return {};
         }
@@ -597,11 +635,11 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
         std::atomic_uint64_t retry_done{0};
         auto retry_ui = ui;
 
-        auto retry = hash_prefetch<Md5Xxh3Consumer>(j.path, j.bytes_to_hash, retry_done, j.bytes_to_hash, retry_ui);
+        auto retry = hash_prefetch<Md5Xxh3Consumer>(j, j.bytes_to_hash, retry_done, j.bytes_to_hash, retry_ui, cancel);
         if (!retry) return brokkr::core::fail(std::move(retry.error()));
 
         if (std::memcmp(retry->md5.data(), j.expected.data(), j.expected.size()) != 0) {
-          return brokkr::core::fail("MD5 mismatch: " + j.path.string() + "\n  expected:   " + md5_hex32(j.expected) +
+          return brokkr::core::fail("MD5 mismatch: " + j.display_name + "\n  expected:   " + md5_hex32(j.expected) +
                                     "\n  calculated: " + md5_hex32(retry->md5) +
                                     "\n  byte count: " + std::to_string(j.bytes_to_hash));
         }
@@ -612,15 +650,16 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
                                   kMd5Xxh3CacheMaxEntries);
           cache_dirty = true;
         }
+        if (cancelled()) return brokkr::core::fail("Verification cancelled");
         remember_session_verify_cache(j);
         return {};
       }
 
-      auto digest = hash_prefetch<Md5Xxh3Consumer>(j.path, j.bytes_to_hash, done, total, ui);
+      auto digest = hash_prefetch<Md5Xxh3Consumer>(j, j.bytes_to_hash, done, total, ui, cancel);
       if (!digest) return brokkr::core::fail(std::move(digest.error()));
 
       if (std::memcmp(digest->md5.data(), j.expected.data(), j.expected.size()) != 0) {
-        return brokkr::core::fail("MD5 mismatch: " + j.path.string() + "\n  expected:   " + md5_hex32(j.expected) +
+        return brokkr::core::fail("MD5 mismatch: " + j.display_name + "\n  expected:   " + md5_hex32(j.expected) +
                                   "\n  calculated: " + md5_hex32(digest->md5) +
                                   "\n  byte count: " + std::to_string(j.bytes_to_hash));
       }
@@ -632,6 +671,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
         cache_dirty = true;
       }
 
+      if (cancelled()) return brokkr::core::fail("Verification cancelled");
       remember_session_verify_cache(j);
 
       return {};
@@ -642,11 +682,17 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
   auto wst = pool.wait();
   persist_cache_if_needed();
+  if (cancelled()) return brokkr::core::fail("Verification cancelled");
   if (!wst) return wst;
 
   if (ui.on_item_done) ui.on_item_done(0);
   spdlog::info("{} OK", verify_name);
   return {};
+}
+
+void clear_session_verify_cache() noexcept {
+  std::lock_guard lk(session_verify_cache_mutex());
+  session_verify_cache().clear();
 }
 
 } // namespace brokkr::app

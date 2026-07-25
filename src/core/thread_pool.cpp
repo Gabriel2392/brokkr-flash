@@ -17,6 +17,8 @@
 
 #include "core/thread_pool.hpp"
 
+#include "core/thread_priority.hpp"
+
 #include <exception>
 #include <utility>
 
@@ -77,6 +79,7 @@ void ThreadPool::set_error_(Status st) noexcept {
 }
 
 void ThreadPool::worker_loop_() noexcept {
+  brokkr::core::bump_thread_priority(-4);
   for (;;) {
     Task task;
 

@@ -17,8 +17,10 @@
 
 #include "protocol/odin/group_flasher.hpp"
 
+#include "core/compat.hpp"
 #include "core/prefetcher.hpp"
 #include "core/str.hpp"
+#include "core/thread_priority.hpp"
 #include "io/lz4_frame.hpp"
 #include "io/read_exact.hpp"
 #include "protocol/odin/pit_transfer.hpp"
@@ -261,7 +263,10 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     std::vector<std::jthread> ts;
     ts.reserve(active.size());
 
-    for (std::size_t i = 0; i < active.size(); ++i) ts.emplace_back([&, i] { sts[i] = fn(*active[i]); });
+    for (std::size_t i = 0; i < active.size(); ++i) ts.emplace_back([&, i] {
+      brokkr::core::bump_thread_priority(-8);
+      sts[i] = fn(*active[i]);
+    });
     for (auto& t : ts)
       if (t.joinable()) t.join();
 
@@ -322,7 +327,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     return fanout_keep([&](Target& d) { return OdinCommands(link(d)).shutdown(m); });
   };
 
-  auto steps = std::vector<std::move_only_function<brokkr::core::Status()>>{};
+  auto steps = std::vector<brokkr::core::MoveOnlyFunction<brokkr::core::Status()>>{};
 
   steps.emplace_back([&] {
     spdlog::info("> Odin");
@@ -504,6 +509,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
       const std::size_t orig = active_idx[i];
 
       workers.emplace_back([&, d, i, orig](std::stop_token stt) {
+        brokkr::core::bump_thread_priority(-8);
         OdinCommands odin(link(*d));
         bool dead_local = false;
 

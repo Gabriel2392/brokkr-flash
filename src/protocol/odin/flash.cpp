@@ -177,6 +177,8 @@ std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<I
 }
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
+  if (custom_open) return custom_open();
+
   switch (kind) {
     case Kind::RawFile: return io::open_raw_file(path);
     case Kind::TarEntry: return io::open_tar_entry(path, entry);

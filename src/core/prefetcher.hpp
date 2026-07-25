@@ -17,11 +17,12 @@
 
 #pragma once
 
+#include "core/compat.hpp"
 #include "core/status.hpp"
+#include "core/thread_priority.hpp"
 
 #include <condition_variable>
 #include <exception>
-#include <functional> // std::move_only_function
 #include <mutex>
 #include <optional>
 #include <stop_token>
@@ -35,8 +36,8 @@ namespace brokkr::core {
 template <class Slot>
 class TwoSlotPrefetcher {
  public:
-  using InitFn = std::move_only_function<void(Slot&)>;
-  using FillFn = std::move_only_function<Result<bool>(Slot&, std::stop_token)>;
+  using InitFn = MoveOnlyFunction<void(Slot&)>;
+  using FillFn = MoveOnlyFunction<Result<bool>(Slot&, std::stop_token)>;
 
   class Lease {
    public:
@@ -128,6 +129,7 @@ class TwoSlotPrefetcher {
   }
 
   void reader_loop_(std::stop_token st) noexcept {
+    brokkr::core::bump_thread_priority(-8);
     try {
       for (;;) {
         {

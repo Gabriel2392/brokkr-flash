@@ -378,8 +378,8 @@ int run_flash_cli(const CliArgs& args) {
     }
 
     for (const auto& job : *jobsr) {
-      std::string name = job.path.filename().string();
-      if (name.empty()) name = job.path.string();
+      std::string name = std::filesystem::path(job.display_name).filename().string();
+      if (name.empty()) name = job.display_name;
 
       if (name.size() >= 11)
         name = name.substr(0, 10) + "...";

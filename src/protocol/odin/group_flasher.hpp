@@ -33,6 +33,7 @@
 
 namespace brokkr::odin {
 
+#if !defined(BROKKR_PLATFORM_ANDROID)
 struct UsbTarget {
   std::string devnode;
   brokkr::platform::UsbFsDevice dev;
@@ -53,6 +54,7 @@ struct UsbTarget {
     return {};
   }
 };
+#endif
 
 struct Target {
   std::string id;

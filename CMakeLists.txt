@@ -8,33 +8,35 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # -----------------------------
 # Dependencies (FetchContent)
 # -----------------------------
-include(FetchContent)
+if (NOT ANDROID)
+    include(FetchContent)
 
-set(FMT_TEST OFF CACHE BOOL "disabling fmt tests" FORCE)
+    set(FMT_TEST OFF CACHE BOOL "disabling fmt tests" FORCE)
 
-FetchContent_Declare(
-   spdlog
-   GIT_REPOSITORY https://github.com/gabime/spdlog.git
-   GIT_TAG        v1.17.0
-   GIT_PROGRESS    TRUE
-   USES_TERMINAL_DOWNLOAD TRUE
-)
-FetchContent_GetProperties(spdlog)
-if (NOT spdlog_POPULATED)
-    FetchContent_MakeAvailable(spdlog)
-endif()
+    FetchContent_Declare(
+       spdlog
+       GIT_REPOSITORY https://github.com/gabime/spdlog.git
+       GIT_TAG        v1.17.0
+       GIT_PROGRESS    TRUE
+       USES_TERMINAL_DOWNLOAD TRUE
+    )
+    FetchContent_GetProperties(spdlog)
+    if (NOT spdlog_POPULATED)
+        FetchContent_MakeAvailable(spdlog)
+    endif()
 
-# Important: Match the fmt version with spdlog's bundled version to avoid ODR issues.
-FetchContent_Declare(
-    fmt
-    GIT_REPOSITORY  https://github.com/fmtlib/fmt.git
-    GIT_TAG         12.1.0
-    GIT_PROGRESS    TRUE
-     USES_TERMINAL_DOWNLOAD TRUE
-)
-FetchContent_GetProperties(fmt)
-if (NOT fmt_POPULATED)
-    FetchContent_MakeAvailable(fmt)
+    # Important: Match the fmt version with spdlog's bundled version to avoid ODR issues.
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY  https://github.com/fmtlib/fmt.git
+        GIT_TAG         12.1.0
+        GIT_PROGRESS    TRUE
+         USES_TERMINAL_DOWNLOAD TRUE
+    )
+    FetchContent_GetProperties(fmt)
+    if (NOT fmt_POPULATED)
+        FetchContent_MakeAvailable(fmt)
+    endif()
 endif()
 
 # -----------------------------------------------
@@ -75,9 +77,11 @@ endif()
 set(MOF_SRC
 "#include <functional>
 int main() { std::move_only_function<void()> f; return 0; }")
-check_cxx_source_compiles("${MOF_SRC}" HAS_STD_MOVE_ONLY_FUNCTION)
+if (NOT ANDROID)
+    check_cxx_source_compiles("${MOF_SRC}" HAS_STD_MOVE_ONLY_FUNCTION)
+endif()
 
-if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
+if (NOT ANDROID AND NOT HAS_STD_MOVE_ONLY_FUNCTION)
     message(STATUS "std::move_only_function not available; enabling polyfill via function2")
 
     FetchContent_Declare(
@@ -108,7 +112,29 @@ endif()
 # -----------------------------------------
 # Platform-specific source files and definitions
 # -----------------------------------------
-if (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if (ANDROID)
+    set(BROKKR_ANDROID_LIBUSB_TARGET "usb-1.0" CACHE STRING
+        "Name of the CMake target providing libusb-1.0 for the Android build")
+    if (NOT TARGET ${BROKKR_ANDROID_LIBUSB_TARGET})
+        message(FATAL_ERROR
+            "Android build requires a libusb-1.0 target named '${BROKKR_ANDROID_LIBUSB_TARGET}'. "
+            "Define it before add_subdirectory(), or set BROKKR_ANDROID_LIBUSB_TARGET.")
+    endif()
+
+    add_library(brokkr-platform INTERFACE)
+    target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_ANDROID _FILE_OFFSET_BITS=64)
+    target_sources(brokkr-platform INTERFACE
+        src/platform/android/app_dirs.cpp
+        src/platform/android/fd_package.cpp
+        src/platform/android/java_tcp_transport.cpp
+        src/platform/android/libusb_transport.cpp
+    )
+    target_link_libraries(brokkr-platform INTERFACE
+        android
+        log
+        ${BROKKR_ANDROID_LIBUSB_TARGET}
+    )
+elseif (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(brokkr-platform INTERFACE)
     target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_LINUX)
     target_sources(brokkr-platform INTERFACE
@@ -157,7 +183,11 @@ else()
 endif()
 
 target_include_directories(brokkr-platform INTERFACE src)
-target_link_libraries(brokkr-platform INTERFACE spdlog::spdlog_header_only fmt::fmt-header-only)
+if (ANDROID)
+    target_include_directories(brokkr-platform INTERFACE src-jni/shim)
+else()
+    target_link_libraries(brokkr-platform INTERFACE spdlog::spdlog_header_only fmt::fmt-header-only)
+endif()
 
 add_library(brokkr-lib INTERFACE)
 target_sources(brokkr-lib INTERFACE
@@ -180,6 +210,16 @@ include(TestBigEndian)
 test_big_endian(BROKKR_IS_BIG_ENDIAN)
 if (BROKKR_IS_BIG_ENDIAN)
     target_compile_definitions(brokkr-lib INTERFACE BROKKR_BIG_ENDIAN)
+endif()
+
+# -----------------------------------------------
+# Android: JNI shared library
+# -----------------------------------------------
+if (ANDROID)
+    add_library(brokkr SHARED src-jni/brokkr_android_jni.cpp)
+    target_include_directories(brokkr PRIVATE src src-jni/shim)
+    target_link_libraries(brokkr PRIVATE brokkr-platform brokkr-lib)
+    return()
 endif()
 
 # ---------------------------

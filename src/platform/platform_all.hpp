@@ -58,6 +58,13 @@ using namespace macos;
 using namespace posix_common;
 } // namespace brokkr::platform
 
+#elif defined(BROKKR_PLATFORM_ANDROID)
+  #include "platform/android/app_dirs.hpp"
+
+namespace brokkr::platform {
+using namespace android_platform;
+} // namespace brokkr::platform
+
 #else
   #error "Unsupported platform"
 #endif

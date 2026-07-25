@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <span>
@@ -57,6 +58,8 @@ struct ImageSpec {
 
   std::string display;
 
+  std::function<brokkr::core::Result<std::unique_ptr<io::ByteSource>>()> custom_open;
+
   brokkr::core::Result<std::unique_ptr<io::ByteSource>> open() const noexcept;
 };
 
@@ -72,7 +75,6 @@ brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit
 
 bool is_pit_name(std::string_view base) noexcept;
 std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<ImageSpec>& specs);
-
 
 namespace detail {
 
