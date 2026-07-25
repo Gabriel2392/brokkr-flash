@@ -451,35 +451,18 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   steps.emplace_back([&] -> brokkr::core::Status {
     if (has_pit || items.empty()) return {};
 
-    const FlashItem* super = nullptr;
-    for (const auto& it : items)
-      if (brokkr::core::equals_ci(it.part.name, "SUPER")) {
-        super = &it;
-        break;
-      }
-    if (!super) return {};
+    const bool has_super =
+        std::ranges::any_of(items, [](const FlashItem& it) { return brokkr::core::equals_ci(it.part.name, "SUPER"); });
+    if (!has_super) return {};
 
     if (!std::ranges::all_of(active, [](Target* d) { return d->pit_table.is_ab(); })) {
       spdlog::debug("Not declaring super size: device is not A/B");
       return {};
     }
 
-    const auto blocks = super_used_blocks(super->spec);
-    if (!blocks || *blocks == 0) {
-      spdlog::debug("Not declaring super size: no usable used-blocks value");
-      return {};
-    }
-    if (super->part.block_size > 0 && *blocks >= static_cast<std::uint32_t>(super->part.block_size)) {
-      spdlog::debug("Not declaring super size: used blocks {} >= partition blocks {}", *blocks,
-                    super->part.block_size);
-      return {};
-    }
-
-    spdlog::debug("Declaring super used blocks: {}", *blocks);
     stage("Declaring super size");
-    return fanout_keep([&](Target& d) {
-      return OdinCommands(link(d)).declare_super_used_blocks(static_cast<std::int32_t>(*blocks), cfg.preflash_retries);
-    });
+    return fanout_keep(
+        [&](Target& d) { return OdinCommands(link(d)).declare_super_used_blocks(0, cfg.preflash_retries); });
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {

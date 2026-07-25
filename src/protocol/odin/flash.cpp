@@ -19,10 +19,8 @@
 
 #include "core/str.hpp"
 #include "io/lz4_frame.hpp"
-#include "io/read_exact.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -176,75 +174,6 @@ std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<I
   }
 
   return std::make_shared<const std::vector<std::byte>>(std::move(*rr));
-}
-
-std::optional<std::uint32_t> super_used_blocks(const ImageSpec& spec) noexcept {
-  constexpr std::uint32_t SPARSE_MAGIC = 0xED26FF3Au;
-  constexpr std::uint64_t USED_BLOCKS_OFFSET = 1024;
-
-  auto le32 = [](const std::byte* p) {
-    return static_cast<std::uint32_t>(static_cast<unsigned char>(p[0])) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(p[1])) << 8) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(p[2])) << 16) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(p[3])) << 24);
-  };
-  auto le16 = [](const std::byte* p) {
-    return static_cast<std::uint32_t>(static_cast<unsigned char>(p[0])) |
-           (static_cast<std::uint32_t>(static_cast<unsigned char>(p[1])) << 8);
-  };
-
-  auto sr = spec.open();
-  if (!sr) {
-    spdlog::debug("super probe: open failed: {}", sr.error());
-    return std::nullopt;
-  }
-
-  std::unique_ptr<io::ByteSource> src = std::move(*sr);
-  if (spec.lz4) {
-    auto dr = io::open_lz4_decompressed(std::move(src));
-    if (!dr) {
-      spdlog::debug("super probe: lz4 open failed: {}", dr.error());
-      return std::nullopt;
-    }
-    src = std::move(*dr);
-  }
-
-  std::array<std::byte, 28> hdr{};
-  if (!io::read_exact(*src, std::span<std::byte>(hdr))) {
-    spdlog::debug("super probe: short read on sparse header");
-    return std::nullopt;
-  }
-
-  const std::uint32_t magic = le32(hdr.data());
-  if (magic != SPARSE_MAGIC) {
-    spdlog::debug("super probe: not a sparse image (magic 0x{:08X})", magic);
-    return std::nullopt;
-  }
-
-  const std::uint64_t skip_to = static_cast<std::uint64_t>(le16(hdr.data() + 8)) + le16(hdr.data() + 10) +
-                                USED_BLOCKS_OFFSET;
-  if (skip_to < hdr.size()) {
-    spdlog::debug("super probe: implausible sparse header sizes");
-    return std::nullopt;
-  }
-
-  std::array<std::byte, 4096> scratch{};
-  for (std::uint64_t left = skip_to - hdr.size(); left > 0;) {
-    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(left, scratch.size()));
-    if (!io::read_exact(*src, std::span<std::byte>(scratch.data(), n))) {
-      spdlog::debug("super probe: short read while seeking to used-blocks field");
-      return std::nullopt;
-    }
-    left -= n;
-  }
-
-  std::array<std::byte, 8> field{};
-  if (!io::read_exact(*src, std::span<std::byte>(field))) {
-    spdlog::debug("super probe: short read on used-blocks field");
-    return std::nullopt;
-  }
-
-  return le32(field.data());
 }
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
