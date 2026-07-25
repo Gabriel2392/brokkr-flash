@@ -61,11 +61,12 @@ class Lz4BlockStreamReader {
 
   std::string display_name() const { return src_ ? src_->display_name() : std::string{}; }
   std::uint64_t content_size() const noexcept { return hdr_.content_size; }
+  std::size_t block_size() const noexcept { return hdr_.max_block_size; }
   const Lz4FrameHeaderInfo& header() const noexcept { return hdr_; }
 
-  std::size_t total_blocks_1m() const noexcept;
-  std::size_t blocks_read_1m() const noexcept { return blocks_read_; }
-  std::size_t blocks_remaining_1m() const noexcept;
+  std::size_t total_blocks() const noexcept;
+  std::size_t blocks_read() const noexcept { return blocks_read_; }
+  std::size_t blocks_remaining() const noexcept;
 
   brokkr::core::Result<std::size_t> read_n_blocks(std::size_t n, std::vector<std::byte>& out) noexcept;
 

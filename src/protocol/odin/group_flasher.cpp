@@ -571,12 +571,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes, pkt);
         u64 item_done = 0;
 
-        bool stream_lz4 = item.spec.lz4 && use_lz4;
-        if (stream_lz4) {
-          BRK_TRYV(probe, item.spec.open());
-          BRK_TRYV(ph, io::parse_lz4_frame_header(*probe));
-          stream_lz4 = (ph.max_block_size == static_cast<std::size_t>(detail::kOneMiB));
-        }
+        const bool stream_lz4 = item.spec.lz4 && use_lz4;
 
         spdlog::debug(
             "Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} window={} lz4={} mode={}",
@@ -597,9 +592,15 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
           const u64 total_decomp = reader.content_size();
           if (!total_decomp) return brokkr::core::fail("LZ4 content size is zero: " + item.spec.display);
 
-          const std::size_t max_blocks = detail::lz4_nonfinal_block_limit(window);
-          if (!max_blocks)
-            return brokkr::core::fail("buffer_bytes too small for compressed download (needs >= 1MiB)");
+          const std::size_t block_sz = reader.block_size();
+          const u64 window_decomp = detail::lz4_window_decomp_bytes(window, block_sz);
+          if (!window_decomp)
+            return brokkr::core::fail("Transfer window smaller than one LZ4 block: " + item.spec.display);
+
+          const auto max_blocks = static_cast<std::size_t>(window_decomp / block_sz);
+
+          spdlog::debug("LZ4 stream: block_size={} total_decomp={} window_decomp={} blocks/window={}", block_sz,
+                        total_decomp, window_decomp, max_blocks);
 
           u64 sent = 0;
 
@@ -608,14 +609,14 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
                 if (stt.stop_requested() || sent >= total_decomp) return false;
 
                 const u64 rem = total_decomp - sent;
-                const bool last = rem <= static_cast<u64>(max_blocks) * detail::kOneMiB;
-                const u64 decomp_sz = last ? rem : static_cast<u64>(max_blocks) * detail::kOneMiB;
+                const bool last = rem <= window_decomp;
+                const u64 decomp_sz = last ? rem : window_decomp;
 
-                const std::size_t blocks = !last ? static_cast<std::size_t>(decomp_sz / detail::kOneMiB)
-                                                 : reader.blocks_remaining_1m();
+                const std::size_t blocks =
+                    last ? reader.blocks_remaining() : static_cast<std::size_t>(decomp_sz / block_sz);
 
                 s.stream.clear();
-                s.stream.reserve(blocks * (static_cast<std::size_t>(detail::kOneMiB) + 4));
+                s.stream.reserve(blocks * (block_sz + 4));
 
                 BRK_TRYV(comp, reader.read_n_blocks(blocks, s.stream));
                 const u64 comp_sz = static_cast<u64>(comp);
@@ -630,7 +631,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
                 sent += decomp_sz;
                 return true;
               },
-              [&](Slot& s) { s.stream.reserve(max_blocks * (static_cast<std::size_t>(detail::kOneMiB) + 4)); });
+              [&](Slot& s) { s.stream.reserve(max_blocks * (block_sz + 4)); });
 
           if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
 

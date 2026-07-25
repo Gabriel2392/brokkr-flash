@@ -101,10 +101,6 @@ brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src)
   if (!st) return brokkr::core::fail(std::move(st.error()));
   info.content_size = u64_le(std::span<const std::byte, 8>(cs.data(), 8));
 
-  if (info.content_size > LZ4_ONE_MIB && info.max_block_size != static_cast<std::size_t>(LZ4_ONE_MIB)) {
-    return brokkr::core::fail("LZ4: content > 1MiB requires 1MiB blocks (compress with -B6)");
-  }
-
   std::array<std::byte, 1> hc{};
   st = read_exact(src, std::span<std::byte>(hc.data(), hc.size()));
   if (!st) return brokkr::core::fail(std::move(st.error()));
@@ -119,13 +115,14 @@ brokkr::core::Result<Lz4BlockStreamReader> Lz4BlockStreamReader::open(std::uniqu
   return Lz4BlockStreamReader(std::move(src), h);
 }
 
-std::size_t Lz4BlockStreamReader::total_blocks_1m() const noexcept {
-  if (hdr_.content_size == 0) return 0;
-  return static_cast<std::size_t>((hdr_.content_size + (LZ4_ONE_MIB - 1)) / LZ4_ONE_MIB);
+std::size_t Lz4BlockStreamReader::total_blocks() const noexcept {
+  if (hdr_.content_size == 0 || hdr_.max_block_size == 0) return 0;
+  const auto bs = static_cast<std::uint64_t>(hdr_.max_block_size);
+  return static_cast<std::size_t>((hdr_.content_size + (bs - 1)) / bs);
 }
 
-std::size_t Lz4BlockStreamReader::blocks_remaining_1m() const noexcept {
-  const auto t = total_blocks_1m();
+std::size_t Lz4BlockStreamReader::blocks_remaining() const noexcept {
+  const auto t = total_blocks();
   return (blocks_read_ >= t) ? 0u : (t - blocks_read_);
 }
 
@@ -138,7 +135,7 @@ brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_
   if (n == 0) return std::size_t{0};
 
   const std::size_t before = out.size();
-  const std::size_t total = total_blocks_1m();
+  const std::size_t total = total_blocks();
   if (blocks_read_ + n > total) return brokkr::core::fail("LZ4: too many blocks requested");
 
   for (std::size_t i = 0; i < n; ++i) {
@@ -172,8 +169,8 @@ Lz4DecompressedSource::Lz4DecompressedSource(std::unique_ptr<ByteSource> src, Lz
       display_(src_ ? src_->display_name() : std::string{}),
       hdr_(hdr),
       total_out_(hdr_.content_size) {
-  block_out_.reserve(static_cast<std::size_t>(LZ4_ONE_MIB));
-  comp_payload_.reserve(static_cast<std::size_t>(LZ4_ONE_MIB) + 64);
+  block_out_.reserve(hdr_.max_block_size);
+  comp_payload_.reserve(hdr_.max_block_size + 64);
 }
 
 brokkr::core::Result<std::unique_ptr<ByteSource>> Lz4DecompressedSource::open(std::unique_ptr<ByteSource> src) noexcept {

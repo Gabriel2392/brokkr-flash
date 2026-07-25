@@ -89,13 +89,14 @@ constexpr std::uint64_t round_up64(std::uint64_t n, std::uint64_t base) noexcept
 }
 
 inline constexpr std::uint64_t kOneMiB = 1024ull * 1024ull;
-inline constexpr std::size_t kMaxNonFinalLz4Blocks = 31;
+inline constexpr std::uint64_t kMaxLz4WindowBytes = 31ull * kOneMiB;
 
 inline constexpr std::uint64_t kXmitStartAlign = 128ull * 1024ull;
 
-inline std::size_t lz4_nonfinal_block_limit(std::uint64_t buffer_bytes) noexcept {
-  const auto want = static_cast<std::size_t>(buffer_bytes / kOneMiB);
-  return std::min<std::size_t>(want, kMaxNonFinalLz4Blocks);
+inline std::uint64_t lz4_window_decomp_bytes(std::uint64_t window_bytes, std::size_t block_size) noexcept {
+  if (block_size == 0) return 0;
+  const std::uint64_t cap = std::min<std::uint64_t>(window_bytes, kMaxLz4WindowBytes);
+  return cap - (cap % block_size);
 }
 
 inline std::uint64_t xmit_window_bytes(const pit::Partition& part, std::uint64_t default_bytes,
