@@ -196,7 +196,7 @@ jobs:
           QT_QPA_PLATFORM=offscreen BROKKR_SCREENSHOT="$PWD/screenshot-linux.png" timeout 60 ./build/brokkr
           test -f screenshot-linux.png
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.build_type == 'Release'
         with:
           name: screenshot-linux
@@ -255,7 +255,7 @@ jobs:
 
           mv Brokkr-x86_64.AppImage Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
@@ -362,7 +362,7 @@ jobs:
 
           mv Brokkr-aarch64.AppImage Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
@@ -452,7 +452,7 @@ jobs:
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
           if (!(Test-Path screenshot-windows.png)) { exit 1 }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.build_type == 'Release' && matrix.artifact_arch == 'x64'
         with:
           name: screenshot-windows
@@ -506,12 +506,12 @@ jobs:
               sys.exit(f"{len(bad)} binaries do not match {sys.argv[1]} ({expected:#06x}): {', '.join(bad)}")
           EOF
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
@@ -576,7 +576,7 @@ jobs:
           BROKKR_SCREENSHOT="$PWD/screenshot-macos.png" ./build/brokkr.app/Contents/MacOS/brokkr
           test -f screenshot-macos.png
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.build_type == 'Release'
         with:
           name: screenshot-macos
@@ -599,7 +599,7 @@ jobs:
           xattr -cr "$APP" || true
           ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
@@ -675,7 +675,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
 
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
           path: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
@@ -782,7 +782,7 @@ jobs:
           test -f dist/Brokkr-android.apk
           mv dist/Brokkr-android.apk "dist/Brokkr-${FULL_VERSION}-android.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.cfg.outputs.enabled == 'true'
         with:
           name: Brokkr-${{ needs.prepare.outputs.full_version }}-android.apk
