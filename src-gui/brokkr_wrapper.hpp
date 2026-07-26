@@ -34,6 +34,7 @@ class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
 class QChildEvent;
+class QShowEvent;
 
 #if defined(BROKKR_PLATFORM_LINUX)
 class QSocketNotifier;
@@ -69,6 +70,7 @@ class BrokkrWrapper : public QWidget {
 #endif
 
   void changeEvent(QEvent* e) override;
+  void showEvent(QShowEvent* e) override;
 
  private slots:
   void onRunClicked();
@@ -119,12 +121,16 @@ class BrokkrWrapper : public QWidget {
 
   void appendLogLine_(const QString& html);
   void applyHeaderStyle_();
+  void applyDarkMode_(bool dark);
+  void applyContainerStyles_();
   void updateHeaderLeds_();
 
   void setSquaresProgress_(double frac, bool animate);
   void setSquaresText_(const QString& s);
   void setSquaresActiveColor_(bool enhanced);
   void setSquaresFinal_(bool ok);
+
+  bool darkModeEnabled_() const noexcept { return darkMode_; }
 
  private:
   static constexpr int kBoxesNormal = 8;
@@ -133,6 +139,7 @@ class BrokkrWrapper : public QWidget {
 
   QStringList connectedDevices_;
   bool overflowDevices_ = false;
+  bool applyingDarkMode_ = false;
 
   int baseWindowHeight_ = 600;
 
@@ -157,6 +164,8 @@ class BrokkrWrapper : public QWidget {
   QPushButton* btnRebootDownloadMode_ = nullptr;
 
   QComboBox* cmbRebootAction = nullptr;
+
+  QCheckBox* chkDarkMode_ = nullptr;
 
   QCheckBox* chkUsePit = nullptr;
   QLineEdit* editPit = nullptr;
@@ -216,4 +225,5 @@ class BrokkrWrapper : public QWidget {
   std::vector<QString> plan_names_;
   std::vector<QString> plan_from_names_;
   bool enhanced_speed_ = false;
+  bool darkMode_ = false;
 };

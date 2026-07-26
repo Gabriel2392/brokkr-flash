@@ -2,6 +2,7 @@
 
 #include <QCloseEvent>
 #include <QChildEvent>
+#include <QShowEvent>
 #include <QApplication>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -24,6 +25,7 @@
 #include <QPen>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSettings>
 #include <QSizePolicy>
 #include <QSpacerItem>
 #include <QStringList>
@@ -73,13 +75,14 @@
   #include <windows.h>
 #endif
 
+static bool g_dark_mode_active = false;
+
 class DeviceSquare final : public QWidget {
  public:
   enum class Variant { Green, Blue, Red };
 
   explicit DeviceSquare(QWidget* parent = nullptr) : QWidget(parent) {
-    setAttribute(Qt::WA_TranslucentBackground, true);
-    setAutoFillBackground(false);
+    setAutoFillBackground(true);
 
     auto sp = sizePolicy();
     sp.setHorizontalPolicy(QSizePolicy::Expanding);
@@ -144,9 +147,12 @@ class DeviceSquare final : public QWidget {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, false);
 
-    const QRect r = rect().adjusted(1, 1, -1, -1);
-    p.fillRect(r, palette().color(QPalette::Base));
+    const QRect full_r = rect();
+    const bool dark_theme = g_dark_mode_active || palette().color(QPalette::Window).lightness() < 128;
 
+    p.fillRect(full_r, dark_theme ? QColor(60, 60, 60) : palette().color(QPalette::Base));
+
+    const QRect r = full_r.adjusted(1, 1, -1, -1);
     const int fillW = static_cast<int>(std::lround(r.width() * fill_));
     if (fillW > 0) {
       QRect fr = r;
@@ -179,9 +185,9 @@ class DeviceSquare final : public QWidget {
       const QString shown = fm.elidedText(text_, Qt::ElideMiddle, maxW);
       const QRect textR = r.adjusted(2, 0, -2, 0);
 
-      const bool dark_theme = palette().color(QPalette::Window).lightness() < 128;
-      const QColor shadow_col = dark_theme ? QColor(0, 0, 0, 160) : QColor(255, 255, 255, 180);
-      const QColor text_col = dark_theme ? QColor("#ffffff") : QColor("#111111");
+      const bool dk = g_dark_mode_active || palette().color(QPalette::Window).lightness() < 128;
+      const QColor shadow_col = dk ? QColor(0, 0, 0, 160) : QColor(255, 255, 255, 180);
+      const QColor text_col = dk ? QColor("#ffffff") : QColor("#111111");
 
       p.setPen(shadow_col);
       p.drawText(textR.translated(1, 1), Qt::AlignCenter, shown);
@@ -416,7 +422,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   headerWidget_ = new QWidget(this);
   headerWidget_->setObjectName("headerBanner");
   headerWidget_->setFixedHeight(56);
-  applyHeaderStyle_();
 
   auto* headerLayout = new QHBoxLayout(headerWidget_);
   headerLayout->setContentsMargins(24, 0, 24, 0);
@@ -446,14 +451,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   mainLayout->addWidget(headerWidget_);
 
   idComGroup_ = new QGroupBox("ID:COM", this);
-  {
-    auto pal = idComGroup_->palette();
-    QColor bg = pal.color(QPalette::Window);
-    bg = bg.darker(110);
-    pal.setColor(QPalette::Window, bg);
-    idComGroup_->setPalette(pal);
-    idComGroup_->setAutoFillBackground(true);
-  }
+  idComGroup_->setAutoFillBackground(true);
   idComLayout_ = new QGridLayout(idComGroup_);
   idComLayout_->setSpacing(6);
   idComLayout_->setContentsMargins(8, 8, 8, 8);
@@ -530,6 +528,15 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   bindDropTarget_(btnPitBrowse, kDropSlotPIT);
 
   tabWidget_->addTab(pitTab, "Pit");
+
+  auto* brokkrTab = new QWidget();
+  auto* brokkrLayout = new QVBoxLayout(brokkrTab);
+  brokkrLayout->setAlignment(Qt::AlignTop);
+
+  chkDarkMode_ = new QCheckBox("Dark Mode", this);
+  brokkrLayout->addWidget(chkDarkMode_);
+
+  tabWidget_->addTab(brokkrTab, "Brokkr");
 
 #if defined(Q_OS_MACOS)
   connect(tabWidget_, &QTabWidget::currentChanged, this, [this](int) {
@@ -827,6 +834,27 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   deviceTimer->start(2000);
 
   requestUsbRefresh_();
+  {
+    QSettings settings("Brokkr", "BrokkrFlash");
+    if (settings.contains("darkMode")) {
+      darkMode_ = settings.value("darkMode", false).toBool();
+    } else {
+      darkMode_ = palette().color(QPalette::Window).lightness() < 128;
+    }
+    g_dark_mode_active = darkMode_;
+  }
+  connect(chkDarkMode_, &QCheckBox::toggled, this, [this](bool checked) {
+    if (busy_) {
+      chkDarkMode_->setChecked(!checked);
+      return;
+    }
+    applyDarkMode_(checked);
+  });
+  chkDarkMode_->setChecked(darkMode_);
+
+  applyContainerStyles_();
+  applyHeaderStyle_();
+
   setControlsEnabled_(true);
   updateActionButtons_();
 
@@ -1228,25 +1256,31 @@ void BrokkrWrapper::childEvent(QChildEvent* e) {
   }
 }
 
+void BrokkrWrapper::showEvent(QShowEvent* e) {
+  QWidget::showEvent(e);
+  if (darkMode_) {
+    applyDarkMode_(true);
+  }
+}
+
 void BrokkrWrapper::changeEvent(QEvent* e) {
   QWidget::changeEvent(e);
+  if (applyingDarkMode_) return;
+
   if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
-    applyHeaderStyle_();
+    if (darkMode_) {
+      applyDarkMode_(true);
+    } else {
+      applyContainerStyles_();
+      applyHeaderStyle_();
 
 #if defined(Q_OS_WIN)
-    apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
-                                 palette().color(QPalette::Window).lightness() < 128);
+      apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
+                                   QApplication::palette().color(QPalette::Window).lightness() < 128);
 #endif
 
-    {
-      auto pal = palette();
-      QColor bg = pal.color(QPalette::Window).darker(110);
-      pal.setColor(QPalette::Window, bg);
-      idComGroup_->setPalette(pal);
+      refreshDeviceBoxes_();
     }
-
-    consoleOutput->setPalette(palette());
-    refreshDeviceBoxes_();
   }
 }
 
@@ -1517,17 +1551,106 @@ void BrokkrWrapper::appendLogLine_(const QString& html) {
 
 void BrokkrWrapper::applyHeaderStyle_() {
   if (!headerWidget_) return;
-  const int luma = palette().color(QPalette::Window).lightness();
-  const bool dark = (luma < 128);
+  const bool dark = darkMode_ || QApplication::palette().color(QPalette::Window).lightness() < 128;
+  const QString bgColor = dark ? "#2d2e30" : "#dce0e4";
+  headerWidget_->setStyleSheet(
+    QString("QWidget#headerBanner { background-color: %1; }").arg(bgColor));
+}
 
-  headerWidget_->setStyleSheet(""); // Clear stylesheet to fallback natively
+void BrokkrWrapper::applyContainerStyles_() {
+  const bool dark = darkMode_ || QApplication::palette().color(QPalette::Window).lightness() < 128;
 
-  QPalette pal = headerWidget_->palette();
-  QColor bgColor = dark ? QColor("#2d2e30") : QColor("#dce0e4");
-  pal.setColor(QPalette::Window, bgColor);
+  if (headerWidget_) {
+    const QString bg = dark ? "#2d2e30" : "#dce0e4";
+    headerWidget_->setStyleSheet(
+      QString("QWidget#headerBanner { background-color: %1; }").arg(bg));
+  }
 
-  headerWidget_->setAutoFillBackground(true);
-  headerWidget_->setPalette(pal);
+  if (idComGroup_) {
+    QPalette pal = QApplication::palette();
+    const QColor bg = dark ? QColor("#3c3c3c") : QColor("#e8e8e8");
+    pal.setColor(QPalette::Window, bg);
+    idComGroup_->setPalette(pal);
+    idComGroup_->setAutoFillBackground(true);
+  }
+
+  if (consoleOutput) {
+    QPalette pal = QApplication::palette();
+    if (dark) {
+      pal.setColor(QPalette::Base, QColor(30, 30, 30));
+      pal.setColor(QPalette::Text, QColor(220, 220, 220));
+    }
+    consoleOutput->setPalette(pal);
+  }
+}
+
+void BrokkrWrapper::applyDarkMode_(bool dark) {
+  applyingDarkMode_ = true;
+
+  darkMode_ = dark;
+  g_dark_mode_active = dark;
+
+  {
+    QSettings settings("Brokkr", "BrokkrFlash");
+    settings.setValue("darkMode", dark);
+  }
+
+  QPalette pal;
+  if (dark) {
+    pal.setColor(QPalette::Window, QColor(53, 53, 53));
+    pal.setColor(QPalette::WindowText, Qt::white);
+    pal.setColor(QPalette::Base, QColor(35, 35, 35));
+    pal.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
+    pal.setColor(QPalette::ToolTipBase, QColor(25, 25, 25));
+    pal.setColor(QPalette::ToolTipText, Qt::white);
+    pal.setColor(QPalette::Text, Qt::white);
+    pal.setColor(QPalette::Button, QColor(53, 53, 53));
+    pal.setColor(QPalette::ButtonText, Qt::white);
+    pal.setColor(QPalette::BrightText, Qt::red);
+    pal.setColor(QPalette::Link, QColor(42, 130, 218));
+    pal.setColor(QPalette::Highlight, QColor(42, 130, 218));
+    pal.setColor(QPalette::HighlightedText, Qt::black);
+    pal.setColor(QPalette::Disabled, QPalette::WindowText, QColor(127, 127, 127));
+    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(127, 127, 127));
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(127, 127, 127));
+    pal.setColor(QPalette::Disabled, QPalette::Base, QColor(40, 40, 40));
+    pal.setColor(QPalette::Mid, QColor(80, 80, 80));
+    pal.setColor(QPalette::Dark, QColor(40, 40, 40));
+    pal.setColor(QPalette::Midlight, QColor(63, 63, 63));
+    pal.setColor(QPalette::Light, QColor(90, 90, 90));
+    pal.setColor(QPalette::Shadow, QColor(20, 20, 20));
+  } else {
+    pal = QApplication::style()->standardPalette();
+  }
+
+  QApplication::setPalette(pal);
+
+  applyContainerStyles_();
+  applyHeaderStyle_();
+  refreshDeviceBoxes_();
+  updateHeaderLeds_();
+
+  for (auto* sq : devSquares_) {
+    if (sq) {
+      QPalette p;
+      p.setColor(QPalette::Window, dark ? QColor("#3c3c3c") : QApplication::palette().color(QPalette::Base));
+      p.setColor(QPalette::Base, dark ? QColor("#3c3c3c") : QApplication::palette().color(QPalette::Base));
+      p.setColor(QPalette::Text, QApplication::palette().color(QPalette::Text));
+      p.setColor(QPalette::Mid, QApplication::palette().color(QPalette::Mid));
+      sq->setPalette(p);
+      sq->update();
+    }
+  }
+  for (auto* box : comBoxes) {
+    if (box) box->update();
+  }
+
+#if defined(Q_OS_WIN)
+  apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
+                               dark);
+#endif
+
+  applyingDarkMode_ = false;
 }
 
 void BrokkrWrapper::updateHeaderLeds_() {
@@ -1550,13 +1673,23 @@ void BrokkrWrapper::updateHeaderLeds_() {
 
     // NOTE: This single style sheet is maintained because there is no native Mac
     // widget for a "glowing orb". Styling a pure QWidget does not break Mac theming.
-    led->setStyleSheet(
-        "background: qradialgradient(cx:0.3, cy:0.3, radius:0.7, fx:0.3, fy:0.3,"
-        "  stop:0 #aaddff, stop:1 #0066cc);"
-        "border: 1px solid #000;"
-        "border-radius: 7px;");
+    const bool darkTheme = QApplication::palette().color(QPalette::Window).lightness() < 128;
+    if (darkTheme) {
+      led->setStyleSheet(
+          "background: qradialgradient(cx:0.3, cy:0.3, radius:0.7, fx:0.3, fy:0.3,"
+          "  stop:0 #4488cc, stop:1 #004488);"
+          "border: 1px solid #333;"
+          "border-radius: 7px;");
+    } else {
+      led->setStyleSheet(
+          "background: qradialgradient(cx:0.3, cy:0.3, radius:0.7, fx:0.3, fy:0.3,"
+          "  stop:0 #aaddff, stop:1 #0066cc);"
+          "border: 1px solid #000;"
+          "border-radius: 7px;");
+    }
+
     auto* glow = new QGraphicsDropShadowEffect(led);
-    glow->setColor(QColor(0, 153, 255, 200));
+    glow->setColor(darkTheme ? QColor(0, 100, 200, 160) : QColor(0, 153, 255, 200));
     glow->setBlurRadius(10);
     glow->setOffset(0, 0);
     led->setGraphicsEffect(glow);
@@ -1790,9 +1923,9 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     box->setToolTip(QString());
     box->setStyleSheet(""); // Clear any leftover inline styling
 
-    QPalette pal = box->palette();
-    pal.setColor(QPalette::Base, palette().color(QPalette::Base));
-    pal.setColor(QPalette::Text, palette().color(QPalette::Text));
+    QPalette pal = QApplication::palette();
+    pal.setColor(QPalette::Base, QApplication::palette().color(QPalette::Base));
+    pal.setColor(QPalette::Text, QApplication::palette().color(QPalette::Text));
     box->setPalette(pal);
 
     QFont f = box->font();
@@ -1825,15 +1958,25 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
       odin_mode = is_odin_product(info->product);
     }
 
-    QPalette pal = comBoxes[i]->palette();
-    if (odin_mode) {
-      pal.setColor(QPalette::Base, QColor("#4080c0")); // Odin mode: blue tint
-      pal.setColor(QPalette::Text, Qt::white);
-    } else {
-      pal.setColor(QPalette::Base, QColor("#d9822b")); // Non-Odin Samsung device: orange tint
-      pal.setColor(QPalette::Text, Qt::white);
+    {
+      QPalette pal = QApplication::palette();
+      if (odin_mode) {
+        if (darkMode_) {
+          pal.setColor(QPalette::Base, QColor("#1a5276")); // Darker blue for dark mode
+        } else {
+          pal.setColor(QPalette::Base, QColor("#4080c0")); // Odin mode: blue tint
+        }
+        pal.setColor(QPalette::Text, Qt::white);
+      } else {
+        if (darkMode_) {
+          pal.setColor(QPalette::Base, QColor("#7a4416")); // Darker orange for dark mode
+        } else {
+          pal.setColor(QPalette::Base, QColor("#d9822b")); // Non-Odin Samsung device: orange tint
+        }
+        pal.setColor(QPalette::Text, Qt::white);
+      }
+      comBoxes[i]->setPalette(pal);
     }
-    comBoxes[i]->setPalette(pal);
 
     QFont f = comBoxes[i]->font();
     f.setBold(true);
@@ -1847,17 +1990,19 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     const QString raw = QString("... +%1 more").arg(extra);
     last->setText(elideFor(last, raw));
 
-    QPalette pal = last->palette();
-    QColor base = palette().color(QPalette::Base);
-    QColor warn(255, 183, 77);
-    warn.setAlpha(50);
-    const int r2 = (base.red() * (255 - warn.alpha()) + warn.red() * warn.alpha()) / 255;
-    const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
-    const int b2 = (base.blue() * (255 - warn.alpha()) + warn.blue() * warn.alpha()) / 255;
+    {
+      QPalette pal = QApplication::palette();
+      QColor base = QApplication::palette().color(QPalette::Base);
+      QColor warn(255, 183, 77);
+      warn.setAlpha(50);
+      const int r2 = (base.red() * (255 - warn.alpha()) + warn.red() * warn.alpha()) / 255;
+      const int g2 = (base.green() * (255 - warn.alpha()) + warn.green() * warn.alpha()) / 255;
+      const int b2 = (base.blue() * (255 - warn.alpha()) + warn.blue() * warn.alpha()) / 255;
 
-    pal.setColor(QPalette::Base, QColor(r2, g2, b2));
-    pal.setColor(QPalette::Text, palette().color(QPalette::Text));
-    last->setPalette(pal);
+      pal.setColor(QPalette::Base, QColor(r2, g2, b2));
+      pal.setColor(QPalette::Text, QApplication::palette().color(QPalette::Text));
+      last->setPalette(pal);
+    }
 
     QFont f = last->font();
     f.setBold(true);
