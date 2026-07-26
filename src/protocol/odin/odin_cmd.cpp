@@ -41,7 +41,7 @@ inline brokkr::core::Status require_connected(brokkr::core::IByteTransport& c) n
 
 static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
   switch (ack) {
-    case -1: return "partition not found in PIT, or unsupported binary type";
+    case -1: return "unsupported binary";
     case -2: return "write protection failure";
     case -3: return "failed to clear write protection";
     case -4: return "write failed";
@@ -91,8 +91,8 @@ static std::string_view bootloader_fail_text(std::int32_t ack) noexcept {
 inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseBox& r, std::int32_t* out_ack) noexcept {
   if (r.id == BOOTLOADER_FAIL) {
     const auto why = bootloader_fail_text(r.ack);
-    if (!why.empty()) return brokkr::core::failf("FAIL: {} ({})", why, r.ack);
-    return brokkr::core::failf("FAIL (ack={} / 0x{:08X})", r.ack, static_cast<std::uint32_t>(r.ack));
+    if (!why.empty()) return brokkr::core::failf("{} ({})", why, r.ack);
+    return brokkr::core::failf("bootloader error (ack={} / 0x{:08X})", r.ack, static_cast<std::uint32_t>(r.ack));
   }
   if (r.id == std::numeric_limits<std::int32_t>::min()) return brokkr::core::fail("Invalid response id (INT_MIN)");
   if (r.id != expected_id) {

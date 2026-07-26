@@ -43,6 +43,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <utility>
@@ -2319,9 +2320,10 @@ void BrokkrWrapper::startWorkStart_() {
     };
 
     ui.on_error = [&](const std::string& s) {
-      if (s.rfind("DEVFAIL idx=", 0) == 0) {
+      constexpr std::string_view kDevFailPrefix = "DEVFAIL idx=";
+      if (s.rfind(kDevFailPrefix, 0) == 0) {
         sawPerDeviceFail.store(true, std::memory_order_relaxed);
-        const auto sp = s.find(' ');
+        const auto sp = s.find(' ', kDevFailPrefix.size());
         if (sp != std::string::npos) {
           std::lock_guard lk(devfailMtx);
           devfailReasons.insert(s.substr(sp + 1));
