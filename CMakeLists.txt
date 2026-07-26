@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Brokkr LANGUAGES C CXX VERSION 1.4.8)
+project(Brokkr LANGUAGES C CXX VERSION 2.4.8)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -397,6 +397,14 @@ if (LTO_SUPPORTED)
 endif()
 
 # Versioning
+set(BROKKR_VERSION_SUFFIX "" CACHE STRING "Pre-release label shown in the UI instead of 'rel' (for example beta1)")
+
+if (BROKKR_VERSION_SUFFIX)
+    set(BROKKR_RELEASE_LABEL "${BROKKR_VERSION_SUFFIX}")
+else()
+    set(BROKKR_RELEASE_LABEL "rel")
+endif()
+
 execute_process(
     COMMAND git rev-list --count ${PROJECT_VERSION}..HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -409,14 +417,14 @@ if(NOT BROKKR_COMMIT_COUNT)
 endif()
 
 if (CMAKE_BUILD_TYPE)
-    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}-${CMAKE_BUILD_TYPE}")
+    message(STATUS "Version: v${PROJECT_VERSION}-${BROKKR_RELEASE_LABEL}+${BROKKR_COMMIT_COUNT}-${CMAKE_BUILD_TYPE}")
 else()
-    message(STATUS "Version: v${PROJECT_VERSION}+${BROKKR_COMMIT_COUNT}")
+    message(STATUS "Version: v${PROJECT_VERSION}-${BROKKR_RELEASE_LABEL}+${BROKKR_COMMIT_COUNT}")
 endif()
 
 target_compile_definitions(brokkr PRIVATE
     BROKKR_COMMIT_COUNT=\"${BROKKR_COMMIT_COUNT}\"
-    BROKKR_BUILD_TYPE=\"$<IF:$<CONFIG:Debug>,dbg,rel>\"
+    BROKKR_BUILD_TYPE=\"$<IF:$<CONFIG:Debug>,dbg,${BROKKR_RELEASE_LABEL}>\"
     BROKKR_VERSION=\"${PROJECT_VERSION}\"
 )
 

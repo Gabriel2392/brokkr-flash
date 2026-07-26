@@ -7,16 +7,20 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
-      new_tag:
-        description: "New release tag (e.g. v1.4.0). Leave empty for build-only."
+      release_type:
+        description: "Publish a release. 'stable' bumps the patch version; 'beta' tags a pre-release without bumping it."
+        required: true
+        type: choice
+        options:
+          - none
+          - stable
+          - beta
+        default: none
+      prerelease_label:
+        description: "Pre-release label, used only when release_type is 'beta' (e.g. beta1, beta2, rc1)."
         required: false
         type: string
-        default: ""
-      prev_tag:
-        description: "Previous release tag for changelog (e.g. v1.3.0)."
-        required: false
-        type: string
-        default: ""
+        default: "beta1"
 
 permissions:
   contents: write
@@ -26,37 +30,115 @@ env:
 
 jobs:
   # ═══════════════════════════════════════════════════
-  #  Bump version, commit, tag  (release only)
+  #  Resolve version; bump, commit and tag on release
   # ═══════════════════════════════════════════════════
   prepare:
-    name: Bump version & tag
-    if: inputs.new_tag != ''
+    name: Resolve version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      full_version: ${{ steps.ver.outputs.full_version }}
+      label: ${{ steps.ver.outputs.label }}
+      tag: ${{ steps.ver.outputs.tag }}
+      prev_tag: ${{ steps.ver.outputs.prev_tag }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Extract semver from tag
+      - name: Compute version
         id: ver
+        env:
+          RELEASE_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_type || 'none' }}
+          PRERELEASE_LABEL: ${{ inputs.prerelease_label }}
         run: |
-          TAG="${{ inputs.new_tag }}"
-          VER="${TAG#v}"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
 
-      - name: Update CMakeLists.txt version
-        run: |
-          sed -i "s/project(Brokkr LANGUAGES C CXX VERSION [0-9.]*)/project(Brokkr LANGUAGES C CXX VERSION ${{ steps.ver.outputs.version }})/" CMakeLists.txt
-          grep 'project(Brokkr' CMakeLists.txt
+          matches="$(grep -cE '^project\(Brokkr LANGUAGES C CXX VERSION [0-9]+\.[0-9]+\.[0-9]+\)' CMakeLists.txt || true)"
+          if [ "$matches" != "1" ]; then
+            echo "::error::Expected exactly one numeric project(Brokkr ... VERSION x.y.z) line in CMakeLists.txt (found ${matches})."
+            exit 1
+          fi
+          CURRENT="$(sed -nE 's/^project\(Brokkr LANGUAGES C CXX VERSION ([0-9]+\.[0-9]+\.[0-9]+)\).*/\1/p' CMakeLists.txt)"
+
+          if [ "$RELEASE_TYPE" = "none" ]; then
+            {
+              echo "version=${CURRENT}"
+              echo "full_version=${CURRENT}-dev"
+              echo "label=dev"
+              echo "tag="
+              echo "prev_tag="
+              echo "prerelease=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "Development build ${CURRENT}-dev"
+            exit 0
+          fi
+
+          IFS=. read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          VERSION="${MAJOR}.${MINOR}.$((10#$PATCH + 1))"
+          PREV_TAG="v${CURRENT}"
+
+          if [ "$RELEASE_TYPE" = "beta" ]; then
+            LABEL="$PRERELEASE_LABEL"
+            if ! printf '%s' "$LABEL" | grep -qE '^[0-9A-Za-z][0-9A-Za-z.]*$'; then
+              echo "::error::prerelease_label must start with a letter or digit and contain only letters, digits and dots (got '${LABEL}')."
+              exit 1
+            fi
+            case "$LABEL" in
+              dbg | dev | rel)
+                echo "::error::'${LABEL}' is reserved; pick a different pre-release label."
+                exit 1
+                ;;
+            esac
+            FULL_VERSION="${VERSION}-${LABEL}"
+            PRERELEASE=true
+          else
+            LABEL="rel"
+            FULL_VERSION="${VERSION}"
+            PRERELEASE=false
+          fi
+
+          TAG="v${FULL_VERSION}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" > /dev/null; then
+            echo "::error::Tag ${TAG} already exists."
+            exit 1
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "full_version=${FULL_VERSION}"
+            echo "label=${LABEL}"
+            echo "tag=${TAG}"
+            echo "prev_tag=${PREV_TAG}"
+            echo "prerelease=${PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "${CURRENT} -> ${VERSION}, tagging ${TAG} (prerelease=${PRERELEASE})"
 
       - name: Commit & tag
+        if: github.event_name == 'workflow_dispatch' && inputs.release_type != 'none'
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
+          set -euo pipefail
+
+          sed -i -E "s/^(project\(Brokkr LANGUAGES C CXX VERSION )[0-9]+\.[0-9]+\.[0-9]+(\))/\1${VERSION}\2/" CMakeLists.txt
+          grep -qF "project(Brokkr LANGUAGES C CXX VERSION ${VERSION})" CMakeLists.txt
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add CMakeLists.txt
-          git commit -m "Release ${{ inputs.new_tag }}"
-          git tag "${{ inputs.new_tag }}"
-          git push origin main --tags
+          git commit -m "Release ${TAG}"
+          git tag "${TAG}"
+
+          if [ "$RELEASE_TYPE" = "beta" ]; then
+            git push origin "refs/tags/${TAG}"
+          else
+            git push origin main --tags
+          fi
 
   # ═══════════════════════════════════════════════════
   #  Linux – Ubuntu 24.04, AppImage (x64)
@@ -64,7 +146,6 @@ jobs:
   linux_appimage:
     name: Linux AppImage x64 (${{ matrix.build_type }})
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -77,7 +158,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - name: Install build deps
         run: |
@@ -102,6 +183,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DCMAKE_C_COMPILER=gcc-14 \
             -DCMAKE_CXX_COMPILER=g++-14 \
+            -DBROKKR_VERSION_SUFFIX="${{ needs.prepare.outputs.label }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
@@ -171,12 +253,12 @@ jobs:
             --plugin qt \
             --output appimage
 
-          mv Brokkr-x86_64.AppImage Brokkr-linux-x86_64${{ matrix.suffix }}.AppImage
+          mv Brokkr-x86_64.AppImage Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-linux-x86_64${{ matrix.suffix }}.AppImage
-          path: Brokkr-linux-x86_64${{ matrix.suffix }}.AppImage
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-x86_64${{ matrix.suffix }}.AppImage
 
   # ═══════════════════════════════════════════════════
   #  Linux – Ubuntu 24.04, AppImage (arm64)
@@ -184,7 +266,6 @@ jobs:
   linux_appimage_arm64:
     name: Linux AppImage arm64 (${{ matrix.build_type }})
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
@@ -197,7 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - name: Install build deps
         run: |
@@ -222,6 +303,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
             -DCMAKE_C_COMPILER=gcc-14 \
             -DCMAKE_CXX_COMPILER=g++-14 \
+            -DBROKKR_VERSION_SUFFIX="${{ needs.prepare.outputs.label }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
@@ -278,12 +360,12 @@ jobs:
             --plugin qt \
             --output appimage
 
-          mv Brokkr-aarch64.AppImage Brokkr-linux-arm64${{ matrix.suffix }}.AppImage
+          mv Brokkr-aarch64.AppImage Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-linux-arm64${{ matrix.suffix }}.AppImage
-          path: Brokkr-linux-arm64${{ matrix.suffix }}.AppImage
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-linux-arm64${{ matrix.suffix }}.AppImage
 
   # ═══════════════════════════════════════════════════
   #  Windows x64 + arm64 (NSIS installer + portable zip)
@@ -291,7 +373,6 @@ jobs:
   windows_installer:
     name: Windows installer ${{ matrix.artifact_arch }} (${{ matrix.build_type }})
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -328,7 +409,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -354,6 +435,7 @@ jobs:
           echo "$QT_ROOT_DIR/bin" >> "$GITHUB_PATH"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBROKKR_VERSION_SUFFIX="${{ needs.prepare.outputs.label }}" \
             "-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR"
 
       - name: Build
@@ -387,7 +469,7 @@ jobs:
             exit 1
           }
           installer="$(ls -1 *.exe | head -n1)"
-          mv "$installer" ../Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
+          mv "$installer" ../Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
 
       - name: Package (portable zip)
         shell: bash
@@ -397,7 +479,7 @@ jobs:
           rm -rf "$install_root"
           cmake --install build --prefix "$install_root" --config ${{ matrix.build_type }}
           cd portable
-          7z a -tzip ../Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip brokkr/
+          7z a -tzip ../Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip brokkr/
 
       - name: Verify deployed binary architectures
         shell: bash
@@ -426,13 +508,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
-          path: Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.exe
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
-          path: Brokkr-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-windows-${{ matrix.artifact_arch }}${{ matrix.suffix }}.zip
 
   # ═══════════════════════════════════════════════════
   #  macOS arm64
@@ -440,7 +522,6 @@ jobs:
   macos_app:
     name: macOS app arm64 (${{ matrix.build_type }})
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: macos-15
     strategy:
       matrix:
@@ -453,7 +534,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -475,6 +556,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBROKKR_VERSION_SUFFIX="${{ needs.prepare.outputs.label }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
@@ -506,7 +588,7 @@ jobs:
           set -euo pipefail
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
-          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
 
       - name: Deploy + Zip (debug)
         if: matrix.build_type == 'Debug'
@@ -515,12 +597,12 @@ jobs:
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
           xattr -cr "$APP" || true
-          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
-          path: Brokkr-macos-arm64${{ matrix.suffix }}.app.zip
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-arm64${{ matrix.suffix }}.app.zip
 
   # ═══════════════════════════════════════════════════
   #  macOS x86_64 (Big Sur+)
@@ -528,7 +610,6 @@ jobs:
   macos_app_x86:
     name: macOS app x86_64 (${{ matrix.build_type }})
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: macos-15-intel
     strategy:
       matrix:
@@ -541,7 +622,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -563,6 +644,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBROKKR_VERSION_SUFFIX="${{ needs.prepare.outputs.label }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
             -DCMAKE_OSX_ARCHITECTURES=x86_64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
@@ -581,7 +663,7 @@ jobs:
           set -euo pipefail
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
-          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
 
       - name: Deploy + Zip (debug)
         if: matrix.build_type == 'Debug'
@@ -590,28 +672,25 @@ jobs:
           APP="build/brokkr.app"
           "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -verbose=2
           xattr -cr "$APP" || true
-          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
 
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
-          path: Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
+          path: Brokkr-${{ needs.prepare.outputs.full_version }}-macos-x86_64${{ matrix.suffix }}.app.zip
 
   android_apk:
     name: Android APK
     needs: [prepare]
-    if: >-
-      always() &&
-      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
-      github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag || github.ref }}
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
       - name: Resolve source commit
         id: src
@@ -622,7 +701,7 @@ jobs:
         env:
           ANDROID_REPO: ${{ secrets.ANDROID_REPO }}
           ANDROID_TOKEN: ${{ secrets.ANDROID_DISPATCH_TOKEN }}
-          NEW_TAG: ${{ inputs.new_tag }}
+          NEW_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           if [ -n "$ANDROID_REPO" ] && [ -n "$ANDROID_TOKEN" ]; then
@@ -641,7 +720,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ANDROID_DISPATCH_TOKEN }}
           ANDROID_REPO: ${{ secrets.ANDROID_REPO }}
-          NEW_TAG: ${{ inputs.new_tag }}
+          NEW_TAG: ${{ needs.prepare.outputs.tag }}
+          FULL_VERSION: ${{ needs.prepare.outputs.full_version }}
+          SYNC_VERSION: ${{ needs.prepare.outputs.label == 'rel' }}
           BROKKR_SHA: ${{ steps.src.outputs.sha }}
         run: |
           set -euo pipefail
@@ -652,9 +733,10 @@ jobs:
           gh workflow run build-apk.yml \
             -R "${ANDROID_REPO}" \
             --ref "${DEFAULT_BRANCH}" \
-            -f version="${NEW_TAG}" \
+            -f version="${FULL_VERSION}" \
             -f brokkr_ref="${BROKKR_SHA}" \
-            -f sync=true \
+            -f sync_submodule=true \
+            -f sync_version="${SYNC_VERSION}" \
             -f dispatch_id="${DISPATCH_ID}"
 
           echo "Dispatched app build ${DISPATCH_ID}"
@@ -698,12 +780,13 @@ jobs:
           mkdir -p dist
           gh run download "${RUN_ID}" -R "${ANDROID_REPO}" -n Brokkr-android.apk -D dist
           test -f dist/Brokkr-android.apk
+          mv dist/Brokkr-android.apk "dist/Brokkr-${FULL_VERSION}-android.apk"
 
       - uses: actions/upload-artifact@v4
         if: steps.cfg.outputs.enabled == 'true'
         with:
-          name: Brokkr-android.apk
-          path: dist/Brokkr-android.apk
+          name: Brokkr-${{ needs.prepare.outputs.full_version }}-android.apk
+          path: dist/Brokkr-${{ needs.prepare.outputs.full_version }}-android.apk
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════
@@ -721,7 +804,8 @@ jobs:
       needs.windows_installer.result == 'success' &&
       needs.macos_app.result == 'success' &&
       github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/main' || inputs.new_tag != '')
+      inputs.release_type != 'beta' &&
+      (github.ref == 'refs/heads/main' || inputs.release_type == 'stable')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -747,14 +831,14 @@ jobs:
 
   release:
     name: Publish release
-    if: inputs.new_tag != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.release_type != 'none'
     needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86, android_apk]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.new_tag }}
+          ref: ${{ needs.prepare.outputs.tag }}
           fetch-depth: 0
 
       - name: Download all artifacts
@@ -766,18 +850,21 @@ jobs:
       - name: Remove debug artifacts from release bundle
         run: |
           set -euo pipefail
-          find artifacts -maxdepth 1 -type f -name '*-dbg*' -delete
+          find artifacts -maxdepth 1 -type f -name '*-dbg.*' -delete
 
       - name: Generate changelog body
+        env:
+          NEW: ${{ needs.prepare.outputs.tag }}
+          PREV: ${{ needs.prepare.outputs.prev_tag }}
         run: |
-          NEW="${{ inputs.new_tag }}"
-          PREV="${{ inputs.prev_tag }}"
+          set -euo pipefail
 
           echo "## Brokkr $NEW" > body.md
           echo "" >> body.md
 
-          if [ -n "$PREV" ]; then
-            git log "${PREV}..${NEW}" --pretty=format:"- %s" --no-merges >> body.md
+          if git rev-parse -q --verify "refs/tags/${PREV}" > /dev/null; then
+            git log "${PREV}..${NEW}" --pretty=format:"- %s" --no-merges \
+              | grep -v '^- Release v' >> body.md || true
             echo "" >> body.md
             echo "" >> body.md
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV}...${NEW}" >> body.md
@@ -790,9 +877,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.new_tag }}
-          name: Brokkr ${{ inputs.new_tag }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Brokkr ${{ needs.prepare.outputs.tag }}
           body_path: body.md
           draft: false
-          prerelease: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           files: artifacts/*
