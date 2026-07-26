@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cstddef>
@@ -388,8 +389,23 @@ int run_flash_cli(const CliArgs& args) {
       saw_per_device_fail.store(true, std::memory_order_relaxed);
       const auto sp = s.find(' ', kDevFailPrefix.size());
       if (sp != std::string::npos) {
-        std::lock_guard lk(devfail_mtx);
-        devfail_reasons.insert(s.substr(sp + 1));
+        const std::string reason = s.substr(sp + 1);
+        {
+          std::lock_guard lk(devfail_mtx);
+          devfail_reasons.insert(reason);
+        }
+
+        const char* const begin = s.data() + kDevFailPrefix.size();
+        const char* const end = s.data() + sp;
+        int idx = 0;
+        const auto [ptr, ec] = std::from_chars(begin, end, idx);
+        if (ec == std::errc{} && ptr == end && idx >= 0) {
+          if (reason.empty())
+            spdlog::error("FAIL! (Device {})", idx);
+          else
+            spdlog::error("FAIL! (Device {}) {}", idx, reason);
+          return;
+        }
       }
     }
     spdlog::error("{}", s);
