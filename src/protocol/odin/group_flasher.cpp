@@ -119,9 +119,16 @@ static brokkr::core::Result<std::vector<ImageSpec>> sources_common_mapping_or_em
   out.reserve(sources.size());
 
   for (const auto& s : sources) {
+    const auto skipped = [&](std::string_view why) {
+      if (s.kind == ImageSpec::Kind::RawFile)
+        spdlog::warn("Skipping '{}': {}", s.basename, why);
+      else
+        spdlog::debug("Skipping '{}': {}", s.basename, why);
+    };
+
     const auto* ref = devs.front()->pit_table.find_by_file_name(s.basename);
     if (!ref) {
-      spdlog::debug("Source '{}' has no matching PIT entry — skipped", s.basename);
+      skipped("no matching PIT entry");
       continue;
     }
 
@@ -129,7 +136,7 @@ static brokkr::core::Result<std::vector<ImageSpec>> sources_common_mapping_or_em
     for (auto* d : devs) {
       const auto* p = d->pit_table.find_by_file_name(s.basename);
       if (!p) {
-        spdlog::debug("Source '{}' missing on one or more devices — skipped", s.basename);
+        skipped("missing on one or more devices");
         missing = true;
         break;
       }
