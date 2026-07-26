@@ -33,7 +33,7 @@ jobs:
     if: inputs.new_tag != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -75,7 +75,7 @@ jobs:
             suffix: "-dbg"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag || github.ref }}
 
@@ -195,7 +195,7 @@ jobs:
             suffix: "-dbg"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag || github.ref }}
 
@@ -326,7 +326,7 @@ jobs:
             suffix: "-dbg"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag || github.ref }}
 
@@ -451,7 +451,7 @@ jobs:
             suffix: "-dbg"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag || github.ref }}
 
@@ -539,7 +539,7 @@ jobs:
             suffix: "-dbg"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag || github.ref }}
 
@@ -616,7 +616,7 @@ jobs:
       (github.ref == 'refs/heads/main' || inputs.new_tag != '')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 
@@ -644,7 +644,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.new_tag }}
           fetch-depth: 0
