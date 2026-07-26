@@ -17,6 +17,7 @@
 
 #include "app/cli_mode.hpp"
 
+#include "app/download_mode.hpp"
 #include "app/md5_verify.hpp"
 #include "app/pit_file.hpp"
 #include "app/samsung_usb.hpp"
@@ -56,6 +57,7 @@ constexpr std::uint16_t kWirelessPort = 13579;
 struct CliArgs {
   bool help = false;
   bool list = false;
+  bool reboot_download = false;
   bool wireless = false;
   bool no_reboot = false;
 
@@ -78,7 +80,7 @@ struct Provider {
 
 bool is_cli_trigger(std::string_view arg) {
   static const std::unordered_set<std::string_view> kTriggers = {
-      "-h", "--help", "--list", "--wireless", "--no-reboot", "--use-pit", "--target",
+      "-h", "--help", "--list", "--reboot-download", "--wireless", "--no-reboot", "--use-pit", "--target",
       "-b", "-a", "-c", "-s", "-u",
   };
   return kTriggers.contains(arg);
@@ -103,6 +105,7 @@ void print_usage() {
       << "CLI options (any of these switches CLI mode):\n"
       << "  -h, --help                 Show this help\n"
       << "  --list                     List Samsung devices usable by --target\n"
+      << "  --reboot-download          Reboot devices into Download Mode and exit; continue flash if none needed\n"
       << "  -b <path>                  BL file\n"
       << "  -a <path>                  AP file\n"
       << "  -c <path>                  CP file\n"
@@ -136,6 +139,10 @@ brokkr::core::Result<CliArgs> parse_cli_args(int argc, char* argv[]) {
     }
     if (arg == "--list") {
       out.list = true;
+      continue;
+    }
+    if (arg == "--reboot-download") {
+      out.reboot_download = true;
       continue;
     }
     if (arg == "--wireless") {
@@ -242,6 +249,31 @@ int list_devices_cli() {
     std::cout << d.sysname << "\t" << (is_odin_product(d.product) ? "Odin Mode" : "Not in Odin Mode") << "\n";
   }
 
+  return 0;
+}
+
+std::optional<int> reboot_download_cli() {
+  const auto devs = enumerate_samsung_targets();
+  const bool any_non_odin = std::ranges::any_of(devs, [](const auto& d) { return !is_odin_product(d.product); });
+  if (!any_non_odin) {
+    spdlog::info("No connected device needs reboot into Download Mode.");
+    return std::nullopt;
+  }
+
+  const auto r = brokkr::app::reboot_to_download_mode();
+  if (r.ports_seen == 0) {
+    spdlog::error("No Samsung serial port found.");
+    return 1;
+  }
+
+  for (const auto& f : r.failures) spdlog::warn("{}", f);
+
+  if (r.sent_ok == 0) {
+    spdlog::error("Failed to send reboot command to Samsung serial ports.");
+    return 1;
+  }
+
+  spdlog::info("Reboot command sent to {} Samsung serial port(s).", r.sent_ok);
   return 0;
 }
 
@@ -464,6 +496,10 @@ int run_cli(int argc, char* argv[]) {
   }
 
   if (args.list) return list_devices_cli();
+
+  if (args.reboot_download) {
+    if (auto rc = reboot_download_cli()) return *rc;
+  }
 
   return run_flash_cli(args);
 }
