@@ -20,9 +20,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <charconv>
@@ -43,10 +45,96 @@
 struct UsbDeviceInfo {
   uint16_t vendor = 0;
   uint16_t product = 0;
+  std::uint64_t connection_id = 0;
+  bool has_connection_id = false;
   std::string device_path;
 };
 
 namespace {
+
+std::mutex g_ports_mtx;
+struct PortState {
+  std::uint64_t id = 0;
+  std::uint64_t last_arrival = 0;
+  bool present = false;
+  bool arrival_pending = false;
+  bool removed = false;
+};
+std::unordered_map<std::string, PortState> g_ports;
+std::uint64_t g_next_id = 1;
+
+std::string port_key(std::string_view port) {
+  std::string normalized(port);
+  for (auto& c : normalized) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return normalized;
+}
+
+std::uint64_t port_id(std::string_view port, std::uint64_t last_arrival) {
+  std::lock_guard lock(g_ports_mtx);
+  auto& state = g_ports[port_key(port)];
+  const bool first_seen = state.id == 0 && !state.removed;
+  if (state.id == 0) state.id = g_next_id++;
+
+  bool new_arrival = false;
+  if (last_arrival != 0) {
+    if (state.last_arrival == 0) {
+      state.last_arrival = last_arrival;
+      if (state.arrival_pending) {
+        state.arrival_pending = false;
+        new_arrival = true;
+      }
+    } else if (state.last_arrival != last_arrival) {
+      state.last_arrival = last_arrival;
+      new_arrival = true;
+      if (state.arrival_pending)
+        state.arrival_pending = false;
+      else
+        state.id = g_next_id++;
+    }
+  }
+
+  // Ignore stale rows after removal.
+  if (state.present || first_seen || new_arrival) {
+    state.present = true;
+    state.removed = false;
+  }
+  return state.id;
+}
+
+void port_arrived(std::string_view port) {
+  if (port.empty()) return;
+  std::lock_guard lock(g_ports_mtx);
+  auto& state = g_ports[port_key(port)];
+  if (!state.present) {
+    state.id = g_next_id++;
+    state.arrival_pending = true;
+  }
+  state.present = true;
+  state.removed = false;
+}
+
+void port_removed(std::string_view port) {
+  if (port.empty()) return;
+  std::lock_guard lock(g_ports_mtx);
+  auto& state = g_ports[port_key(port)];
+  state.present = false;
+  state.arrival_pending = false;
+  state.removed = true;
+}
+
+std::optional<std::uint64_t> last_arrival(HDEVINFO set, SP_DEVINFO_DATA& device) {
+  DEVPROPTYPE type = 0;
+  FILETIME arrival{};
+  if (!SetupDiGetDevicePropertyW(set, &device, &DEVPKEY_Device_LastArrivalDate, &type,
+                                 reinterpret_cast<PBYTE>(&arrival), sizeof(arrival), nullptr, 0) ||
+      type != DEVPROP_TYPE_FILETIME) {
+    return std::nullopt;
+  }
+  const auto value = (static_cast<std::uint64_t>(arrival.dwHighDateTime) << 32) |
+                     static_cast<std::uint64_t>(arrival.dwLowDateTime);
+  if (value == 0) return std::nullopt;
+  return value;
+}
 
 uint16_t extract_hex4(const std::string& str, const std::string& key) {
   std::string lower_str = str;
@@ -112,12 +200,20 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
     }
 
     if (found_port) {
-      UsbDeviceInfo info;
-      info.device_path = portName;
-      info.vendor = vid;
-      info.product = pid;
-      spdlog::debug("Found Device: {} (VID: 0x{:04x}, PID: 0x{:04x})", info.device_path, vid, pid);
-      result.push_back(std::move(info));
+      const auto duplicate = std::ranges::find_if(result, [&](const UsbDeviceInfo& existing) {
+        return port_key(existing.device_path) == port_key(portName);
+      });
+      if (duplicate == result.end()) {
+        UsbDeviceInfo info;
+        info.device_path = portName;
+        info.vendor = vid;
+        info.product = pid;
+        const auto arrival = last_arrival(hDevInfo, devInfoData);
+        info.connection_id = port_id(info.device_path, arrival.value_or(0));
+        info.has_connection_id = arrival.has_value();
+        spdlog::debug("Found Device: {} (VID: 0x{:04x}, PID: 0x{:04x})", info.device_path, vid, pid);
+        result.push_back(std::move(info));
+      }
     }
 
     RegCloseKey(hKey);
@@ -146,6 +242,8 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
     info.serial_nodes = {dev.device_path};
     info.vendor = dev.vendor;
     info.product = dev.product;
+    info.connection_id = dev.connection_id;
+    info.has_connection_id = dev.has_connection_id;
     result.push_back(info);
   }
   spdlog::debug("Total USB devices found: {}", result.size());
@@ -159,5 +257,9 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   }
   return std::nullopt;
 }
+
+void note_device_arrival(std::string_view sysname) { port_arrived(sysname); }
+
+void note_device_removal(std::string_view sysname) { port_removed(sysname); }
 
 } // namespace brokkr::windows

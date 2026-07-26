@@ -612,6 +612,15 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
         btnManyDevices_->setEnabled(false);
       }
 
+      usbSlots_ = slots_;
+      usbResults_ = results_;
+      usbStateSaved_ = true;
+      slots_.clear();
+      results_.assign(1, brokkr::app::SlotResult::None);
+      sessions_.clear();
+      shown_.clear();
+      connectedDevices_.clear();
+
       rebuildDeviceBoxes_(1, true);
       layout()->invalidate();
       layout()->activate();
@@ -629,6 +638,16 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       layout()->activate();
       setMinimumHeight(0);
       resize(width(), baseWindowHeight_);
+
+      if (usbStateSaved_) {
+        slots_ = std::move(usbSlots_);
+        results_ = std::move(usbResults_);
+        usbStateSaved_ = false;
+      }
+
+      // Clear the old wireless device.
+      refreshConnectedDevices_();
+      showResults_();
     }
 
     refreshDeviceBoxes_();
@@ -753,6 +772,8 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
     slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    std::ranges::fill(results_, brokkr::app::SlotResult::None);
+    std::ranges::fill(usbResults_, brokkr::app::SlotResult::None);
 
     for (auto* sq : devSquares_) {
       if (!sq) continue;
@@ -822,6 +843,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   deviceTimer = new QTimer(this);
   connect(deviceTimer, &QTimer::timeout, this, [this]() {
+    if (busy_) return;
     if (!usbDirty_.exchange(false)) return;
     refreshConnectedDevices_();
   });
@@ -1292,7 +1314,24 @@ bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qint
   }
 
   if (msg->message == WM_DEVICECHANGE) {
-    if (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE) requestUsbRefresh_();
+    const bool arrived = msg->wParam == DBT_DEVICEARRIVAL;
+    const bool removed = msg->wParam == DBT_DEVICEREMOVECOMPLETE;
+    if ((arrived || removed) && msg->lParam != 0) {
+      const auto* header = reinterpret_cast<const DEV_BROADCAST_HDR*>(msg->lParam);
+      if (header->dbch_devicetype == DBT_DEVTYP_PORT) {
+        const QString sysname =
+            IsWindowUnicode(msg->hwnd)
+                ? QString::fromWCharArray(reinterpret_cast<const DEV_BROADCAST_PORT_W*>(header)->dbcp_name).trimmed()
+                : QString::fromLocal8Bit(reinterpret_cast<const DEV_BROADCAST_PORT_A*>(header)->dbcp_name).trimmed();
+        if (!sysname.isEmpty()) {
+          if (arrived)
+            brokkr::platform::note_device_arrival(sysname.toStdString());
+          else
+            brokkr::platform::note_device_removal(sysname.toStdString());
+        }
+      }
+    }
+    if (arrived || removed) requestUsbRefresh_();
   }
 
   if (result) *result = 0;
@@ -1305,24 +1344,80 @@ void BrokkrWrapper::requestUsbRefresh_() noexcept {
   usbDirty_.store(true, std::memory_order_relaxed);
 }
 
-void BrokkrWrapper::refreshConnectedDevices_() {
-  QStringList shown;
-  QStringList physicalUsb;
+void BrokkrWrapper::clearSquare_(int slot) {
+  if (slot < 0) return;
+  const auto index = static_cast<std::size_t>(slot);
+  if (index >= results_.size()) results_.resize(index + 1, brokkr::app::SlotResult::None);
+  results_[index] = brokkr::app::SlotResult::None;
 
-  for (const auto& d : brokkr::app::enumerate_samsung_targets()) physicalUsb << QString::fromStdString(d.sysname);
+  if (slot >= devSquares_.size()) return;
+  if (static_cast<std::size_t>(slot) < slotFailed_.size()) slotFailed_[static_cast<std::size_t>(slot)] = 0;
+  if (static_cast<std::size_t>(slot) < slotActive_.size()) slotActive_[static_cast<std::size_t>(slot)] = 0;
+
+  if (auto* square = devSquares_[slot]) {
+    square->setVariant(DeviceSquare::Variant::Green);
+    square->setText("");
+    square->setFill(0.0);
+  }
+}
+
+void BrokkrWrapper::updateSlots_(const std::vector<brokkr::app::DeviceSession>& sessions) {
+  auto update = brokkr::app::update_slots(slots_, sessions, static_cast<std::size_t>(devSquares_.size()));
+  slots_ = std::move(update.devices);
+  overflowCount_ = update.overflow;
+  overflowDevices_ = overflowCount_ != 0;
+
+  for (const auto slot : update.added) clearSquare_(static_cast<int>(slot));
+}
+
+bool BrokkrWrapper::isShown_(const brokkr::app::DeviceSession& session) const {
+  return std::ranges::find(shown_, session) != shown_.end();
+}
+
+std::vector<std::optional<brokkr::app::DeviceSession>> BrokkrWrapper::shownSlots_() const {
+  auto out = slots_;
+  for (auto& slot : out)
+    if (slot && !isShown_(*slot)) slot.reset();
+  return out;
+}
+
+QStringList BrokkrWrapper::slotNames_() const {
+  QStringList out;
+  out.reserve(static_cast<qsizetype>(slots_.size()));
+  for (const auto& slot : slots_) out << (slot && isShown_(*slot) ? QString::fromStdString(slot->sysname) : QString{});
+  return out;
+}
+
+void BrokkrWrapper::refreshConnectedDevices_() {
+  const auto usb = brokkr::app::enumerate_samsung_targets();
+
+  QStringList physicalUsb;
+  std::vector<brokkr::app::DeviceSession> usbSessions;
+  usbSessions.reserve(usb.size());
+
+  for (const auto& device : usb) {
+    physicalUsb << QString::fromStdString(device.sysname);
+    usbSessions.push_back({.sysname = device.sysname,
+                           .connection_id = device.connection_id,
+                           .transport = brokkr::app::DeviceTransport::Usb});
+  }
 
   bool physicalWireless = false;
   QString physicalWirelessId;
+  std::uint64_t wirelessId = 0;
+  bool wantWireless = false;
   {
     std::lock_guard lk(wireless_mtx_);
-    const bool wantWireless = (chkWireless && chkWireless->isChecked());
+    wantWireless = (chkWireless && chkWireless->isChecked());
     if (wantWireless) {
       if (wireless_watcher_paused_.load(std::memory_order_acquire)) {
         physicalWireless = !wireless_sysname_.isEmpty();
         physicalWirelessId = wireless_sysname_;
+        wirelessId = wireless_id_;
       } else if (wireless_conn_ && wireless_conn_->connected() && !wireless_sysname_.isEmpty()) {
         physicalWireless = true;
         physicalWirelessId = wireless_sysname_;
+        wirelessId = wireless_id_;
       } else {
         wireless_conn_.reset();
         wireless_sysname_.clear();
@@ -1333,28 +1428,45 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   const int physicalCount = physicalUsb.size() + (physicalWireless ? 1 : 0);
   logDevCount_.store(physicalCount, std::memory_order_relaxed);
 
+  std::vector<brokkr::app::DeviceSession> shown;
   const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
-  if (!tgt.isEmpty()) {
-    auto info = brokkr::platform::find_by_sysname(tgt.toStdString());
-    if (info) shown << QString::fromStdString(info->sysname);
-  } else {
-    shown = physicalUsb;
+  if (!wantWireless) {
+    if (!tgt.isEmpty()) {
+      const std::string name = tgt.toStdString();
+      const auto it = std::ranges::find_if(usb, [&](const auto& device) { return device.sysname == name; });
+      if (it != usb.end()) {
+        shown.push_back({.sysname = it->sysname,
+                         .connection_id = it->connection_id,
+                         .transport = brokkr::app::DeviceTransport::Usb});
+      } else if (auto info = brokkr::platform::find_by_sysname(name)) {
+        shown.push_back({.sysname = info->sysname,
+                         .connection_id = info->connection_id,
+                         .transport = brokkr::app::DeviceTransport::Usb});
+      }
+    } else {
+      shown = usbSessions;
+    }
   }
 
-  if (physicalWireless) shown.prepend(physicalWirelessId);
+  // Wireless uses one square.
+  if (physicalWireless) {
+    shown.insert(shown.begin(), {.sysname = physicalWirelessId.toStdString(),
+                                 .connection_id = wirelessId,
+                                 .transport = brokkr::app::DeviceTransport::Wireless});
+  }
 
-  if (busy_) return;
+  if (busy_) {
+    requestUsbRefresh_();
+    return;
+  }
 
   {
     const QSet<QString> prev = QSet<QString>(physicalUsbPrev_.begin(), physicalUsbPrev_.end());
     const QSet<QString> now = QSet<QString>(physicalUsb.begin(), physicalUsb.end());
 
-    bool anyAttached = false;
-
     for (const auto& s : now) {
       if (!prev.contains(s)) {
         spdlog::info("Connected: {}", s.toStdString());
-        anyAttached = true;
       }
     }
     for (const auto& s : prev)
@@ -1366,7 +1478,6 @@ void BrokkrWrapper::refreshConnectedDevices_() {
     if (physicalWireless && (!physicalWirelessPrev_ || physicalWirelessIdPrev_ != physicalWirelessId)) {
       if (!physicalWirelessId.isEmpty()) {
         spdlog::info("Connected: {}", physicalWirelessId.toStdString());
-        anyAttached = true;
       }
     }
 
@@ -1375,26 +1486,35 @@ void BrokkrWrapper::refreshConnectedDevices_() {
     physicalWirelessIdPrev_ = physicalWirelessId;
   }
 
-  const QStringList prevShown = connectedDevices_;
-  connectedDevices_ = shown;
-
-  auto clearRowState = [this](int i) {
-    if (i < 0 || i >= devSquares_.size()) return;
-    if (static_cast<std::size_t>(i) < slotFailed_.size()) slotFailed_[static_cast<std::size_t>(i)] = 0;
-    if (static_cast<std::size_t>(i) < slotActive_.size()) slotActive_[static_cast<std::size_t>(i)] = 0;
-
-    if (auto* sq = devSquares_[i]) {
-      sq->setVariant(DeviceSquare::Variant::Green);
-      sq->setText("");
-      sq->setFill(0.0);
+  std::vector<brokkr::app::DeviceSession> sessions = wantWireless ? shown : usbSessions;
+  if (!wantWireless) {
+    // Track direct targets too.
+    for (const auto& session : shown) {
+      const auto same = std::ranges::find_if(sessions, [&](const auto& existing) {
+        return existing.transport == session.transport && existing.sysname == session.sysname;
+      });
+      if (same == sessions.end()) sessions.push_back(session);
     }
-  };
+  }
 
-  const int rows = devSquares_.size();
-  for (int i = 0; i < rows; ++i) {
-    const QString prevSys = (i < prevShown.size()) ? prevShown[i].trimmed() : QString{};
-    const QString nowSys = (i < connectedDevices_.size()) ? connectedDevices_[i].trimmed() : QString{};
-    if (!nowSys.isEmpty() && prevSys != nowSys) clearRowState(i);
+  connectedDevices_.clear();
+  connectedDevices_.reserve(static_cast<qsizetype>(shown.size()));
+  for (const auto& session : shown) connectedDevices_ << QString::fromStdString(session.sysname);
+
+  shown_ = shown;
+  sessions_ = std::move(sessions);
+  updateSlots_(sessions_);
+
+  // Put the target in a square.
+  if (!wantWireless && !tgt.isEmpty() && !shown.empty() && !slots_.empty()) {
+    const auto& target = shown.front();
+    const auto assigned = std::ranges::find_if(slots_, [&](const auto& slot) { return slot && *slot == target; });
+    if (assigned == slots_.end()) {
+      const auto vacant = std::ranges::find_if(slots_, [](const auto& slot) { return !slot; });
+      const auto slot = vacant != slots_.end() ? static_cast<std::size_t>(vacant - slots_.begin()) : std::size_t{0};
+      slots_[slot] = target;
+      clearSquare_(static_cast<int>(slot));
+    }
   }
 
   refreshDeviceBoxes_();
@@ -1478,6 +1598,7 @@ void BrokkrWrapper::startWirelessListener_() {
         if (wireless_watcher_paused_.load(std::memory_order_acquire)) continue;
         wireless_conn_.emplace(std::move(*ar));
         wireless_sysname_ = sys;
+        ++wireless_id_;
       }
 
       QMetaObject::invokeMethod(this, [this]() { refreshConnectedDevices_(); }, Qt::QueuedConnection);
@@ -1653,6 +1774,9 @@ void BrokkrWrapper::setSquaresFinal_(bool ok) {
       auto* sq = devSquares_[i];
       if (!sq) continue;
       if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
+      if (static_cast<std::size_t>(i) >= results_.size())
+        results_.resize(static_cast<std::size_t>(i) + 1, brokkr::app::SlotResult::None);
+      results_[static_cast<std::size_t>(i)] = brokkr::app::SlotResult::Fail;
       sq->setVariant(DeviceSquare::Variant::Red);
       sq->setText("FAIL!");
       sq->setFillAnimated(1.0, 250);
@@ -1667,14 +1791,50 @@ void BrokkrWrapper::setSquaresFinal_(bool ok) {
     if (!sq) continue;
     if (static_cast<std::size_t>(i) < slotActive_.size() && !slotActive_[static_cast<std::size_t>(i)]) continue;
     const bool failed = (static_cast<std::size_t>(i) < slotFailed_.size() && slotFailed_[static_cast<std::size_t>(i)]);
+    if (static_cast<std::size_t>(i) >= results_.size())
+      results_.resize(static_cast<std::size_t>(i) + 1, brokkr::app::SlotResult::None);
     if (failed) {
+      results_[static_cast<std::size_t>(i)] = brokkr::app::SlotResult::Fail;
       sq->setVariant(DeviceSquare::Variant::Red);
       sq->setText("FAIL!");
       sq->setFillAnimated(1.0, 200);
     } else {
+      results_[static_cast<std::size_t>(i)] = enhanced_speed_ ? brokkr::app::SlotResult::PassEnhanced
+                                                              : brokkr::app::SlotResult::PassNormal;
       sq->setVariant(passV);
       sq->setText("PASS");
       sq->setFillAnimated(1.0, 350);
+    }
+  }
+}
+
+void BrokkrWrapper::showResults_() {
+  const int count = std::min<int>(devSquares_.size(), static_cast<int>(results_.size()));
+  for (int i = 0; i < count; ++i) {
+    auto* square = devSquares_[i];
+    if (!square) continue;
+
+    switch (results_[static_cast<std::size_t>(i)]) {
+      case brokkr::app::SlotResult::None:
+        square->setVariant(DeviceSquare::Variant::Green);
+        square->setText("");
+        square->setFill(0.0);
+        break;
+      case brokkr::app::SlotResult::PassNormal:
+        square->setVariant(DeviceSquare::Variant::Blue);
+        square->setText("PASS");
+        square->setFill(1.0);
+        break;
+      case brokkr::app::SlotResult::PassEnhanced:
+        square->setVariant(DeviceSquare::Variant::Green);
+        square->setText("PASS");
+        square->setFill(1.0);
+        break;
+      case brokkr::app::SlotResult::Fail:
+        square->setVariant(DeviceSquare::Variant::Red);
+        square->setText("FAIL!");
+        square->setFill(1.0);
+        break;
     }
   }
 }
@@ -1768,6 +1928,10 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
 
     slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
     slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+    if (results_.size() < static_cast<std::size_t>(devSquares_.size()))
+      results_.resize(static_cast<std::size_t>(devSquares_.size()), brokkr::app::SlotResult::None);
+    updateSlots_(sessions_);
+    showResults_();
     return;
   }
 
@@ -1781,11 +1945,13 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
 
   slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
   slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
+  if (results_.size() < static_cast<std::size_t>(devSquares_.size()))
+    results_.resize(static_cast<std::size_t>(devSquares_.size()), brokkr::app::SlotResult::None);
+  updateSlots_(sessions_);
+  showResults_();
 }
 
 void BrokkrWrapper::refreshDeviceBoxes_() {
-  overflowDevices_ = false;
-
   for (auto* box : comBoxes) {
     box->clear();
     box->setToolTip(QString());
@@ -1812,9 +1978,12 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     wirelessSys = wireless_sysname_;
   }
 
-  const int shown = std::min<int>(connectedDevices_.size(), comBoxes.size());
-  for (int i = 0; i < shown; ++i) {
-    const QString sysname = connectedDevices_[i].trimmed();
+  const int slotCount = std::min<int>(static_cast<int>(slots_.size()), comBoxes.size());
+  for (int i = 0; i < slotCount; ++i) {
+    if (!slots_[static_cast<std::size_t>(i)]) continue;
+    if (!isShown_(*slots_[static_cast<std::size_t>(i)])) continue;
+
+    const QString sysname = QString::fromStdString(slots_[static_cast<std::size_t>(i)]->sysname).trimmed();
     const QString raw = QString("%1:[%2]").arg(i).arg(sysname);
     comBoxes[i]->setText(elideFor(comBoxes[i], raw));
     comBoxes[i]->setToolTip(sysname);
@@ -1841,9 +2010,10 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
     comBoxes[i]->setFont(f);
   }
 
-  if (connectedDevices_.size() > comBoxes.size() && !comBoxes.isEmpty()) {
-    overflowDevices_ = true;
-    const int extra = connectedDevices_.size() - comBoxes.size();
+  const bool filteredView = (editTarget && !editTarget->text().trimmed().isEmpty()) ||
+                            (chkWireless && chkWireless->isChecked());
+  if (!filteredView && overflowCount_ > 0 && !comBoxes.isEmpty()) {
+    const auto extra = static_cast<qulonglong>(overflowCount_);
     auto* last = comBoxes.back();
     const QString raw = QString("... +%1 more").arg(extra);
     last->setText(elideFor(last, raw));
@@ -2122,6 +2292,9 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
 
 void BrokkrWrapper::onRunClicked() {
   if (busy_) return;
+  // Refresh the target.
+  refreshConnectedDevices_();
+
   QString why;
   if (!canRunStart_(&why)) {
     showBlocked_("Cannot start", why);
@@ -2134,7 +2307,8 @@ void BrokkrWrapper::onRunClicked() {
 void BrokkrWrapper::startWorkStart_() {
   if (busy_) return;
 
-  const QStringList uiDevicesSnapshot = connectedDevices_;
+  const auto runSlots = shownSlots_();
+  const QStringList runNames = slotNames_();
   setBusy_(true);
 
   plan_names_.clear();
@@ -2150,18 +2324,24 @@ void BrokkrWrapper::startWorkStart_() {
       wirelessSys = wireless_sysname_;
     }
 
-    const int activeCount = std::min<int>(uiDevicesSnapshot.size(), devSquares_.size());
+    const int activeCount = std::min<int>(runNames.size(), devSquares_.size());
     for (int i = 0; i < activeCount; ++i) {
       bool active = false;
-      const QString sysname = uiDevicesSnapshot[i].trimmed();
+      const QString sysname = runNames[i].trimmed();
       if (chkWireless && chkWireless->isChecked() && !wirelessSys.isEmpty() && sysname == wirelessSys) {
         active = true;
       } else if (select_odin_target(sysname)) {
         active = true;
       }
       slotActive_[static_cast<std::size_t>(i)] = active ? 1 : 0;
+      if (active) {
+        if (static_cast<std::size_t>(i) >= results_.size())
+          results_.resize(static_cast<std::size_t>(i) + 1, brokkr::app::SlotResult::None);
+        results_[static_cast<std::size_t>(i)] = brokkr::app::SlotResult::None;
+      }
     }
   }
+  const auto runActive = slotActive_;
 
   int progressSteps = 1;
   for (int i = 0; i < devSquares_.size(); ++i) {
@@ -2200,7 +2380,7 @@ void BrokkrWrapper::startWorkStart_() {
   // engine owns it. Cleared from done_ui / fail_ui below.
   wireless_watcher_paused_.store(true, std::memory_order_release);
 
-  worker_ = std::jthread([this, uiDevicesSnapshot, actionIndex, tgt, wireless, usePit, pitPath,
+  worker_ = std::jthread([this, runNames, runSlots, runActive, actionIndex, tgt, wireless, usePit, pitPath,
                           inputs](std::stop_token) {
     auto done_ui = [&] {
       QMetaObject::invokeMethod(
@@ -2209,6 +2389,7 @@ void BrokkrWrapper::startWorkStart_() {
             wireless_watcher_paused_.store(false, std::memory_order_release);
             setSquaresFinal_(true);
             setBusy_(false);
+            requestUsbRefresh_();
           },
           Qt::QueuedConnection);
     };
@@ -2222,6 +2403,7 @@ void BrokkrWrapper::startWorkStart_() {
             appendLogLine_(QString("<font color=\"#ff5555\">&lt;%1&gt; FAIL! %2</font>").arg(z).arg(htmlEsc(msg)));
             setSquaresFinal_(false);
             setBusy_(false);
+            requestUsbRefresh_();
             if (showPopup) QMessageBox::warning(this, "Brokkr Flash", "The connected devices do not match!");
           },
           Qt::QueuedConnection);
@@ -2245,8 +2427,8 @@ void BrokkrWrapper::startWorkStart_() {
 
     auto findUiIndexBySysname = [&](const QString& sysname) {
       const QString needle = sysname.trimmed();
-      for (int i = 0; i < uiDevicesSnapshot.size(); ++i) {
-        if (uiDevicesSnapshot[i].trimmed() == needle) return i;
+      for (int i = 0; i < runNames.size(); ++i) {
+        if (runNames[i].trimmed() == needle) return i;
       }
       return -1;
     };
@@ -2356,6 +2538,9 @@ void BrokkrWrapper::startWorkStart_() {
                   if (static_cast<std::size_t>(uiIdx) >= slotFailed_.size())
                     slotFailed_.resize(static_cast<std::size_t>(uiIdx) + 1, 0);
                   slotFailed_[static_cast<std::size_t>(uiIdx)] = 1;
+                  if (static_cast<std::size_t>(uiIdx) >= results_.size())
+                    results_.resize(static_cast<std::size_t>(uiIdx) + 1, brokkr::app::SlotResult::None);
+                  results_[static_cast<std::size_t>(uiIdx)] = brokkr::app::SlotResult::Fail;
                 }
 
                 if (uiIdx >= 0 && uiIdx < devSquares_.size() && devSquares_[uiIdx]) {
@@ -2409,11 +2594,13 @@ void BrokkrWrapper::startWorkStart_() {
       if (wireless) {
         brokkr::platform::TcpConnection* connp = nullptr;
         QString wsys;
+        std::uint64_t wirelessId = 0;
         {
           std::lock_guard lk(wireless_mtx_);
           if (wireless_conn_) {
             connp = &*wireless_conn_;
             wsys = wireless_sysname_;
+            wirelessId = wireless_id_;
           }
         }
         if (!connp || !connp->connected()) {
@@ -2421,38 +2608,72 @@ void BrokkrWrapper::startWorkStart_() {
           return std::nullopt;
         }
 
+        int uiIdx = findUiIndexBySysname(wsys);
+        const auto expected = (uiIdx >= 0 && static_cast<std::size_t>(uiIdx) < runSlots.size())
+                                  ? runSlots[static_cast<std::size_t>(uiIdx)]
+                                  : std::nullopt;
+        const brokkr::app::DeviceSession current{
+            .sysname = wsys.toStdString(),
+            .connection_id = wirelessId,
+            .transport = brokkr::app::DeviceTransport::Wireless,
+        };
+        if (!expected || *expected != current) {
+          fail_ui("The wireless device changed before flashing.");
+          return std::nullopt;
+        }
+
         p.owned.push_back(brokkr::odin::Target{.id = wsys.toStdString(), .link = connp});
         p.ptrs.push_back(&p.owned.back());
-        int uiIdx = findUiIndexBySysname(wsys);
-        if (uiIdx < 0 && !devSquares_.isEmpty()) uiIdx = 0;
         targetToUiSlots.push_back(uiIdx);
         return p;
       }
 
       std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
-      if (!tgt.isEmpty()) {
-        auto one = select_odin_target(tgt);
-        if (!one) {
-          fail_ui("Target sysname not found or not supported.");
+      auto resolveTarget = [&](int uiIdx) -> std::optional<brokkr::platform::UsbDeviceSysfsInfo> {
+        if (uiIdx < 0 || static_cast<std::size_t>(uiIdx) >= runSlots.size() ||
+            !runSlots[static_cast<std::size_t>(uiIdx)]) {
+          fail_ui("The selected device was not connected when flashing started.");
           return std::nullopt;
         }
-        targets.push_back(*one);
-        targetToUiSlots.push_back(findUiIndexBySysname(QString::fromStdString(one->sysname)));
+
+        const auto& expected = *runSlots[static_cast<std::size_t>(uiIdx)];
+        if (expected.transport != brokkr::app::DeviceTransport::Usb) {
+          fail_ui("The selected device transport changed before flashing.");
+          return std::nullopt;
+        }
+
+        auto info = select_odin_target(QString::fromStdString(expected.sysname));
+        if (!info) {
+          fail_ui(QString("Device %1 disconnected before flashing.").arg(uiIdx));
+          return std::nullopt;
+        }
+
+        const brokkr::app::DeviceSession current{
+            .sysname = info->sysname,
+            .connection_id = info->connection_id,
+            .transport = brokkr::app::DeviceTransport::Usb,
+        };
+        if (current != expected) {
+          fail_ui(QString("Device %1 was replaced before flashing.").arg(uiIdx));
+          return std::nullopt;
+        }
+
+        return info;
+      };
+
+      auto addTarget = [&](int uiIdx) {
+        auto info = resolveTarget(uiIdx);
+        if (!info) return false;
+        targets.push_back(std::move(*info));
+        targetToUiSlots.push_back(uiIdx);
+        return true;
+      };
+
+      if (!tgt.isEmpty()) {
+        if (!addTarget(findUiIndexBySysname(tgt))) return std::nullopt;
       } else {
-        for (int i = 0; i < uiDevicesSnapshot.size(); ++i) {
-          const QString sys = uiDevicesSnapshot[i].trimmed();
-          if (auto one = select_odin_target(sys)) {
-            targets.push_back(*one);
-            targetToUiSlots.push_back(i);
-          }
-        }
-        if (targets.empty()) {
-          targets = brokkr::app::enumerate_odin_targets();
-          targetToUiSlots.clear();
-          for (const auto& td : targets) {
-            targetToUiSlots.push_back(findUiIndexBySysname(QString::fromStdString(td.sysname)));
-          }
-        }
+        for (std::size_t i = 0; i < runActive.size(); ++i)
+          if (runActive[i] && !addTarget(static_cast<int>(i))) return std::nullopt;
       }
 
       if (targets.empty()) {
@@ -2464,8 +2685,12 @@ void BrokkrWrapper::startWorkStart_() {
       p.owned.reserve(targets.size());
       p.ptrs.reserve(targets.size());
 
-      for (const auto& td : targets) {
-        auto ut = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
+      for (std::size_t i = 0; i < targets.size(); ++i) {
+        const int uiIdx = targetToUiSlots[i];
+        auto info = resolveTarget(uiIdx);
+        if (!info) return std::nullopt;
+
+        auto ut = std::make_unique<brokkr::odin::UsbTarget>(info->devnode());
 
         auto st = ut->open_and_connect(cfg.preflash_timeout_ms);
         if (!st) {
@@ -2488,6 +2713,9 @@ void BrokkrWrapper::startWorkStart_() {
           fail_ui(err);
           return std::nullopt;
         }
+
+        // Check for a swap during open.
+        if (!resolveTarget(uiIdx)) return std::nullopt;
 
         p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
         p.ptrs.push_back(&p.owned.back());

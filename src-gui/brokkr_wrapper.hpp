@@ -16,12 +16,14 @@
 #include <QTimer>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
 #include <thread>
 #include <vector>
 
+#include "app/device_slot_tracker.hpp"
 #include "platform/platform_all.hpp"
 
 class QGridLayout;
@@ -107,6 +109,11 @@ class BrokkrWrapper : public QWidget {
 
   void requestUsbRefresh_() noexcept;
   void refreshConnectedDevices_();
+  void updateSlots_(const std::vector<brokkr::app::DeviceSession>& sessions);
+  void clearSquare_(int slot);
+  bool isShown_(const brokkr::app::DeviceSession& session) const;
+  std::vector<std::optional<brokkr::app::DeviceSession>> shownSlots_() const;
+  QStringList slotNames_() const;
 
   void startWirelessListener_();
   void stopWirelessListener_();
@@ -125,6 +132,7 @@ class BrokkrWrapper : public QWidget {
   void setSquaresText_(const QString& s);
   void setSquaresActiveColor_(bool enhanced);
   void setSquaresFinal_(bool ok);
+  void showResults_();
 
  private:
   static constexpr int kBoxesNormal = 8;
@@ -132,7 +140,13 @@ class BrokkrWrapper : public QWidget {
   static constexpr int kBoxesColsMany = 8;
 
   QStringList connectedDevices_;
+  std::vector<brokkr::app::DeviceSession> sessions_;
+  std::vector<brokkr::app::DeviceSession> shown_;
+  std::vector<std::optional<brokkr::app::DeviceSession>> slots_;
+  std::vector<std::optional<brokkr::app::DeviceSession>> usbSlots_;
+  bool usbStateSaved_ = false;
   bool overflowDevices_ = false;
+  std::size_t overflowCount_ = 0;
 
   int baseWindowHeight_ = 600;
 
@@ -146,6 +160,8 @@ class BrokkrWrapper : public QWidget {
 
   std::vector<std::uint8_t> slotFailed_;
   std::vector<std::uint8_t> slotActive_;
+  std::vector<brokkr::app::SlotResult> results_;
+  std::vector<brokkr::app::SlotResult> usbResults_;
 
   QTabWidget* tabWidget_ = nullptr;
   QTextEdit* consoleOutput = nullptr;
@@ -198,6 +214,7 @@ class BrokkrWrapper : public QWidget {
   std::optional<brokkr::platform::TcpListener> wireless_listener_;
   std::optional<brokkr::platform::TcpConnection> wireless_conn_;
   QString wireless_sysname_;
+  std::uint64_t wireless_id_ = 0;
   // While true the watcher thread must NOT touch wireless_conn_ (no
   // connected() probes, no reset()), because the flash engine is using the
   // underlying socket. Set during a flash run.

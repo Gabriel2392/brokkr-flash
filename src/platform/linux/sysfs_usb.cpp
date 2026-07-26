@@ -121,6 +121,9 @@ std::optional<UsbDeviceSysfsInfo> load_one(const fs::path& dir, std::string sysn
   out.product = *prod;
   out.busnum = *bus;
   out.devnum = *dev;
+  out.connection_id = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(*bus)) << 32) |
+                      static_cast<std::uint32_t>(*dev);
+  out.has_connection_id = true;
 
   const fs::path cdPath = dir / "power" / "connected_duration";
   if (fs::exists(cdPath)) {

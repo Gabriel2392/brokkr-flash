@@ -72,6 +72,11 @@ struct CliArgs {
   std::optional<std::string> userdata;
 };
 
+struct UsbSession {
+  std::string sysname;
+  std::uint64_t connection_id = 0;
+};
+
 struct Provider {
   std::vector<std::unique_ptr<brokkr::odin::UsbTarget>> usb;
   std::vector<brokkr::odin::Target> owned;
@@ -278,7 +283,55 @@ std::optional<int> reboot_download_cli() {
   return 0;
 }
 
-brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::odin::Cfg& cfg) {
+brokkr::core::Result<std::vector<UsbSession>> pick_usb(const CliArgs& args) {
+  std::vector<UsbSession> out;
+
+  auto add = [&](const auto& info) -> brokkr::core::Status {
+    if (!info.has_connection_id) return brokkr::core::failf("Cannot track reconnects for device {}.", info.sysname);
+    const auto found = std::ranges::find(out, info.sysname, &UsbSession::sysname);
+    if (found == out.end()) out.push_back({.sysname = info.sysname, .connection_id = info.connection_id});
+    return {};
+  };
+
+  if (args.target && !args.target->empty()) {
+    auto info = select_samsung_target(*args.target);
+    if (!info) return brokkr::core::fail("Target sysname not found.");
+    if (!is_odin_product(info->product)) {
+      return brokkr::core::fail("The device is not in Odin Mode, reboot to download mode first.");
+    }
+    BRK_TRY(add(*info));
+    return out;
+  }
+
+  const auto devices = enumerate_samsung_targets();
+  if (devices.empty()) return brokkr::core::fail("No connected devices detected.");
+
+  for (const auto& device : devices) {
+    if (is_odin_product(device.product)) {
+      BRK_TRY(add(device));
+    } else {
+      spdlog::info("{} is not in Odin Mode hence ignored", device.sysname);
+    }
+  }
+
+  if (out.empty()) return brokkr::core::fail("None of the devices are in Odin Mode");
+  return out;
+}
+
+brokkr::core::Result<brokkr::platform::UsbDeviceSysfsInfo> check_usb(const UsbSession& expected) {
+  auto info = select_odin_target(expected.sysname);
+  if (!info) return brokkr::core::failf("Device {} disconnected during initialization.", expected.sysname);
+  if (!info->has_connection_id) {
+    return brokkr::core::failf("Cannot track reconnects for device {}.", expected.sysname);
+  }
+  if (info->connection_id != expected.connection_id) {
+    return brokkr::core::failf("Device {} reconnected during initialization.", expected.sysname);
+  }
+  return std::move(*info);
+}
+
+brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::odin::Cfg& cfg,
+                                             const std::vector<UsbSession>& usb) {
   Provider p;
 
   if (args.wireless) {
@@ -302,44 +355,28 @@ brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::
     return p;
   }
 
-  std::vector<brokkr::platform::UsbDeviceSysfsInfo> targets;
-  if (args.target && !args.target->empty()) {
-    auto info = select_samsung_target(*args.target);
-    if (!info) return brokkr::core::fail("Target sysname not found.");
-    if (!is_odin_product(info->product)) {
-      return brokkr::core::fail("The device is not in Odin Mode, reboot to download mode first.");
-    }
-    targets.push_back(*info);
-  } else {
-    const auto all_samsung = enumerate_samsung_targets();
-    if (all_samsung.empty()) return brokkr::core::fail("No connected devices detected.");
+  if (usb.empty()) return brokkr::core::fail("No connected devices detected.");
+  for (const auto& expected : usb) BRK_TRY(check_usb(expected));
 
-    for (const auto& d : all_samsung) {
-      if (is_odin_product(d.product)) {
-        targets.push_back(d);
-      } else {
-        spdlog::info("{} is not in Odin Mode hence ignored", d.sysname);
-      }
-    }
+  p.usb.reserve(usb.size());
+  p.owned.reserve(usb.size());
+  p.ptrs.reserve(usb.size());
 
-    if (targets.empty()) return brokkr::core::fail("None of the devices are in Odin Mode");
-  }
-
-  p.usb.reserve(targets.size());
-  p.owned.reserve(targets.size());
-  p.ptrs.reserve(targets.size());
-
-  for (const auto& td : targets) {
-    auto ut = std::make_unique<brokkr::odin::UsbTarget>(td.devnode());
+  for (const auto& expected : usb) {
+    BRK_TRYV(info, check_usb(expected));
+    auto ut = std::make_unique<brokkr::odin::UsbTarget>(info.devnode());
 
     auto st = ut->open_and_connect(cfg.preflash_timeout_ms);
     if (!st) return brokkr::core::fail(std::move(st.error()));
+
+    BRK_TRY(check_usb(expected));
 
     p.owned.push_back(brokkr::odin::Target{.id = ut->devnode, .link = &ut->conn});
     p.ptrs.push_back(&p.owned.back());
     p.usb.push_back(std::move(ut));
   }
 
+  for (const auto& expected : usb) BRK_TRY(check_usb(expected));
   return p;
 }
 
@@ -352,6 +389,16 @@ int run_flash_cli(const CliArgs& args) {
   if (args.wireless && args.target && !args.target->empty()) {
     spdlog::error("Wireless cannot be used together with Target Sysname.");
     return 2;
+  }
+
+  std::vector<UsbSession> usb;
+  if (!args.wireless) {
+    auto usb_r = pick_usb(args);
+    if (!usb_r) {
+      spdlog::error("{}", map_global_error_to_cli_message(usb_r.error()));
+      return 1;
+    }
+    usb = std::move(*usb_r);
   }
 
   auto pit_to_upload = load_pit_if_needed(args);
@@ -411,12 +458,18 @@ int run_flash_cli(const CliArgs& args) {
     spdlog::error("{}", s);
   };
 
-  auto provider_r = make_provider(args, cfg);
-  if (!provider_r) {
-    spdlog::error("{}", map_global_error_to_cli_message(provider_r.error()));
-    return 1;
-  }
-  auto provider = std::move(*provider_r);
+  std::optional<Provider> provider;
+  auto open_provider = [&] {
+    auto result = make_provider(args, cfg, usb);
+    if (!result) {
+      spdlog::error("{}", map_global_error_to_cli_message(result.error()));
+      return false;
+    }
+    provider = std::move(*result);
+    return true;
+  };
+
+  if (args.wireless && !open_provider()) return 1;
 
   std::vector<brokkr::odin::ImageSpec> specs;
   if (!inputs.empty()) {
@@ -465,7 +518,13 @@ int run_flash_cli(const CliArgs& args) {
     }
   }
 
-  auto fst = brokkr::odin::flash(provider.ptrs, specs, pit_to_upload, cfg, ui);
+  if (!provider && !open_provider()) return 1;
+  if (args.wireless && (!provider->wireless_conn || !provider->wireless_conn->connected())) {
+    spdlog::error("Wireless device disconnected during initialization.");
+    return 1;
+  }
+
+  auto fst = brokkr::odin::flash(provider->ptrs, specs, pit_to_upload, cfg, ui);
   if (!fst) {
     bool already_shown = false;
     if (saw_per_device_fail.load(std::memory_order_relaxed)) {

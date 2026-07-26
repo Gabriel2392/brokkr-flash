@@ -129,7 +129,6 @@ bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t>& al
 
 struct Match {
   UsbDeviceSysfsInfo info;
-  std::uint64_t registry_id = 0;
 };
 
 void enumerate_class(const char* className, const EnumerateFilter& filter, std::vector<Match>& out) {
@@ -166,13 +165,14 @@ void enumerate_class(const char* className, const EnumerateFilter& filter, std::
     info.sysname = fmt::format("0x{:08x}", locationID);
     info.vendor = vendor;
     info.product = product;
+    info.connection_id = rid_opt.value_or(0);
+    info.has_connection_id = rid_opt.has_value() && *rid_opt != 0;
     info.serial_nodes = find_serial_nodes(locationID);
 
     spdlog::debug("Matched USB device: {}", info.describe());
 
     Match m;
     m.info = std::move(info);
-    m.registry_id = rid_opt.value_or(0);
     out.push_back(std::move(m));
 
     IOObjectRelease(service);
@@ -238,7 +238,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
   enumerate_class("IOUSBHostDevice", filter, matches);
   if (matches.empty()) enumerate_class("IOUSBDevice", filter, matches);
 
-  std::ranges::sort(matches, [](const Match& a, const Match& b) { return a.registry_id > b.registry_id; });
+  std::ranges::sort(matches, [](const Match& a, const Match& b) { return a.info.connection_id > b.info.connection_id; });
 
   std::vector<UsbDeviceSysfsInfo> out;
   out.reserve(matches.size());
@@ -261,6 +261,7 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
 
   auto vid_opt = get_u32_property(service, CFSTR("idVendor"));
   auto pid_opt = get_u32_property(service, CFSTR("idProduct"));
+  auto rid_opt = get_registry_entry_id(service);
   IOObjectRelease(service);
 
   if (!vid_opt || !pid_opt) {
@@ -272,6 +273,8 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   info.sysname = std::string(sysname);
   info.vendor = static_cast<std::uint16_t>(*vid_opt);
   info.product = static_cast<std::uint16_t>(*pid_opt);
+  info.connection_id = rid_opt.value_or(0);
+  info.has_connection_id = rid_opt.has_value() && *rid_opt != 0;
   info.serial_nodes = find_serial_nodes(*loc);
   return info;
 }

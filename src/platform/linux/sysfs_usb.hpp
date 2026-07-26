@@ -32,6 +32,8 @@ struct UsbDeviceSysfsInfo {
   std::uint16_t vendor = 0;
   std::uint16_t product = 0;
   int connected_duration_sec = 0;
+  std::uint64_t connection_id = 0;
+  bool has_connection_id = false;
   std::vector<std::string> serial_nodes;
 
   std::string devnode() const;
