@@ -37,7 +37,7 @@ constexpr std::chrono::milliseconds kRetryBackoff{10};
 constexpr int kZlpProbeTimeoutMs = 100;
 constexpr std::size_t kMaxChunkBytes = 1 * 1024 * 1024;
 constexpr int kZlpRecvTimeoutMs = 10;
-constexpr int kCancelPollMs = 250;
+constexpr int kCancelPollMs = 1000;
 
 std::string libusb_strerror_pair(int rc) {
   return std::format("{} ({})", libusb_error_name(rc), libusb_strerror(rc));
