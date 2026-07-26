@@ -51,6 +51,7 @@
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/spdlog.h>
 
+#include "app/download_mode.hpp"
 #include "app/md5_verify.hpp"
 #include "app/pit_file.hpp"
 #include "app/samsung_usb.hpp"
@@ -488,7 +489,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   chkWireless = new QCheckBox("Wireless", this);
   optLayout->addWidget(chkWireless);
 
-#if defined(BROKKR_PLATFORM_WINDOWS)
   btnRebootDownloadMode_ = new QPushButton("Try to Reboot the device(s) into Download Mode", this);
   btnRebootDownloadMode_->setEnabled(false);
   optLayout->addWidget(btnRebootDownloadMode_);
@@ -497,7 +497,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     if (busy_) return;
     tryRebootIntoDownloadMode_();
   });
-#endif
 
   optLayout->addSpacing(10);
   optLayout->addWidget(new QLabel("Post-Action:", this));
@@ -1921,21 +1920,17 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     box.setText(text);
 
     auto* ok_btn = box.addButton(QMessageBox::Ok);
-  #if defined(BROKKR_PLATFORM_WINDOWS)
     auto* reboot_btn = box.addButton("Try to Reboot them into Download Mode", QMessageBox::ActionRole);
-  #endif
     QAbstractButton* ignore_btn = nullptr;
     if (allowIgnore) ignore_btn = box.addButton("Ignore them", QMessageBox::AcceptRole);
 
     box.setDefaultButton(qobject_cast<QPushButton*>(ok_btn));
     box.exec();
 
-#if defined(BROKKR_PLATFORM_WINDOWS)
     if (box.clickedButton() == reboot_btn) {
       tryRebootIntoDownloadMode_();
       return false;
     }
-#endif
     return allowIgnore && ignore_btn && box.clickedButton() == ignore_btn;
   };
 
@@ -2012,11 +2007,6 @@ void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const
 void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   if (busy_) return;
 
-#if !defined(BROKKR_PLATFORM_WINDOWS)
-  QMessageBox::information(this, "Brokkr Flash", "This action is available only on Windows builds.");
-  return;
-#else
-
   int nonOdinCount = 0;
   for (const auto& sys : connectedDevices_) {
     if (auto one = select_samsung_target(sys); one && !is_odin_product(one->product)) {
@@ -2029,7 +2019,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
     return;
   }
 
-  const auto r = brokkr::platform::send_atcmd_to_samsung_serial(brokkr::app::kSamsungVid, nonOdinCount);
+  const auto r = brokkr::app::reboot_to_download_mode();
   if (r.ports_seen == 0) {
     QMessageBox::warning(this, "Brokkr Flash", "No Samsung serial port found.");
     return;
@@ -2066,7 +2056,6 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
   }
 
   requestUsbRefresh_();
-#endif
 }
 
 void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {

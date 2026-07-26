@@ -21,6 +21,7 @@
   #include "platform/posix-common/single_instance.hpp"
   #include "platform/posix-common/tcp_transport.hpp"
 
+  #include "platform/serial_port.hpp"
   #include "platform/linux/sysfs_usb.hpp"
   #include "platform/linux/usbfs_conn.hpp"
   #include "platform/linux/usbfs_device.hpp"
@@ -34,6 +35,7 @@ using namespace posix_common;
   #include "platform/windows/app_dirs.hpp"
   #include "platform/windows/signal_shield.hpp"
   #include "platform/windows/single_instance.hpp"
+  #include "platform/serial_port.hpp"
   #include "platform/windows/sysfs_usb.hpp"
   #include "platform/windows/tcp_transport.hpp"
   #include "platform/windows/usbfs_conn.hpp"
@@ -49,6 +51,7 @@ using namespace windows;
   #include "platform/posix-common/single_instance.hpp"
   #include "platform/posix-common/tcp_transport.hpp"
 
+  #include "platform/serial_port.hpp"
   #include "platform/macos/sysfs_usb.hpp"
   #include "platform/macos/usbfs_conn.hpp"
   #include "platform/macos/usbfs_device.hpp"

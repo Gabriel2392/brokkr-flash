@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -73,6 +74,28 @@ std::optional<std::uint16_t> parse_u16_hex(std::string_view s) {
 bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t>& allowed) {
   if (allowed.empty()) return true;
   return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
+}
+
+std::vector<std::string> find_serial_nodes(std::string_view sysname) {
+  std::error_code ec;
+  std::vector<std::string> out;
+  const fs::path base{kSysUsbDevices};
+
+  for (const auto& entry : fs::directory_iterator(base, ec)) {
+    const auto name = entry.path().filename().string();
+    if (!name.starts_with(sysname) || name.size() <= sysname.size() || name[sysname.size()] != ':') continue;
+
+    const fs::path tty_dir = entry.path() / "tty";
+    if (!fs::is_directory(tty_dir, ec)) continue;
+
+    for (const auto& tty : fs::directory_iterator(tty_dir, ec)) {
+      const fs::path node = fs::path{"/dev"} / tty.path().filename();
+      if (fs::exists(node, ec)) out.push_back(node.string());
+    }
+  }
+
+  std::ranges::sort(out);
+  return out;
 }
 
 std::optional<UsbDeviceSysfsInfo> load_one(const fs::path& dir, std::string sysname) {
@@ -136,6 +159,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
     if (info->vendor != filter.vendor) continue;
     if (!product_allowed(info->product, filter.products)) continue;
 
+    info->serial_nodes = find_serial_nodes(info->sysname);
     spdlog::debug("Matched USB device: {}", info->describe());
 
     out.emplace_back(std::move(*info));
@@ -150,7 +174,10 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   const fs::path dir = fs::path{kSysUsbDevices} / std::string(sysname);
   if (!fs::exists(dir) || !fs::is_directory(dir)) return std::nullopt;
-  return load_one(dir, std::string(sysname));
+
+  auto info = load_one(dir, std::string(sysname));
+  if (info) info->serial_nodes = find_serial_nodes(info->sysname);
+  return info;
 }
 
 } // namespace brokkr::linux

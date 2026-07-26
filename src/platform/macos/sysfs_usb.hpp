@@ -29,6 +29,7 @@ struct UsbDeviceSysfsInfo {
   std::string sysname;
   std::uint16_t vendor = 0;
   std::uint16_t product = 0;
+  std::vector<std::string> serial_nodes;
 
   std::string devnode() const;
   std::string describe() const;

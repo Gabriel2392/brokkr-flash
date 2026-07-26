@@ -28,6 +28,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
+#include <IOKit/serial/IOSerialKeys.h>
 #include <IOKit/usb/IOUSBLib.h>
 
 #include <fmt/format.h>
@@ -40,6 +41,8 @@
 namespace brokkr::macos {
 namespace {
 
+constexpr int kMaxRegistryDepth = 16;
+
 std::optional<std::uint32_t> get_u32_property(io_service_t service, CFStringRef key) {
   CFTypeRef prop = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
   if (!prop) return std::nullopt;
@@ -51,6 +54,65 @@ std::optional<std::uint32_t> get_u32_property(io_service_t service, CFStringRef 
   }
   CFRelease(prop);
   return ok ? std::optional<std::uint32_t>{value} : std::nullopt;
+}
+
+std::optional<std::string> get_string_property(io_service_t service, CFStringRef key) {
+  CFTypeRef prop = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
+  if (!prop) return std::nullopt;
+
+  std::optional<std::string> out;
+  if (CFGetTypeID(prop) == CFStringGetTypeID()) {
+    const auto str = static_cast<CFStringRef>(prop);
+    const CFIndex cap = CFStringGetMaximumSizeForEncoding(CFStringGetLength(str), kCFStringEncodingUTF8) + 1;
+    std::string buf(static_cast<std::size_t>(cap), '\0');
+    if (CFStringGetCString(str, buf.data(), cap, kCFStringEncodingUTF8)) {
+      buf.resize(std::char_traits<char>::length(buf.c_str()));
+      out = std::move(buf);
+    }
+  }
+
+  CFRelease(prop);
+  return out;
+}
+
+std::vector<std::string> find_serial_nodes(std::uint32_t locationID) {
+  CFMutableDictionaryRef dict = IOServiceMatching(kIOSerialBSDServiceValue);
+  if (!dict) return {};
+
+  io_iterator_t iter = 0;
+  if (IOServiceGetMatchingServices(kIOMainPortDefault, dict, &iter) != KERN_SUCCESS) return {};
+
+  std::vector<std::string> out;
+  io_service_t service;
+  while ((service = IOIteratorNext(iter)) != 0) {
+    io_registry_entry_t node = service;
+    IOObjectRetain(node);
+
+    bool match = false;
+    for (int depth = 0; node && depth < kMaxRegistryDepth; ++depth) {
+      const auto loc = get_u32_property(node, CFSTR("locationID"));
+      if (loc && *loc == locationID) {
+        match = true;
+        break;
+      }
+
+      io_registry_entry_t parent = 0;
+      const kern_return_t kr = IORegistryEntryGetParentEntry(node, kIOServicePlane, &parent);
+      IOObjectRelease(node);
+      node = (kr == KERN_SUCCESS) ? parent : 0;
+    }
+    if (node) IOObjectRelease(node);
+
+    if (match) {
+      if (auto dev = get_string_property(service, CFSTR(kIOCalloutDeviceKey))) out.push_back(std::move(*dev));
+    }
+
+    IOObjectRelease(service);
+  }
+
+  IOObjectRelease(iter);
+  std::ranges::sort(out);
+  return out;
 }
 
 std::optional<std::uint64_t> get_registry_entry_id(io_service_t service) {
@@ -104,6 +166,7 @@ void enumerate_class(const char* className, const EnumerateFilter& filter, std::
     info.sysname = fmt::format("0x{:08x}", locationID);
     info.vendor = vendor;
     info.product = product;
+    info.serial_nodes = find_serial_nodes(locationID);
 
     spdlog::debug("Matched USB device: {}", info.describe());
 
@@ -209,6 +272,7 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   info.sysname = std::string(sysname);
   info.vendor = static_cast<std::uint16_t>(*vid_opt);
   info.product = static_cast<std::uint16_t>(*pid_opt);
+  info.serial_nodes = find_serial_nodes(*loc);
   return info;
 }
 

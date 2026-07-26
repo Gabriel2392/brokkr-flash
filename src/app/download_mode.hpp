@@ -17,30 +17,17 @@
 
 #pragma once
 
-#include <cstdint>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
-namespace brokkr::windows {
+namespace brokkr::app {
 
-struct UsbDeviceSysfsInfo {
-  std::string sysname;
-  std::uint16_t vendor = 0;
-  std::uint16_t product = 0;
-  std::vector<std::string> serial_nodes;
-
-  std::string devnode() const;
-  std::string describe() const;
+struct AtCmdResult {
+  int ports_seen = 0;
+  int sent_ok = 0;
+  std::vector<std::string> failures;
 };
 
-struct EnumerateFilter {
-  std::uint16_t vendor = 0x04E8;
-  std::vector<std::uint16_t> products;
-};
+AtCmdResult reboot_to_download_mode();
 
-std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilter& filter);
-std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname);
-
-} // namespace brokkr::windows
+} // namespace brokkr::app

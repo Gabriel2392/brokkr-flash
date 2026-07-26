@@ -141,6 +141,7 @@ elseif (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
         src/platform/posix-common/tcp_transport.cpp
+        src/platform/posix-common/serial_port.cpp
         src/platform/linux/sysfs_usb.cpp
         src/platform/linux/usbfs_device.cpp
         src/platform/linux/usbfs_conn.cpp
@@ -156,6 +157,7 @@ elseif (WIN32)
         src/platform/windows/app_dirs.cpp
         src/platform/windows/signal_shield.cpp
         src/platform/windows/single_instance.cpp
+        src/platform/windows/serial_port.cpp
         src/platform/windows/sysfs_usb.cpp
         src/platform/windows/usbfs_device.cpp
         src/platform/windows/usbfs_conn.cpp
@@ -169,6 +171,7 @@ elseif (APPLE)
         src/platform/posix-common/signal_shield.cpp
         src/platform/posix-common/single_instance.cpp
         src/platform/posix-common/tcp_transport.cpp
+        src/platform/posix-common/serial_port.cpp
         src/platform/macos/sysfs_usb.cpp
         src/platform/macos/usbfs_device.cpp
         src/platform/macos/usbfs_conn.cpp
@@ -292,6 +295,8 @@ if (WIN32)
         src-gui/main_gui.cpp
         src/app/cli_mode.hpp
         src/app/cli_mode.cpp
+        src/app/download_mode.hpp
+        src/app/download_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/icon.rc
@@ -304,6 +309,8 @@ elseif (APPLE)
         src-gui/main_gui.cpp
         src/app/cli_mode.hpp
         src/app/cli_mode.cpp
+        src/app/download_mode.hpp
+        src/app/download_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/brokkr.qrc
@@ -314,6 +321,8 @@ else()
         src-gui/main_gui.cpp
         src/app/cli_mode.hpp
         src/app/cli_mode.cpp
+        src/app/download_mode.hpp
+        src/app/download_mode.cpp
         src-gui/brokkr_wrapper.hpp
         src-gui/brokkr_wrapper.cpp
         assets/brokkr.qrc

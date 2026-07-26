@@ -20,12 +20,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 #include <charconv>
@@ -50,13 +47,6 @@ struct UsbDeviceInfo {
 };
 
 namespace {
-
-constexpr std::string_view kAtCmd = "AT+SUDDLMOD=0,0\r";
-constexpr std::uint16_t kOdinPids[] = {0x6601, 0x685D, 0x68C3};
-
-bool is_odin_pid(std::uint16_t pid) {
-  return std::find(std::begin(kOdinPids), std::end(kOdinPids), pid) != std::end(kOdinPids);
-}
 
 uint16_t extract_hex4(const std::string& str, const std::string& key) {
   std::string lower_str = str;
@@ -137,73 +127,6 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
   return result;
 }
 
-std::string normalize_com_path(std::string port) {
-  if (port.empty()) return {};
-  if (port.rfind("\\\\.\\", 0) == 0) return port;
-
-  std::string upper = port;
-  for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  if (upper.rfind("COM", 0) == 0) return std::string("\\\\.\\") + port;
-  return {};
-}
-
-std::optional<std::string> send_atcmd_win32(std::string_view comPort) {
-  const std::string path = normalize_com_path(std::string(comPort));
-  if (path.empty()) return std::string("invalid port name");
-
-  HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-  if (h == INVALID_HANDLE_VALUE) return std::string("open failed: ") + std::to_string(GetLastError());
-
-  DCB dcb{};
-  dcb.DCBlength = sizeof(DCB);
-  if (!GetCommState(h, &dcb)) {
-    const auto e = GetLastError();
-    CloseHandle(h);
-    return std::string("GetCommState failed: ") + std::to_string(e);
-  }
-
-  dcb.BaudRate = CBR_115200;
-  dcb.ByteSize = 8;
-  dcb.Parity = NOPARITY;
-  dcb.StopBits = ONESTOPBIT;
-  dcb.fOutxCtsFlow = FALSE;
-  dcb.fOutxDsrFlow = FALSE;
-  dcb.fOutX = FALSE;
-  dcb.fInX = FALSE;
-  dcb.fRtsControl = RTS_CONTROL_DISABLE;
-  dcb.fDtrControl = DTR_CONTROL_ENABLE;
-
-  if (!SetCommState(h, &dcb)) {
-    const auto e = GetLastError();
-    CloseHandle(h);
-    return std::string("SetCommState failed: ") + std::to_string(e);
-  }
-
-  COMMTIMEOUTS to{};
-  to.ReadIntervalTimeout = 50;
-  to.ReadTotalTimeoutConstant = 100;
-  to.ReadTotalTimeoutMultiplier = 10;
-  to.WriteTotalTimeoutConstant = 1000;
-  to.WriteTotalTimeoutMultiplier = 10;
-  (void)SetCommTimeouts(h, &to);
-
-  DWORD wrote = 0;
-  const BOOL ok = WriteFile(h, kAtCmd.data(), static_cast<DWORD>(kAtCmd.size()), &wrote, nullptr);
-  if (!ok) {
-    const auto e = GetLastError();
-    CloseHandle(h);
-    return std::string("write failed: ") + std::to_string(e);
-  }
-  if (wrote != static_cast<DWORD>(kAtCmd.size())) {
-    CloseHandle(h);
-    return std::string("write timed out (short write)");
-  }
-
-  (void)FlushFileBuffers(h);
-  CloseHandle(h);
-  return std::nullopt;
-}
-
 } // namespace
 
 namespace brokkr::windows {
@@ -220,6 +143,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
   for (const auto& dev : devices) {
     UsbDeviceSysfsInfo info;
     info.sysname = dev.device_path;
+    info.serial_nodes = {dev.device_path};
     info.vendor = dev.vendor;
     info.product = dev.product;
     result.push_back(info);
@@ -234,43 +158,6 @@ std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
     if (dev.sysname == sysname) return dev;
   }
   return std::nullopt;
-}
-
-AtCmdResult send_atcmd_to_samsung_serial(std::uint16_t vendor, int maxTargets) {
-  AtCmdResult out;
-  const auto devices = enumerate_usb_devices_windows(vendor, {});
-
-  std::set<std::string> uniquePorts;
-  for (const auto& d : devices) {
-    if (is_odin_pid(d.product)) continue;
-    if (!d.device_path.empty()) uniquePorts.insert(d.device_path);
-  }
-
-  std::vector<std::string> ports(uniquePorts.begin(), uniquePorts.end());
-  if (maxTargets > 0 && static_cast<int>(ports.size()) > maxTargets) {
-    ports.resize(static_cast<std::size_t>(maxTargets));
-  }
-  out.ports_seen = static_cast<int>(ports.size());
-
-  std::vector<std::optional<std::string>> errors(ports.size());
-  std::vector<std::thread> workers;
-  workers.reserve(ports.size());
-
-  for (std::size_t i = 0; i < ports.size(); ++i) {
-    workers.emplace_back([&, i]() { errors[i] = send_atcmd_win32(ports[i]); });
-  }
-  for (auto& t : workers)
-    if (t.joinable()) t.join();
-
-  for (std::size_t i = 0; i < ports.size(); ++i) {
-    if (errors[i]) {
-      out.failures.push_back(ports[i] + ": " + *errors[i]);
-      continue;
-    }
-    ++out.sent_ok;
-  }
-
-  return out;
 }
 
 } // namespace brokkr::windows
