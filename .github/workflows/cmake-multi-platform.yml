@@ -598,6 +598,114 @@ jobs:
           name: Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
           path: Brokkr-macos-x86_64${{ matrix.suffix }}.app.zip
 
+  android_apk:
+    name: Android APK
+    needs: [prepare]
+    if: >-
+      always() &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.new_tag || github.ref }}
+
+      - name: Resolve source commit
+        id: src
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Check app repository credentials
+        id: cfg
+        env:
+          ANDROID_REPO: ${{ secrets.ANDROID_REPO }}
+          ANDROID_TOKEN: ${{ secrets.ANDROID_DISPATCH_TOKEN }}
+          NEW_TAG: ${{ inputs.new_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ANDROID_REPO" ] && [ -n "$ANDROID_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ -n "$NEW_TAG" ]; then
+            echo "::error::ANDROID_REPO and ANDROID_DISPATCH_TOKEN secrets are required to publish a release."
+            exit 1
+          fi
+          echo "::warning::Android secrets are not configured; skipping the APK build."
+
+      - name: Build APK in the app repository
+        if: steps.cfg.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.ANDROID_DISPATCH_TOKEN }}
+          ANDROID_REPO: ${{ secrets.ANDROID_REPO }}
+          NEW_TAG: ${{ inputs.new_tag }}
+          BROKKR_SHA: ${{ steps.src.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          DISPATCH_ID="brokkr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DEFAULT_BRANCH="$(gh api "repos/${ANDROID_REPO}" --jq '.default_branch')"
+
+          gh workflow run build-apk.yml \
+            -R "${ANDROID_REPO}" \
+            --ref "${DEFAULT_BRANCH}" \
+            -f version="${NEW_TAG}" \
+            -f brokkr_ref="${BROKKR_SHA}" \
+            -f sync=true \
+            -f dispatch_id="${DISPATCH_ID}"
+
+          echo "Dispatched app build ${DISPATCH_ID}"
+
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            sleep 10
+            RUN_ID="$(gh api -X GET \
+              "repos/${ANDROID_REPO}/actions/workflows/build-apk.yml/runs" \
+              -f event=workflow_dispatch -f per_page=50 \
+              --jq "first(.workflow_runs[] | select((.display_title // \"\") | contains(\"${DISPATCH_ID}\")) | .id)" || true)"
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Timed out waiting for the app build to start."
+            exit 1
+          fi
+          echo "App build run id ${RUN_ID}"
+
+          DEADLINE=$((SECONDS + 70 * 60))
+          while :; do
+            STATUS="$(gh api "repos/${ANDROID_REPO}/actions/runs/${RUN_ID}" --jq '.status' || true)"
+            if [ "$STATUS" = "completed" ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "::error::Timed out waiting for app build run ${RUN_ID} to finish."
+              exit 1
+            fi
+            sleep 20
+          done
+
+          CONCLUSION="$(gh api "repos/${ANDROID_REPO}/actions/runs/${RUN_ID}" --jq '.conclusion')"
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::App build run ${RUN_ID} finished with '${CONCLUSION}'; see the Actions tab of the app repository."
+            exit 1
+          fi
+
+          mkdir -p dist
+          gh run download "${RUN_ID}" -R "${ANDROID_REPO}" -n Brokkr-android.apk -D dist
+          test -f dist/Brokkr-android.apk
+
+      - uses: actions/upload-artifact@v4
+        if: steps.cfg.outputs.enabled == 'true'
+        with:
+          name: Brokkr-android.apk
+          path: dist/Brokkr-android.apk
+          if-no-files-found: error
+
   # ═══════════════════════════════════════════════════
   #  Publish GitHub Release  (release only)
   # ═══════════════════════════════════════════════════
@@ -640,7 +748,7 @@ jobs:
   release:
     name: Publish release
     if: inputs.new_tag != ''
-    needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86]
+    needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86, android_apk]
     runs-on: ubuntu-latest
 
     steps:
