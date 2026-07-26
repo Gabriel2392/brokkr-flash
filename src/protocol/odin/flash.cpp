@@ -125,12 +125,12 @@ static brokkr::core::Result<std::vector<std::byte>> read_all_source(io::ByteSour
   return out;
 }
 
-static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, std::filesystem::path path, io::TarEntry entry,
-                                                 std::string display, std::string source_basename,
-                                                 std::uint64_t disk_size) noexcept {
+static brokkr::core::Result<ImageSpec> make_spec(ImageSpec::Kind kind, io::RandomAccessSourcePtr source,
+                                                 io::TarEntry entry, std::string display,
+                                                 std::string source_basename, std::uint64_t disk_size) noexcept {
   ImageSpec spec;
   spec.kind = kind;
-  spec.path = std::move(path);
+  spec.source = std::move(source);
   spec.entry = std::move(entry);
 
   spec.source_basename = std::move(source_basename);
@@ -177,17 +177,17 @@ std::shared_ptr<const std::vector<std::byte>> pit_from_specs(const std::vector<I
 }
 
 brokkr::core::Result<std::unique_ptr<io::ByteSource>> ImageSpec::open() const noexcept {
-  if (custom_open) return custom_open();
+  if (!source) return brokkr::core::fail("ImageSpec::open: no source");
 
   switch (kind) {
-    case Kind::RawFile: return io::open_raw_file(path);
-    case Kind::TarEntry: return io::open_tar_entry(path, entry);
+    case Kind::RawFile: return io::open_range(source, 0, source->size(), display);
+    case Kind::TarEntry: return io::open_tar_entry(source, entry);
   }
   return brokkr::core::fail("ImageSpec::open: invalid kind");
 }
 
-brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
-    const std::vector<std::filesystem::path>& inputs) noexcept {
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io::RandomAccessSourcePtr>& inputs,
+                                                           ExpandOptions options) noexcept {
   std::vector<ImageSpec> out;
 
   std::vector<std::optional<io::TarArchive>> tars(inputs.size());
@@ -195,12 +195,16 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
 
   for (std::size_t i = 0; i < inputs.size(); ++i) {
     const auto& p = inputs[i];
-    if (!io::TarArchive::is_tar_file(p.string())) continue;
+    if (!io::TarArchive::is_tar_file(*p)) {
+      if (!options.allow_raw_files)
+        return brokkr::core::failf("Raw single-image flashing is not supported: {}", p->label());
+      continue;
+    }
 
-    BRK_TRYV(tar, io::TarArchive::open(p.string(), true));
+    BRK_TRYV(tar, io::TarArchive::open(p, true));
 
     if (auto e = find_download_list_entry(tar)) {
-      BRK_TRYV(src, io::open_tar_entry(p, *e));
+      auto src = io::open_tar_entry(p, *e);
       BRK_TRYV(txt, read_text(*src, 128 * 1024, "download-list.txt"));
       BRK_TRYV(names, parse_download_list(txt));
 
@@ -247,7 +251,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         record(base, i, j);
       }
     } else {
-      const std::string sb = io::basename(inputs[i].string());
+      const std::string sb = io::basename(inputs[i]->label());
       const std::string base = compute_basename(sb);
       if (base.empty()) continue;
       record(base, i, kRaw);
@@ -278,7 +282,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
           continue;
         }
 
-        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p.string() + ":" + e.name, sb, e.size));
+        BRK_TRYV(spec, make_spec(ImageSpec::Kind::TarEntry, p, e, p->label() + ":" + e.name, sb, e.size));
         if (is_pit) {
           pit_specs.push_back(std::move(spec));
         } else {
@@ -287,7 +291,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         }
       }
     } else {
-      const std::string sb = io::basename(p.string());
+      const std::string sb = io::basename(p->label());
       const std::string base = compute_basename(sb);
       if (base.empty()) continue;
 
@@ -300,8 +304,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
         continue;
       }
 
-      BRK_TRYV(src, io::open_raw_file(p));
-      BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p.string(), sb, src->size()));
+      BRK_TRYV(spec, make_spec(ImageSpec::Kind::RawFile, p, {}, p->label(), sb, p->size()));
       if (is_pit) {
         pit_specs.push_back(std::move(spec));
       } else {
@@ -320,6 +323,19 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
 
   for (auto& s : pit_specs) out.push_back(std::move(s));
   return out;
+}
+
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
+    const std::vector<std::filesystem::path>& inputs) noexcept {
+  std::vector<io::RandomAccessSourcePtr> sources;
+  sources.reserve(inputs.size());
+
+  for (const auto& p : inputs) {
+    BRK_TRYV(source, io::open_file_source(p));
+    sources.push_back(std::move(source));
+  }
+
+  return expand_inputs(sources);
 }
 
 brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table,

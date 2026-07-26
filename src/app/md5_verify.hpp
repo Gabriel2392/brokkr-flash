@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "io/random_access.hpp"
 #include "protocol/odin/group_flasher.hpp"
 
 #include <array>
@@ -51,6 +52,8 @@ struct Md5Job {
 };
 
 brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept;
+brokkr::core::Result<std::vector<Md5Job>> md5_jobs_from_sources(
+    const std::vector<brokkr::io::RandomAccessSourcePtr>& inputs) noexcept;
 std::string_view md5_verify_name(const std::vector<Md5Job>& jobs) noexcept;
 brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::odin::Ui& ui,
                                 std::atomic<bool>* cancel = nullptr) noexcept;

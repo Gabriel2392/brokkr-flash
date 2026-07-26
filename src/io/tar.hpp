@@ -18,9 +18,11 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "io/random_access.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -37,14 +39,18 @@ struct TarEntry {
 
 class TarArchive {
  public:
-  static brokkr::core::Result<TarArchive> open(std::string path, bool validate_header_checksums = true) noexcept;
+  static brokkr::core::Result<TarArchive> open(RandomAccessSourcePtr source,
+                                               bool validate_header_checksums = true) noexcept;
+  static brokkr::core::Result<TarArchive> open(const std::filesystem::path& path,
+                                               bool validate_header_checksums = true) noexcept;
 
-  const std::string& path() const noexcept { return path_; }
+  const RandomAccessSourcePtr& source() const noexcept { return source_; }
   const std::vector<TarEntry>& entries() const noexcept { return entries_; }
 
   std::optional<TarEntry> find_by_basename(std::string_view base) const;
 
-  static bool is_tar_file(const std::string& path) noexcept;
+  static bool is_tar_file(const RandomAccessSource& source) noexcept;
+  static bool is_tar_file(const std::filesystem::path& path) noexcept;
 
   std::optional<std::uint64_t> payload_size_bytes() const noexcept { return payload_size_bytes_; }
 
@@ -78,7 +84,7 @@ class TarArchive {
   brokkr::core::Status scan_() noexcept;
 
  private:
-  std::string path_;
+  RandomAccessSourcePtr source_;
   bool validate_ = true;
   std::vector<TarEntry> entries_;
   std::optional<std::uint64_t> payload_size_bytes_;

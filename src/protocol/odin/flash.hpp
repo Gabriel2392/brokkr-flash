@@ -44,7 +44,7 @@ struct ImageSpec {
   enum class Kind { RawFile, TarEntry };
 
   Kind kind{};
-  std::filesystem::path path;
+  io::RandomAccessSourcePtr source;
   io::TarEntry entry{};
 
   std::string basename;
@@ -58,8 +58,6 @@ struct ImageSpec {
 
   std::string display;
 
-  std::function<brokkr::core::Result<std::unique_ptr<io::ByteSource>>()> custom_open;
-
   brokkr::core::Result<std::unique_ptr<io::ByteSource>> open() const noexcept;
 };
 
@@ -68,6 +66,12 @@ struct FlashItem {
   ImageSpec spec;
 };
 
+struct ExpandOptions {
+  bool allow_raw_files = true;
+};
+
+brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io::RandomAccessSourcePtr>& inputs,
+                                                           ExpandOptions options = {}) noexcept;
 brokkr::core::Result<std::vector<ImageSpec>> expand_inputs_tar_or_raw(
     const std::vector<std::filesystem::path>& inputs) noexcept;
 brokkr::core::Result<std::vector<FlashItem>> map_to_pit(const pit::PitTable& pit_table,

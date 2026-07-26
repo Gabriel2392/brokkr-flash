@@ -32,7 +32,6 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -42,17 +41,6 @@
 #include <thread>
 #include <unordered_set>
 #include <utility>
-
-#if defined(_WIN32)
-  #include <windows.h>
-#else
-  #include <cerrno>
-  #include <fcntl.h>
-  #include <unistd.h>
-  #if defined(POSIX_FADV_SEQUENTIAL)
-    #include <sys/types.h>
-  #endif
-#endif
 
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
@@ -117,93 +105,24 @@ std::mutex& session_verify_cache_mutex() {
   return mtx;
 }
 
-class HashFileReader {
+class SourceHashReader final : public HashReader {
  public:
-  explicit HashFileReader(const std::filesystem::path& path) noexcept : path_(path) {}
+  explicit SourceHashReader(brokkr::io::RandomAccessSourcePtr source) noexcept : source_(std::move(source)) {}
 
-  brokkr::core::Status open() noexcept {
-#if defined(_WIN32)
-    handle_ = CreateFileW(path_.c_str(), GENERIC_READ,
-                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (handle_ == INVALID_HANDLE_VALUE) {
-      return brokkr::core::failf("Cannot open for hashing: {}", path_.string());
-    }
+  brokkr::core::Status open() noexcept override {
+    source_->advise_sequential();
     return {};
-#else
-    fd_ = ::open(path_.c_str(), O_RDONLY
-#if defined(O_CLOEXEC)
-                                   | O_CLOEXEC
-#endif
-    );
-    if (fd_ < 0) return brokkr::core::failf("Cannot open for hashing: {}", path_.string());
-#if defined(POSIX_FADV_SEQUENTIAL)
-    (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_SEQUENTIAL);
-#endif
-#if defined(POSIX_FADV_WILLNEED)
-    (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_WILLNEED);
-#endif
-    return {};
-#endif
   }
-
-  brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept {
-#if defined(_WIN32)
-    std::size_t total = 0;
-    while (total < want) {
-      const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(want - total, static_cast<std::size_t>(1u << 30)));
-      DWORD got = 0;
-      if (!ReadFile(handle_, data + total, chunk, &got, nullptr)) {
-        return brokkr::core::failf("Read failed while hashing: {}", path_.string());
-      }
-      if (got == 0) break;
-      total += static_cast<std::size_t>(got);
-    }
-    return total;
-#else
-    std::size_t total = 0;
-    while (total < want) {
-      const ssize_t got = ::read(fd_, data + total, want - total);
-      if (got < 0) {
-        if (errno == EINTR) continue;
-        return brokkr::core::failf("Read failed while hashing: {}", path_.string());
-      }
-      if (got == 0) break;
-      total += static_cast<std::size_t>(got);
-    }
-    return total;
-#endif
-  }
-
-  ~HashFileReader() {
-#if defined(_WIN32)
-    if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
-#else
-    if (fd_ >= 0) ::close(fd_);
-#endif
-  }
-
- private:
-  std::filesystem::path path_;
-#if defined(_WIN32)
-  HANDLE handle_ = INVALID_HANDLE_VALUE;
-#else
-  int fd_ = -1;
-#endif
-};
-
-class PathHashReader final : public HashReader {
- public:
-  explicit PathHashReader(std::filesystem::path path) noexcept : reader_(std::move(path)) {}
-
-  brokkr::core::Status open() noexcept override { return reader_.open(); }
 
   brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept override {
-    return reader_.read_some(data, want);
+    BRK_TRYV(got, source_->read_at(cursor_, std::as_writable_bytes(std::span<unsigned char>(data, want))));
+    cursor_ += got;
+    return got;
   }
 
  private:
-  HashFileReader reader_;
+  brokkr::io::RandomAccessSourcePtr source_;
+  std::uint64_t cursor_ = 0;
 };
 
 static bool is_hex(unsigned char c) noexcept {
@@ -228,23 +147,8 @@ static bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>&
   return true;
 }
 
-static bool is_md5_wrapped_tar_name(const std::filesystem::path& path) noexcept {
-  return brokkr::core::ends_with_ci(path.filename().string(), ".md5");
-}
-
-static std::filesystem::path session_identity_path(const std::filesystem::path& path) noexcept {
-  std::error_code ec;
-  auto canonical = std::filesystem::weakly_canonical(path, ec);
-  if (!ec) return canonical;
-
-  auto absolute = std::filesystem::absolute(path, ec);
-  if (!ec) return absolute.lexically_normal();
-
-  return path.lexically_normal();
-}
-
-static std::int64_t session_identity_write_time(std::filesystem::file_time_type t) noexcept {
-  return static_cast<std::int64_t>(t.time_since_epoch().count());
+static bool is_md5_wrapped_tar_name(std::string_view label) noexcept {
+  return brokkr::core::ends_with_ci(std::filesystem::path(label).filename().string(), ".md5");
 }
 
 static SessionVerifyKey make_session_verify_key(const Md5Job& job) {
@@ -407,25 +311,16 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const Md5Jo
   return digest;
 }
 
-static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::filesystem::path& p) noexcept {
-  std::error_code ec;
-  const std::uint64_t file_size = std::filesystem::file_size(p, ec);
-  if (ec) return brokkr::core::failf("Cannot stat file: {}", p.string());
-  const auto write_time = std::filesystem::last_write_time(p, ec);
-  if (ec) return brokkr::core::failf("Cannot stat file write time: {}", p.string());
+static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(
+    const brokkr::io::RandomAccessSourcePtr& source) noexcept {
+  const std::uint64_t file_size = source->size();
   if (file_size < (kMd5HexChars + 2)) return std::nullopt;
 
   const std::uint64_t tail_off = (file_size > kTrailerMaxBytes) ? (file_size - kTrailerMaxBytes) : 0;
   const std::size_t tail_len = static_cast<std::size_t>(file_size - tail_off);
 
-  std::ifstream in(p, std::ios::binary);
-  if (!in.is_open()) return brokkr::core::failf("Cannot open for MD5: {}", p.string());
-
   std::string tail(tail_len, '\0');
-  in.seekg(static_cast<std::streamoff>(tail_off), std::ios::beg);
-  if (!in.good()) return brokkr::core::failf("Seek failed: {}", p.string());
-  in.read(tail.data(), static_cast<std::streamsize>(tail.size()));
-  if (!in.good()) return brokkr::core::failf("Read failed: {}", p.string());
+  BRK_TRY(source->read_exact_at(tail_off, std::as_writable_bytes(std::span<char>(tail.data(), tail.size()))));
 
   std::int64_t delim = -1;
   for (std::int64_t i = static_cast<std::int64_t>(tail.size()) - 2; i >= 0; --i) {
@@ -457,36 +352,53 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(const std::fil
   const std::uint64_t bytes_to_hash = tail_off +
                                       static_cast<std::uint64_t>(delim - static_cast<std::int64_t>(kMd5HexChars));
 
-  if (file_size - bytes_to_hash > kTrailerMaxBytes) return brokkr::core::failf("MD5 trailer too large: {}", p.string());
+  if (file_size - bytes_to_hash > kTrailerMaxBytes) {
+    return brokkr::core::failf("MD5 trailer too large: {}", source->label());
+  }
 
   Md5Job j;
-  j.display_name = p.string();
-  j.identity_path = session_identity_path(p).generic_string();
+  j.display_name = source->label();
+  j.identity_path = source->identity();
   j.identity_size = file_size;
-  j.identity_write_time = session_identity_write_time(write_time);
+  j.identity_write_time = source->write_time();
   j.bytes_to_hash = bytes_to_hash;
   j.expected = expected;
-  j.open_reader = [path = p]() -> brokkr::core::Result<std::unique_ptr<HashReader>> {
-    return std::unique_ptr<HashReader>(std::make_unique<PathHashReader>(path));
+  j.open_reader = [source]() -> brokkr::core::Result<std::unique_ptr<HashReader>> {
+    return std::unique_ptr<HashReader>(std::make_unique<SourceHashReader>(source));
   };
   return std::optional<Md5Job>(std::move(j));
 }
 
 } // namespace
 
-brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept {
+brokkr::core::Result<std::vector<Md5Job>> md5_jobs_from_sources(
+    const std::vector<brokkr::io::RandomAccessSourcePtr>& inputs) noexcept {
   std::vector<Md5Job> jobs;
 
-  for (const auto& p : inputs) {
-    if (!is_md5_wrapped_tar_name(p)) continue;
-    if (!brokkr::io::TarArchive::is_tar_file(p.string())) continue;
+  for (const auto& source : inputs) {
+    if (!is_md5_wrapped_tar_name(source->label())) continue;
+    if (!brokkr::io::TarArchive::is_tar_file(*source)) continue;
 
-    auto r = detect_md5_job(p);
+    auto r = detect_md5_job(source);
     if (!r) return brokkr::core::fail(std::move(r.error()));
     if (*r) jobs.push_back(std::move(**r));
   }
 
   return jobs;
+}
+
+brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept {
+  std::vector<brokkr::io::RandomAccessSourcePtr> sources;
+  sources.reserve(inputs.size());
+
+  for (const auto& p : inputs) {
+    if (!is_md5_wrapped_tar_name(p.string())) continue;
+
+    BRK_TRYV(source, brokkr::io::open_file_source(p));
+    sources.push_back(std::move(source));
+  }
+
+  return md5_jobs_from_sources(sources);
 }
 
 std::string_view md5_verify_name(const std::vector<Md5Job>& jobs) noexcept {

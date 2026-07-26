@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "io/random_access.hpp"
 #include "io/tar.hpp"
 
 #include <cstddef>
@@ -41,7 +42,12 @@ class ByteSource {
   virtual brokkr::core::Status status() const noexcept { return {}; }
 };
 
+std::unique_ptr<ByteSource> open_range(RandomAccessSourcePtr src, std::uint64_t offset, std::uint64_t size,
+                                       std::string display);
+
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept;
+
+std::unique_ptr<ByteSource> open_tar_entry(RandomAccessSourcePtr src, const TarEntry& entry);
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path,
                                                                  const TarEntry& entry) noexcept;
 

@@ -17,8 +17,8 @@
 
 #include "app/md5_verify.hpp"
 #include "core/str.hpp"
+#include "io/random_access.hpp"
 #include "platform/android/app_dirs.hpp"
-#include "platform/android/fd_package.hpp"
 #include "platform/android/java_tcp_transport.hpp"
 #include "platform/android/libusb_transport.hpp"
 #include "protocol/odin/flash.hpp"
@@ -33,9 +33,11 @@
 #include <cstdint>
 #include <exception>
 #include <expected>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -412,6 +414,20 @@ std::vector<std::string> collect_labels(JNIEnv* env, jobjectArray label_array, s
   return labels;
 }
 
+brokkr::core::Result<std::shared_ptr<const std::vector<std::byte>>> load_pit_fd(int fd, std::string label) noexcept {
+  BRK_TRYV(source, brokkr::io::open_fd_source(fd, std::move(label)));
+
+  const std::uint64_t size = source->size();
+  if (size == 0) return brokkr::core::fail("Manual PIT file is empty");
+  if (size > std::numeric_limits<std::size_t>::max()) return brokkr::core::fail("Manual PIT file is too large");
+
+  auto pit = std::make_shared<std::vector<std::byte>>(static_cast<std::size_t>(size));
+  BRK_TRY(source->read_exact_at(0, std::span<std::byte>(*pit)));
+
+  spdlog::info("Using manual PIT: {}", source->label());
+  return std::shared_ptr<const std::vector<std::byte>>(std::move(pit));
+}
+
 std::expected<brokkr::android_platform::LibusbUsbTransport::OpenParams, std::string>
 read_usb_open_params(JNIEnv* env, jobject transport) {
   if (transport == nullptr) return std::unexpected{"null USB transport"};
@@ -472,10 +488,10 @@ brokkr::core::Status execute_flash(JNIEnv* env, NativeSession& session,
   const auto labels = collect_labels(env, package_labels, raw_fds.size(), "Package ");
   if (raw_fds.empty() && manual_pit_fd < 0) return brokkr::core::fail("No package files or PIT selected");
 
-  brokkr::android_platform::PackageFiles packages;
+  std::vector<brokkr::io::RandomAccessSourcePtr> packages;
   packages.reserve(raw_fds.size());
   for (std::size_t i = 0; i < raw_fds.size(); ++i) {
-    BRK_TRYV(package, brokkr::android_platform::PackageFile::open(raw_fds[i], labels[i]));
+    BRK_TRYV(package, brokkr::io::open_fd_source(raw_fds[i], labels[i]));
     packages.push_back(std::move(package));
   }
 
@@ -521,21 +537,18 @@ brokkr::core::Status execute_flash(JNIEnv* env, NativeSession& session,
     proxy->on_error(message);
   };
 
-  BRK_TRYV(md5_jobs, brokkr::android_platform::md5_jobs_from_packages(packages));
+  BRK_TRYV(md5_jobs, brokkr::app::md5_jobs_from_sources(packages));
   BRK_TRY(brokkr::app::md5_verify(md5_jobs, ui, &session.cancel));
 
-  BRK_TRYV(specs, brokkr::android_platform::expand_package_inputs(packages));
+  BRK_TRYV(specs, brokkr::odin::expand_inputs(packages, {.allow_raw_files = false}));
   std::shared_ptr<const std::vector<std::byte>> pit_to_upload;
   if (manual_pit_fd >= 0) {
     const auto label = jstring_to_string(env, manual_pit_label);
-    BRK_TRYV(manual_pit, brokkr::android_platform::load_pit_file(manual_pit_fd, label.empty() ? "Manual PIT" : label));
+    BRK_TRYV(manual_pit, load_pit_fd(manual_pit_fd, label.empty() ? "Manual PIT" : label));
     pit_to_upload = std::move(manual_pit);
   }
 
-  if (!pit_to_upload) {
-    BRK_TRYV(auto_pit, brokkr::android_platform::load_pit_from_packages(packages));
-    pit_to_upload = std::move(auto_pit);
-  }
+  if (!pit_to_upload) pit_to_upload = brokkr::odin::pit_from_specs(specs);
 
   std::vector<brokkr::odin::ImageSpec> flash_specs;
   flash_specs.reserve(specs.size());

@@ -17,89 +17,69 @@
 
 #include "io/source.hpp"
 
-#include <filesystem>
-#include <fstream>
-#include <limits>
+#include <algorithm>
 #include <utility>
 
 namespace brokkr::io {
 
-class RawFileSource final : public ByteSource {
+namespace {
+
+class RangeSource final : public ByteSource {
  public:
-  explicit RawFileSource(std::filesystem::path p, std::uint64_t size)
-      : path_(std::move(p)), in_(path_, std::ios::binary), size_(size) {}
+  RangeSource(RandomAccessSourcePtr src, std::uint64_t offset, std::uint64_t size, std::string display)
+      : src_(std::move(src)), offset_(offset), size_(size), display_(std::move(display)) {}
 
-  bool opened() const noexcept { return in_.is_open(); }
-
-  std::string display_name() const override { return path_.string(); }
+  std::string display_name() const override { return display_; }
   std::uint64_t size() const override { return size_; }
 
   std::size_t read(std::span<std::byte> out) override {
-    if (out.empty()) return 0;
-    in_.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(out.size()));
-    const auto n = in_.gcount();
-    return (n <= 0) ? 0u : static_cast<std::size_t>(n);
+    if (cursor_ >= size_ || out.empty()) return 0;
+
+    const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(size_ - cursor_, out.size()));
+    auto got = src_->read_at(offset_ + cursor_, out.subspan(0, want));
+    if (!got) {
+      status_ = brokkr::core::fail(std::move(got.error()));
+      return 0;
+    }
+
+    cursor_ += *got;
+    return *got;
   }
 
+  brokkr::core::Status status() const noexcept override { return status_; }
+
  private:
-  std::filesystem::path path_;
-  std::ifstream in_;
+  RandomAccessSourcePtr src_;
+  std::uint64_t offset_ = 0;
   std::uint64_t size_ = 0;
+  std::uint64_t cursor_ = 0;
+  std::string display_;
+  brokkr::core::Status status_{};
 };
 
-class TarEntrySource final : public ByteSource {
- public:
-  TarEntrySource(std::filesystem::path tar, TarEntry e)
-      : tar_path_(std::move(tar)), entry_(std::move(e)), in_(tar_path_, std::ios::binary), remaining_(entry_.size) {}
+} // namespace
 
-  bool opened() const noexcept { return in_.is_open(); }
+std::unique_ptr<ByteSource> open_range(RandomAccessSourcePtr src, std::uint64_t offset, std::uint64_t size,
+                                       std::string display) {
+  return std::make_unique<RangeSource>(std::move(src), offset, size, std::move(display));
+}
 
-  bool seek_to_data() noexcept {
-    if (!in_.is_open()) return false;
-    if (entry_.data_offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max())) return false;
-    in_.seekg(static_cast<std::streamoff>(entry_.data_offset), std::ios::beg);
-    return in_.good();
-  }
-
-  std::string display_name() const override { return tar_path_.string() + ":" + entry_.name; }
-  std::uint64_t size() const override { return entry_.size; }
-
-  std::size_t read(std::span<std::byte> out) override {
-    if (remaining_ == 0 || out.empty()) return 0;
-    const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining_, out.size()));
-    in_.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(want));
-    const auto n = in_.gcount();
-    if (n <= 0) return 0;
-    remaining_ -= static_cast<std::uint64_t>(n);
-    return static_cast<std::size_t>(n);
-  }
-
- private:
-  std::filesystem::path tar_path_;
-  TarEntry entry_;
-  std::ifstream in_;
-  std::uint64_t remaining_ = 0;
-};
+std::unique_ptr<ByteSource> open_tar_entry(RandomAccessSourcePtr src, const TarEntry& entry) {
+  std::string display = src->label() + ":" + entry.name;
+  return open_range(std::move(src), entry.data_offset, entry.size, std::move(display));
+}
 
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_raw_file(const std::filesystem::path& path) noexcept {
-  std::error_code ec;
-  const auto sz = std::filesystem::file_size(path, ec);
-  if (ec) return brokkr::core::failf("open_raw_file: stat failed: {}", path.string());
-
-  auto ptr = std::make_unique<RawFileSource>(path, static_cast<std::uint64_t>(sz));
-  if (!ptr->opened()) return brokkr::core::failf("open_raw_file: cannot open: {}", path.string());
-
-  return std::move(ptr);
+  BRK_TRYV(src, open_file_source(path));
+  const auto size = src->size();
+  std::string display = src->label();
+  return open_range(std::move(src), 0, size, std::move(display));
 }
 
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path,
                                                                  const TarEntry& entry) noexcept {
-  auto ptr = std::make_unique<TarEntrySource>(tar_path, entry);
-
-  if (!ptr->opened()) return brokkr::core::failf("open_tar_entry: cannot open tar: {}", tar_path.string());
-  if (!ptr->seek_to_data()) return brokkr::core::failf("open_tar_entry: seek failed: {}", tar_path.string());
-
-  return std::move(ptr);
+  BRK_TRYV(src, open_file_source(tar_path));
+  return open_tar_entry(std::move(src), entry);
 }
 
 } // namespace brokkr::io

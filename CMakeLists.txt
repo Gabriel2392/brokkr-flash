@@ -125,7 +125,6 @@ if (ANDROID)
     target_compile_definitions(brokkr-platform INTERFACE BROKKR_PLATFORM_ANDROID _FILE_OFFSET_BITS=64)
     target_sources(brokkr-platform INTERFACE
         src/platform/android/app_dirs.cpp
-        src/platform/android/fd_package.cpp
         src/platform/android/java_tcp_transport.cpp
         src/platform/android/libusb_transport.cpp
     )
@@ -192,6 +191,7 @@ endif()
 add_library(brokkr-lib INTERFACE)
 target_sources(brokkr-lib INTERFACE
     src/core/thread_pool.cpp
+    src/io/random_access.cpp
     src/io/tar.cpp
     src/io/source.cpp
     src/io/lz4_frame.cpp

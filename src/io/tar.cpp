@@ -21,11 +21,10 @@
 #include <array>
 #include <charconv>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 
@@ -61,9 +60,12 @@ static brokkr::core::Result<std::uint64_t> parse_u64_dec(std::string_view s) noe
 
 } // namespace
 
-brokkr::core::Result<TarArchive> TarArchive::open(std::string path, bool validate_header_checksums) noexcept {
+brokkr::core::Result<TarArchive> TarArchive::open(RandomAccessSourcePtr source,
+                                                  bool validate_header_checksums) noexcept {
+  if (!source) return brokkr::core::fail("TarArchive: null source");
+
   TarArchive t;
-  t.path_ = std::move(path);
+  t.source_ = std::move(source);
   t.validate_ = validate_header_checksums;
 
   auto st = t.scan_();
@@ -72,16 +74,27 @@ brokkr::core::Result<TarArchive> TarArchive::open(std::string path, bool validat
   return t;
 }
 
-bool TarArchive::is_tar_file(const std::string& path) noexcept {
-  std::ifstream in(path, std::ios::binary);
-  if (!in.is_open()) return false;
+brokkr::core::Result<TarArchive> TarArchive::open(const std::filesystem::path& path,
+                                                  bool validate_header_checksums) noexcept {
+  BRK_TRYV(source, open_file_source(path));
+  return open(std::move(source), validate_header_checksums);
+}
+
+bool TarArchive::is_tar_file(const RandomAccessSource& source) noexcept {
+  if (source.size() < kBlock) return false;
 
   std::array<std::byte, 512> header{};
-  in.read(reinterpret_cast<char*>(header.data()), header.size());
-  if (!in.good()) return false;
+  auto got = source.read_at(0, header);
+  if (!got || *got != header.size()) return false;
 
   if (header_all_zero(std::span<const std::byte, 512>(header))) return false;
   return validate_header_checksum(std::span<const std::byte, 512>(header));
+}
+
+bool TarArchive::is_tar_file(const std::filesystem::path& path) noexcept {
+  auto source = open_file_source(path);
+  if (!source) return false;
+  return is_tar_file(**source);
 }
 
 std::optional<TarEntry> TarArchive::find_by_basename(std::string_view base) const {
@@ -215,8 +228,8 @@ brokkr::core::Result<TarArchive::PaxKV> TarArchive::parse_pax_payload(std::strin
 }
 
 brokkr::core::Status TarArchive::scan_() noexcept {
-  std::ifstream in(path_, std::ios::binary);
-  if (!in.is_open()) return brokkr::core::failf("TarArchive: cannot open: {}", path_);
+  const std::string& label = source_->label();
+  const std::uint64_t total = source_->size();
 
   entries_.clear();
   payload_size_bytes_.reset();
@@ -238,19 +251,24 @@ brokkr::core::Status TarArchive::scan_() noexcept {
   };
   std::vector<PendingHardlink> pending_hardlinks;
 
-  auto read_exact = [&](std::byte* dst, std::size_t n) -> brokkr::core::Status {
-    in.read(reinterpret_cast<char*>(dst), static_cast<std::streamsize>(n));
-    if (!in.good()) return brokkr::core::failf("TarArchive: short read: {}", path_);
+  auto read_exact = [&](std::span<std::byte> dst) -> brokkr::core::Status {
+    if (pos + dst.size() > total) return brokkr::core::failf("TarArchive: short read: {}", label);
+    BRK_TRY(source_->read_exact_at(pos, dst));
+    pos += dst.size();
+    return {};
+  };
+
+  auto read_body = [&](std::string& out, std::uint64_t n) -> brokkr::core::Status {
+    if (pos + n > total) return brokkr::core::failf("TarArchive: entry truncated: {}", label);
+    out.resize(static_cast<std::size_t>(n));
+    if (n) BRK_TRY(source_->read_exact_at(pos, std::as_writable_bytes(std::span<char>(out.data(), out.size()))));
     pos += n;
     return {};
   };
 
   auto skip_exact = [&](std::uint64_t n) -> brokkr::core::Status {
     if (n == 0) return {};
-    if (n > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
-      return brokkr::core::fail("TarArchive: entry too large for seekg");
-    in.seekg(static_cast<std::streamoff>(n), std::ios::cur);
-    if (!in.good()) return brokkr::core::failf("TarArchive: seek failed: {}", path_);
+    if (n > total || pos > total - n) return brokkr::core::failf("TarArchive: entry truncated: {}", label);
     pos += n;
     return {};
   };
@@ -273,24 +291,22 @@ brokkr::core::Status TarArchive::scan_() noexcept {
   };
 
   for (;;) {
-    BRK_TRY(read_exact(header.data(), header.size()));
+    BRK_TRY(read_exact(header));
 
     if (header_all_zero(std::span<const std::byte, 512>(header))) {
       std::array<std::byte, 512> hdr2{};
-      in.read(reinterpret_cast<char*>(hdr2.data()), static_cast<std::streamsize>(hdr2.size()));
-      const auto got2 = in.gcount();
-
-      if (got2 == static_cast<std::streamsize>(hdr2.size()) && header_all_zero(std::span<const std::byte, 512>(hdr2))) {
-        pos += hdr2.size();
-        payload_size_bytes_ = pos;
-      } else {
-        if (got2 > 0) pos += static_cast<std::uint64_t>(got2);
+      if (pos + hdr2.size() <= total) {
+        auto got2 = source_->read_at(pos, hdr2);
+        if (got2 && *got2 == hdr2.size() && header_all_zero(std::span<const std::byte, 512>(hdr2))) {
+          pos += hdr2.size();
+          payload_size_bytes_ = pos;
+        }
       }
       break;
     }
 
     if (validate_ && !validate_header_checksum(std::span<const std::byte, 512>(header))) {
-      return brokkr::core::failf("TarArchive: invalid header checksum in: {}", path_);
+      return brokkr::core::failf("TarArchive: invalid header checksum in: {}", label);
     }
 
     const char* h = reinterpret_cast<const char*>(header.data());
@@ -307,8 +323,7 @@ brokkr::core::Status TarArchive::scan_() noexcept {
       if (size > (1024ull * 1024ull * 8ull)) return brokkr::core::fail("TarArchive: refusing huge PAX header");
 
       std::string payload;
-      payload.resize(static_cast<std::size_t>(size));
-      if (size) BRK_TRY(read_exact(reinterpret_cast<std::byte*>(payload.data()), static_cast<std::size_t>(size)));
+      BRK_TRY(read_body(payload, size));
       BRK_TRY(skip_exact(round_up_512(size) - size));
 
       auto kvr = parse_pax_payload(payload);
@@ -325,8 +340,7 @@ brokkr::core::Status TarArchive::scan_() noexcept {
       if (size > (1024ull * 1024ull * 8ull)) return brokkr::core::fail("TarArchive: refusing huge GNU longname header");
 
       std::string payload;
-      payload.resize(static_cast<std::size_t>(size));
-      if (size) BRK_TRY(read_exact(reinterpret_cast<std::byte*>(payload.data()), static_cast<std::size_t>(size)));
+      BRK_TRY(read_body(payload, size));
       BRK_TRY(skip_exact(round_up_512(size) - size));
 
       const auto nul = payload.find('\0');
@@ -345,6 +359,10 @@ brokkr::core::Status TarArchive::scan_() noexcept {
     const bool is_payload = (typeflag == '0' || typeflag == '\0' || typeflag == '7');
 
     if (is_payload && !full_name.empty()) {
+      if (size > total || data_offset > total - size) {
+        return brokkr::core::failf("TarArchive: entry truncated: {}:{}", label, full_name);
+      }
+
       TarEntry e{full_name, size, data_offset};
       entries_.push_back(e);
       payload_by_name.emplace(e.name, e);
@@ -362,7 +380,7 @@ brokkr::core::Status TarArchive::scan_() noexcept {
     entries_.push_back(TarEntry{hl.name, it->second.size, it->second.data_offset});
   }
 
-  spdlog::debug("TarArchive: scanned {} entries in {}", entries_.size(), path_);
+  spdlog::debug("TarArchive: scanned {} entries in {}", entries_.size(), label);
   return {};
 }
 
