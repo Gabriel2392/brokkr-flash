@@ -207,11 +207,6 @@ static bool is_pit_drop_name(const QString& file_name) {
   return file_name.trimmed().toLower().endsWith(".pit");
 }
 
-static bool is_firmware_drop_name(const QString& file_name) {
-  const QString name = file_name.trimmed().toLower();
-  return name.endsWith(".tar") || name.endsWith(".md5");
-}
-
 static bool is_token_char(QChar c) { return c.isLetterOrNumber(); }
 
 static bool contains_token(const QString& upper_name, const QString& token) {
@@ -926,7 +921,7 @@ int BrokkrWrapper::inferDropSlotFromFileName_(const QString& fileName) {
 
 bool BrokkrWrapper::isDropFileAllowedForSlot_(int slotId, const QString& fileName) {
   if (slotId == kDropSlotPIT) return is_pit_drop_name(fileName);
-  if (slotId >= kDropSlotBL && slotId <= kDropSlotUSERDATA) return is_firmware_drop_name(fileName);
+  if (slotId >= kDropSlotBL && slotId <= kDropSlotUSERDATA) return !is_pit_drop_name(fileName);
   return false;
 }
 
@@ -1011,7 +1006,7 @@ bool BrokkrWrapper::assignDroppedFileToSlot_(int slotId, const QString& localPat
       if (slotId == kDropSlotPIT)
         *reason = "PIT slot accepts only .pit files.";
       else
-        *reason = "Firmware slots accept only .tar or .md5 files.";
+        *reason = "Firmware slots do not accept .pit files; use the PIT slot.";
     }
     return false;
   }
