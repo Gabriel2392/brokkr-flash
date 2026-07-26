@@ -411,7 +411,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag || github.ref }}
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: ${{ matrix.msvc_arch }}
 
