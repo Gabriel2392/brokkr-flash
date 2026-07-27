@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "Publish a release. 'stable' bumps the patch version; 'beta' tags a pre-release without bumping it."
+        description: "Publish the current version. 'stable' then bumps the patch for development; 'beta' does not change it."
         required: true
         type: choice
         options:
@@ -30,7 +30,7 @@ env:
 
 jobs:
   # ═══════════════════════════════════════════════════
-  #  Resolve version; bump, commit and tag on release
+  #  Resolve and tag release
   # ═══════════════════════════════════════════════════
   prepare:
     name: Resolve version
@@ -52,6 +52,8 @@ jobs:
         env:
           RELEASE_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_type || 'none' }}
           PRERELEASE_LABEL: ${{ inputs.prerelease_label }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -69,15 +71,29 @@ jobs:
               echo "label=dev"
               echo "tag="
               echo "prev_tag="
+              echo "next_version="
               echo "prerelease=false"
             } >> "$GITHUB_OUTPUT"
             echo "Development build ${CURRENT}-dev"
             exit 0
           fi
 
-          IFS=. read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          VERSION="${MAJOR}.${MINOR}.$((10#$PATCH + 1))"
-          PREV_TAG="v${CURRENT}"
+          VERSION="$CURRENT"
+          PREV_TAG=""
+          while IFS= read -r OLD_TAG; do
+            if git rev-parse -q --verify "refs/tags/${OLD_TAG}^{commit}" > /dev/null &&
+              git merge-base --is-ancestor "refs/tags/${OLD_TAG}^{commit}" HEAD; then
+              PREV_TAG="$OLD_TAG"
+              break
+            fi
+          done < <(
+            gh api --paginate "repos/${REPO}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .tag_name' 2>/dev/null || true
+          )
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG="$(git describe --tags --match 'v*' --abbrev=0 HEAD 2>/dev/null || true)"
+          fi
+          NEXT_VERSION=""
 
           if [ "$RELEASE_TYPE" = "beta" ]; then
             LABEL="$PRERELEASE_LABEL"
@@ -96,6 +112,8 @@ jobs:
           else
             LABEL="rel"
             FULL_VERSION="${VERSION}"
+            IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+            NEXT_VERSION="${MAJOR}.${MINOR}.$((10#$PATCH + 1))"
             PRERELEASE=false
           fi
 
@@ -111,33 +129,34 @@ jobs:
             echo "label=${LABEL}"
             echo "tag=${TAG}"
             echo "prev_tag=${PREV_TAG}"
+            echo "next_version=${NEXT_VERSION}"
             echo "prerelease=${PRERELEASE}"
           } >> "$GITHUB_OUTPUT"
 
-          echo "${CURRENT} -> ${VERSION}, tagging ${TAG} (prerelease=${PRERELEASE})"
+          echo "Tagging ${TAG} (next=${NEXT_VERSION:-unchanged})"
 
-      - name: Commit & tag
+      - name: Tag release
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != 'none'
         env:
           RELEASE_TYPE: ${{ inputs.release_type }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          NEXT_VERSION: ${{ steps.ver.outputs.next_version }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
 
-          sed -i -E "s/^(project\(Brokkr LANGUAGES C CXX VERSION )[0-9]+\.[0-9]+\.[0-9]+(\))/\1${VERSION}\2/" CMakeLists.txt
-          grep -qF "project(Brokkr LANGUAGES C CXX VERSION ${VERSION})" CMakeLists.txt
-
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CMakeLists.txt
-          git commit -m "Release ${TAG}"
           git tag "${TAG}"
 
           if [ "$RELEASE_TYPE" = "beta" ]; then
             git push origin "refs/tags/${TAG}"
           else
-            git push origin main --tags
+            test -n "$NEXT_VERSION"
+            sed -i -E "s/^(project\(Brokkr LANGUAGES C CXX VERSION )[0-9]+\.[0-9]+\.[0-9]+(\))/\1${NEXT_VERSION}\2/" CMakeLists.txt
+            grep -qF "project(Brokkr LANGUAGES C CXX VERSION ${NEXT_VERSION})" CMakeLists.txt
+            git add CMakeLists.txt
+            git commit -m "Bump version to ${NEXT_VERSION}"
+            git push --atomic origin HEAD:main "refs/tags/${TAG}"
           fi
 
   # ═══════════════════════════════════════════════════
@@ -862,7 +881,7 @@ jobs:
           echo "## Brokkr $NEW" > body.md
           echo "" >> body.md
 
-          if git rev-parse -q --verify "refs/tags/${PREV}" > /dev/null; then
+          if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/${PREV}" > /dev/null; then
             git log "${PREV}..${NEW}" --pretty=format:"- %s" --no-merges \
               | grep -v '^- Release v' >> body.md || true
             echo "" >> body.md
