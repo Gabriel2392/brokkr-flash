@@ -483,7 +483,13 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* targetLayout = new QHBoxLayout();
   targetLayout->addWidget(new QLabel("Target Sysname:", this));
   editTarget = new QLineEdit(this);
-  editTarget->setPlaceholderText("e.g. COM12 or 1-1.4");
+#if defined(Q_OS_WIN)
+  editTarget->setPlaceholderText("e.g. COM12");
+#elif defined(Q_OS_MACOS)
+  editTarget->setPlaceholderText("e.g. 0x12345678");
+#elif defined(Q_OS_LINUX)
+  editTarget->setPlaceholderText("e.g. 1-1.4");
+#endif
   targetLayout->addWidget(editTarget);
   optLayout->addLayout(targetLayout);
 
