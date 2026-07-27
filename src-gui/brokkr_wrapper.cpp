@@ -480,6 +480,9 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   auto* optLayout = new QVBoxLayout(optTab);
   optLayout->setAlignment(Qt::AlignTop);
 
+  chkWireless = new QCheckBox("Wireless", this);
+  optLayout->addWidget(chkWireless);
+
   auto* targetLayout = new QHBoxLayout();
   targetLayout->addWidget(new QLabel("Target Sysname:", this));
   editTarget = new QLineEdit(this);
@@ -493,8 +496,12 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   targetLayout->addWidget(editTarget);
   optLayout->addLayout(targetLayout);
 
-  chkWireless = new QCheckBox("Wireless", this);
-  optLayout->addWidget(chkWireless);
+  optLayout->addSpacing(10);
+  optLayout->addWidget(new QLabel("Post-Action:", this));
+  cmbRebootAction = new QComboBox(this);
+  cmbRebootAction->addItem("Default (Reboot Normally)");
+  cmbRebootAction->addItem("No Reboot");
+  optLayout->addWidget(cmbRebootAction);
 
   btnRebootDownloadMode_ = new QPushButton("Try to Reboot the device(s) into Download Mode", this);
   btnRebootDownloadMode_->setEnabled(false);
@@ -504,13 +511,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     if (busy_) return;
     tryRebootIntoDownloadMode_();
   });
-
-  optLayout->addSpacing(10);
-  optLayout->addWidget(new QLabel("Post-Action:", this));
-  cmbRebootAction = new QComboBox(this);
-  cmbRebootAction->addItem("Default (Reboot Normally)");
-  cmbRebootAction->addItem("No Reboot");
-  optLayout->addWidget(cmbRebootAction);
 
   tabWidget_->addTab(optTab, "Options");
 
