@@ -29,6 +29,8 @@ namespace brokkr::linux {
 
 class UsbFsConnection : public brokkr::core::IByteTransport {
  public:
+  static constexpr std::size_t MAX_BULK_IOCTL_BYTES = 16 * 1024;
+
   Kind kind() const noexcept override { return Kind::UsbBulk; }
 
   explicit UsbFsConnection(UsbFsDevice& dev);
@@ -47,7 +49,7 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
   int timeout_ms() const noexcept override { return timeout_ms_; }
   void set_packet_size_hint(std::size_t bytes) noexcept override;
 
-  std::size_t max_packet_size() const noexcept { return max_pack_size_; }
+  std::size_t max_packet_size() const noexcept { return MAX_BULK_IOCTL_BYTES; }
 
  private:
   UsbFsDevice& dev_;
@@ -56,7 +58,6 @@ class UsbFsConnection : public brokkr::core::IByteTransport {
   int timeout_ms_ = 200;
 
   bool zlp_needed_ = true;
-  std::size_t max_pack_size_ = 16 * 1024;
 };
 
 } // namespace brokkr::linux

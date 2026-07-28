@@ -30,29 +30,17 @@
 
 namespace brokkr::linux {
 
-namespace {
-constexpr std::size_t BULK_BUFFER_LENGTH_LIMIT = 16 * 1024;
-constexpr std::size_t BULK_BUFFER_LENGTH_NO_LIMIT = 128 * 1024;
-} // namespace
+static_assert(UsbFsConnection::MAX_BULK_IOCTL_BYTES % 1024 == 0);
 
 UsbFsConnection::UsbFsConnection(UsbFsDevice& dev) : dev_(dev) {}
 
 void UsbFsConnection::set_packet_size_hint(std::size_t bytes) noexcept {
-  if (bytes == 0) return;
-
-  if (dev_.has_packet_size_limit())
-    max_pack_size_ = std::min<std::size_t>(bytes, BULK_BUFFER_LENGTH_LIMIT);
-  else
-    max_pack_size_ = bytes;
-
-  if (max_pack_size_ == 0) max_pack_size_ = 1;
+  (void)bytes;
 }
 
 brokkr::core::Status UsbFsConnection::open() noexcept {
   if (connected_) return {};
   if (!dev_.is_open()) return brokkr::core::fail("UsbFsConnection::open: device not open");
-
-  max_pack_size_ = dev_.has_packet_size_limit() ? BULK_BUFFER_LENGTH_LIMIT : BULK_BUFFER_LENGTH_NO_LIMIT;
 
   connected_ = true;
   zlp_needed_ = true;
@@ -76,7 +64,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
   bulk.timeout = timeout_ms_;
 
   while (p < end) {
-    const int want = static_cast<int>(std::min<std::size_t>(std::size_t(end - p), max_pack_size_));
+    const int want = static_cast<int>(std::min<std::size_t>(std::size_t(end - p), MAX_BULK_IOCTL_BYTES));
     bulk.len = want;
     bulk.data = const_cast<std::uint8_t*>(p);
 
@@ -150,7 +138,8 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   usbdevfs_bulktransfer bulk{};
 
   while (p < end) {
-    const auto xfer = static_cast<int>(std::min<std::size_t>(std::size_t(end - p), max_pack_size_));
+    const auto xfer =
+        static_cast<int>(std::min<std::size_t>(std::size_t(end - p), MAX_BULK_IOCTL_BYTES));
     bulk.ep = eps.bulk_in;
     bulk.len = xfer;
     bulk.data = p;
