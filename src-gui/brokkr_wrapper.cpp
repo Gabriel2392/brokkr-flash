@@ -206,7 +206,7 @@ namespace {
 using brokkr::app::is_odin_product;
 
 static QString unlock_screen_notice() {
-  return QStringLiteral("Please ensure the screen is unlocked before sending reboot command.");
+  return QStringLiteral("Please ensure the screen is unlocked and Auto Blocker is disabled before sending reboot command.");
 }
 
 static bool is_pit_drop_name(const QString& file_name) {

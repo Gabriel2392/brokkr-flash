@@ -266,7 +266,7 @@ std::optional<int> reboot_download_cli() {
     return std::nullopt;
   }
 
-  spdlog::warn("Please ensure the screen is unlocked before sending reboot command.");
+  spdlog::warn("Please ensure the screen is unlocked and Auto Blocker is disabled before sending reboot command.");
 
   const auto r = brokkr::app::reboot_to_download_mode();
   if (r.ports_seen == 0) {
