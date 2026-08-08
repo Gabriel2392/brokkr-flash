@@ -119,7 +119,7 @@ class BrokkrWrapper : public QWidget {
   void stopWirelessListener_();
 
   void startWorkStart_();
-  void tryRebootIntoDownloadMode_();
+  void tryRebootIntoDownloadMode_(bool confirm = true);
 
   void setBusy_(bool busy);
   void setControlsEnabled_(bool enabled);

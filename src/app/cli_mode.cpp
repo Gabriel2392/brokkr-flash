@@ -266,6 +266,8 @@ std::optional<int> reboot_download_cli() {
     return std::nullopt;
   }
 
+  spdlog::warn("Please ensure the screen is unlocked before sending reboot command.");
+
   const auto r = brokkr::app::reboot_to_download_mode();
   if (r.ports_seen == 0) {
     spdlog::error("No Samsung serial port found.");

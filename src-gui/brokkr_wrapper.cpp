@@ -205,6 +205,10 @@ namespace {
 
 using brokkr::app::is_odin_product;
 
+static QString unlock_screen_notice() {
+  return QStringLiteral("Please ensure the screen is unlocked before sending reboot command.");
+}
+
 static bool is_pit_drop_name(const QString& file_name) {
   return file_name.trimmed().toLower().endsWith(".pit");
 }
@@ -2094,7 +2098,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle("Brokkr Flash");
-    box.setText(text);
+    box.setText(text + "\n\n" + unlock_screen_notice());
 
     auto* ok_btn = box.addButton(QMessageBox::Ok);
     auto* reboot_btn = box.addButton("Try to Reboot them into Download Mode", QMessageBox::ActionRole);
@@ -2105,7 +2109,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     box.exec();
 
     if (box.clickedButton() == reboot_btn) {
-      tryRebootIntoDownloadMode_();
+      tryRebootIntoDownloadMode_(false);
       return false;
     }
     return allowIgnore && ignore_btn && box.clickedButton() == ignore_btn;
@@ -2181,7 +2185,7 @@ void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const
   QMessageBox::warning(const_cast<BrokkrWrapper*>(this), title, msg);
 }
 
-void BrokkrWrapper::tryRebootIntoDownloadMode_() {
+void BrokkrWrapper::tryRebootIntoDownloadMode_(bool confirm) {
   if (busy_) return;
 
   int nonOdinCount = 0;
@@ -2193,6 +2197,12 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_() {
 
   if (nonOdinCount <= 0) {
     QMessageBox::information(this, "Brokkr Flash", "No connected device needs reboot into Download Mode.");
+    return;
+  }
+
+  if (confirm &&
+      QMessageBox::question(this, "Brokkr Flash", unlock_screen_notice(), QMessageBox::Ok | QMessageBox::Cancel,
+                            QMessageBox::Ok) != QMessageBox::Ok) {
     return;
   }
 
