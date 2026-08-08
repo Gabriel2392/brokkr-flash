@@ -674,8 +674,8 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   QLabel* tipsLabel = new QLabel(
       "Tips - How to download HOME binary\n"
-      "  OLD model : Download one binary ...\n"
-      "  NEW model : Download BL + AP + CP + CSC",
+      "  OLD model : Download one binary (e.g. N71O0XXDME6...)\n"
+      "  NEW model : Download BL + AP + CP + CSC (e.g. AP_N930FXXU1APKG...)",
       this);
   tipsLabel->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
   tipsLabel->setMargin(6);
