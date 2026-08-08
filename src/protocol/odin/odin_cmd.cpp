@@ -110,6 +110,9 @@ inline brokkr::core::Status check_resp(std::int32_t expected_id, const ResponseB
   return {};
 }
 
+constexpr int kRebootCmdTimeoutMs = 500;
+constexpr unsigned kRebootCmdRetries = 0;
+
 static brokkr::core::Status to_status(brokkr::core::Result<ResponseBox> r) noexcept {
   if (r) return {};
   return brokkr::core::fail(std::move(r.error()));
@@ -383,8 +386,8 @@ brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries)
   auto st = require_connected(conn_);
   if (!st) return st;
 
-  auto close_cmd = [&](RqtCommandParam p, const char* name) -> brokkr::core::Status {
-    auto r = rpc_(RqtCommandType::RQT_CLOSE, p, {}, {}, nullptr, retries);
+  auto close_cmd = [&](RqtCommandParam p, const char* name, unsigned r_count) -> brokkr::core::Status {
+    auto r = rpc_(RqtCommandType::RQT_CLOSE, p, {}, {}, nullptr, r_count);
     if (!r) {
       if (p == RqtCommandParam::RQT_CLOSE_REBOOT) {
         spdlog::debug("Failed to send shutdown command {}: {}", name, r.error());
@@ -398,12 +401,17 @@ brokkr::core::Status OdinCommands::shutdown(ShutdownMode mode, unsigned retries)
   };
 
   if (mode == ShutdownMode::NoReboot) {
-    return close_cmd(RqtCommandParam::RQT_CLOSE_END, "RQT_CLOSE_END");
+    return close_cmd(RqtCommandParam::RQT_CLOSE_END, "RQT_CLOSE_END", retries);
   }
   if (mode == ShutdownMode::Reboot) {
-    st = close_cmd(RqtCommandParam::RQT_CLOSE_END, "RQT_CLOSE_END");
+    st = close_cmd(RqtCommandParam::RQT_CLOSE_END, "RQT_CLOSE_END", retries);
     if (!st) return st;
-    auto reboot_st = close_cmd(RqtCommandParam::RQT_CLOSE_REBOOT, "RQT_CLOSE_REBOOT");
+
+    const int prev_timeout = conn_.timeout_ms();
+    conn_.set_timeout_ms(kRebootCmdTimeoutMs);
+    auto reboot_st = close_cmd(RqtCommandParam::RQT_CLOSE_REBOOT, "RQT_CLOSE_REBOOT", kRebootCmdRetries);
+    conn_.set_timeout_ms(prev_timeout);
+
     if (!reboot_st)
       spdlog::debug("Reboot command failed (device likely already rebooting): {}", reboot_st.error());
     return {};

@@ -562,6 +562,8 @@ brokkr::core::Status execute_flash(JNIEnv* env, NativeSession& session,
 
   brokkr::odin::Cfg cfg;
   cfg.reboot_after = (auto_reboot == JNI_TRUE);
+  cfg.post_close_delay_ms = 0;
+  cfg.step_delay_ms = 0;
 
   auto status = brokkr::odin::flash(target_ptrs, flash_specs, pit_to_upload, cfg, ui);
   return status;
