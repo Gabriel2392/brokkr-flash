@@ -1,13 +1,22 @@
 # Brokkr Flash
 
+[![Build](https://img.shields.io/github/actions/workflow/status/Gabriel2392/brokkr-flash/cmake-multi-platform.yml?branch=main&label=build)](https://github.com/Gabriel2392/brokkr-flash/actions/workflows/cmake-multi-platform.yml)
+[![Release](https://img.shields.io/github/v/release/Gabriel2392/brokkr-flash?include_prereleases&label=release&color=blue)](https://github.com/Gabriel2392/brokkr-flash/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Gabriel2392/brokkr-flash/total?label=downloads&color=blue)](https://github.com/Gabriel2392/brokkr-flash/releases)
+[![Stars](https://img.shields.io/github/stars/Gabriel2392/brokkr-flash?color=blue)](https://github.com/Gabriel2392/brokkr-flash/stargazers)
+[![Issues](https://img.shields.io/github/issues/Gabriel2392/brokkr-flash?label=issues)](https://github.com/Gabriel2392/brokkr-flash/issues)
+[![License](https://img.shields.io/github/license/Gabriel2392/brokkr-flash?color=blue)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-lightgrey)
+[![Telegram](https://img.shields.io/badge/Telegram-BrokkrCommunity-26A5E4?logo=telegram&logoColor=white)](https://t.me/BrokkrCommunity)
+
 A modern, cross-platform Samsung device flashing utility written in C++23.
 
-## Features (why is it better than etc lol)
+## Goodies
 
-- **Multi-device support**: Flash multiple devices in parallel
-- **Wireless flashing support**: Support for TCP-based flashing for Galaxy Watch
-- **Cross-platform**: Native support for Windows, Linux, MacOS and Android
-- **Compressed download support**; Samsung's Odin decompresses the lz4 stream before uploading no matter how recent is the device. We just send it compressed (if the device supports), allowing for up to 2x speed (depends on compression ratio).
+- **Multi-device support**
+- **Wireless flashing support**
+- **Cross-platform**
+- **Compressed download support**
 
 ## Requirements
 
@@ -22,7 +31,7 @@ A modern, cross-platform Samsung device flashing utility written in C++23.
 ### Runtime Requirements
 
 - **Windows**: Windows 10 or later
-- **Linux**: Any modern Linux distribution with USB support
+- **Linux**: Any modern Linux distribution
 - **macOS**: macOS 11 or later
 - **Android**: Android 7.0 or later with USB host support
 
