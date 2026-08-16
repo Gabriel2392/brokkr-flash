@@ -181,6 +181,8 @@ brokkr::core::Result<RandomAccessSourcePtr> adopt_fd(int owned_fd, std::string l
 } // namespace
 
 brokkr::core::Result<RandomAccessSourcePtr> open_file_source(const std::filesystem::path& path) noexcept {
+  std::error_code stat_ec;
+  if (!std::filesystem::is_regular_file(path, stat_ec)) return brokkr::core::failf("Not a regular file: {}", path.string());
 #if defined(_WIN32)
   HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
