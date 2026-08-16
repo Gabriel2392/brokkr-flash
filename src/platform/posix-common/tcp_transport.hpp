@@ -58,6 +58,8 @@ class TcpConnection final : public brokkr::core::IByteTransport {
  private:
   void close_() noexcept;
   void set_sock_timeouts_() noexcept;
+  int send_(std::span<const std::uint8_t> data);
+  int recv_(std::span<std::uint8_t> data);
 
  private:
   brokkr::FileHandle fd_;

@@ -178,6 +178,12 @@ void TcpConnection::set_timeout_ms(int ms) noexcept {
 std::string TcpConnection::peer_label() const { return fmt::format("{}:{}", peer_ip_, peer_port_); }
 
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/) {
+  const int n = send_(data);
+  if (n < 0) close_();
+  return n;
+}
+
+int TcpConnection::send_(std::span<const std::uint8_t> data) {
   if (fd_ == INVALID_SOCKET) return -1;
   if (!connected()) return -1;
 
@@ -223,6 +229,12 @@ int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/
 }
 
 int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
+  const int n = recv_(data);
+  if (n < 0) close_();
+  return n;
+}
+
+int TcpConnection::recv_(std::span<std::uint8_t> data) {
   if (fd_ == INVALID_SOCKET) return -1;
   if (!connected()) return -1;
   if (data.empty()) return 0;
