@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Brokkr LANGUAGES C CXX VERSION 2.4.8)
+project(Brokkr LANGUAGES C CXX VERSION 2.4.9)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
