@@ -249,13 +249,13 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
   const auto loc = parse_u32_sysname(sysname);
   if (!loc) {
-    spdlog::error("Invalid sysname format: '{}'", sysname);
+    spdlog::debug("Invalid sysname format: '{}'", sysname);
     return std::nullopt;
   }
 
   io_service_t service = find_device_by_location(*loc);
   if (!service) {
-    spdlog::error("No device found with locationID: 0x{:08x}", *loc);
+    spdlog::debug("No device found with locationID: 0x{:08x}", *loc);
     return std::nullopt;
   }
 
