@@ -102,7 +102,11 @@ static void test_roundtrip_save_load() {
 
 static void test_eviction_keeps_most_recent_65535() {
   std::vector<Md5Xxh3CacheEntry> entries;
-  for (std::uint64_t i = 0; i < 65540; ++i) {
+  entries.reserve(65536);
+  for (std::uint64_t i = 0; i < 65535; ++i) {
+    entries.push_back(Md5Xxh3CacheEntry{make_md5(static_cast<unsigned char>(i)), i, 0xABC00000ULL + i, i + 1});
+  }
+  for (std::uint64_t i = 65535; i < 65540; ++i) {
     brokkr::app::remember_md5_xxh3_cache(entries, make_md5(static_cast<unsigned char>(i)), i, 0xABC00000ULL + i);
   }
 
@@ -124,6 +128,25 @@ static void test_eviction_keeps_most_recent_65535() {
   }
 
   pass();
+}
+
+static void test_normalize_keeps_newest_duplicate() {
+  const auto dir = unique_test_dir();
+  const auto file = brokkr::app::md5_xxh3_cache_file(dir);
+  const auto md5 = make_md5(0x50);
+  std::vector<Md5Xxh3CacheEntry> entries = {
+      {md5, 100, 0x11, 1}, {md5, 200, 0x22, 2}, {md5, 100, 0x33, 3},
+  };
+  const auto saved = brokkr::app::save_md5_xxh3_cache(file, entries);
+  auto loaded = brokkr::app::load_md5_xxh3_cache(file);
+  if (!saved || !loaded || loaded->size() != 2 ||
+      brokkr::app::lookup_md5_xxh3_cache(*loaded, md5, 100) != 0x33 ||
+      brokkr::app::lookup_md5_xxh3_cache(*loaded, md5, 200) != 0x22) {
+    fail_msg("normalize_keeps_newest_duplicate", "newest duplicate or distinct size was lost");
+  } else {
+    pass();
+  }
+  std::filesystem::remove_all(dir);
 }
 
 static void test_remember_updates_existing_pair() {
@@ -292,6 +315,7 @@ static void test_locked_cache_file_fails_fast() {
 int main() {
   test_roundtrip_save_load();
   test_eviction_keeps_most_recent_65535();
+  test_normalize_keeps_newest_duplicate();
   test_remember_updates_existing_pair();
   test_forget_removes_existing_pair();
   test_corrupt_primary_falls_back_to_backup();

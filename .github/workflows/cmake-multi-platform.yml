@@ -208,6 +208,10 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --timeout 120
+
       - name: Capture screenshot
         if: matrix.build_type == 'Release'
         run: |
@@ -327,6 +331,10 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --timeout 120
 
       - name: Stage AppDir
         run: |
@@ -461,6 +469,10 @@ jobs:
         shell: bash
         run: cmake --build build --parallel
 
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --timeout 120
+
       - name: Capture screenshot
         if: matrix.build_type == 'Release' && matrix.artifact_arch == 'x64'
         shell: powershell
@@ -588,6 +600,10 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --timeout 120
+
       - name: Capture screenshot
         if: matrix.build_type == 'Release'
         run: |
@@ -675,6 +691,10 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure --timeout 120
         
       - name: Deploy + Zip
         if: matrix.build_type == 'Release'

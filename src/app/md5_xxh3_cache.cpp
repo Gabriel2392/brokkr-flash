@@ -23,6 +23,8 @@
 #include <cstdio>
 #include <fstream>
 #include <optional>
+#include <set>
+#include <utility>
 #include <sstream>
 #include <string_view>
 #include <system_error>
@@ -96,16 +98,10 @@ void normalize_entries(std::vector<Md5Xxh3CacheEntry>& entries, std::size_t max_
 
   std::vector<Md5Xxh3CacheEntry> deduped;
   deduped.reserve(std::min(entries.size(), max_entries));
+  std::set<std::pair<std::array<unsigned char, 16>, std::uint64_t>> seen;
   for (const auto& entry : entries) {
-    bool duplicate = false;
-    for (const auto& kept : deduped) {
-      if (kept.md5 == entry.md5 && kept.bytes_to_hash == entry.bytes_to_hash) {
-        duplicate = true;
-        break;
-      }
-    }
-    if (!duplicate) deduped.push_back(entry);
     if (deduped.size() == max_entries) break;
+    if (seen.emplace(entry.md5, entry.bytes_to_hash).second) deduped.push_back(entry);
   }
 
   entries = std::move(deduped);

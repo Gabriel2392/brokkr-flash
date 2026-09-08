@@ -469,6 +469,41 @@ add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
 
+add_executable(test_file_paths
+    tests/test_file_paths.cpp
+    src/core/thread_pool.cpp
+    src/io/random_access.cpp
+    src/io/source.cpp
+    src/io/tar.cpp
+    src/io/lz4_frame.cpp
+    src/protocol/odin/flash.cpp
+    src/protocol/odin/pit.cpp
+    src/app/md5_verify.cpp
+    src/app/md5_xxh3_cache.cpp
+    src/third_party/md5/md5.c
+    src/third_party/lz4/lz4.c
+)
+target_include_directories(test_file_paths PRIVATE src)
+target_compile_definitions(test_file_paths PRIVATE
+    $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_link_libraries(test_file_paths PRIVATE
+    brokkr-cxx-compat Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+)
+add_test(NAME file_paths COMMAND test_file_paths)
+
+add_executable(test_desktop_paths tests/test_desktop_paths.cpp src/app/cli_args.cpp)
+target_include_directories(test_desktop_paths PRIVATE src src-gui)
+target_link_libraries(test_desktop_paths PRIVATE brokkr-cxx-compat Qt6::Core fmt::fmt-header-only)
+if (WIN32)
+    target_link_libraries(test_desktop_paths PRIVATE shell32)
+endif()
+add_dependencies(test_desktop_paths brokkr)
+add_test(NAME desktop_paths COMMAND test_desktop_paths $<TARGET_FILE:brokkr>)
+set_tests_properties(desktop_paths PROPERTIES RESOURCE_LOCK brokkr_instance)
+set_tests_properties(md5 md5_xxh3_cache endian file_paths desktop_paths PROPERTIES TIMEOUT 120)
+
 # ── CPack ─────────────────────────────────────────────────────────────
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
