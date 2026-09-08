@@ -56,9 +56,9 @@ int main(int argc, char* argv[]) {
   BrokkrWrapper window;
   window.show();
 
-  if (const QByteArray shotPath = qgetenv("BROKKR_SCREENSHOT"); !shotPath.isEmpty()) {
+  if (const QString shotPath = qEnvironmentVariable("BROKKR_SCREENSHOT"); !shotPath.isEmpty()) {
     QTimer::singleShot(1500, &window, [&app, &window, shotPath]() {
-      const bool ok = window.grab().save(QString::fromLocal8Bit(shotPath));
+      const bool ok = window.grab().save(shotPath);
       app.exit(ok ? 0 : 1);
     });
   }

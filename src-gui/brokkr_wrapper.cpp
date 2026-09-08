@@ -57,6 +57,7 @@
 #include "app/pit_file.hpp"
 #include "app/samsung_usb.hpp"
 #include "app/version.hpp"
+#include "path_qt.hpp"
 #include "protocol/odin/flash.hpp"
 #include "protocol/odin/group_flasher.hpp"
 
@@ -2377,13 +2378,13 @@ void BrokkrWrapper::startWorkStart_() {
   const QString tgt = editTarget->text().trimmed();
   const bool wireless = chkWireless->isChecked();
   const bool usePit = chkUsePit->isChecked() && !editPit->text().isEmpty();
-  const std::filesystem::path pitPath = editPit->text().toStdString();
+  const std::filesystem::path pitPath = brokkr::gui::path_from_qstring(editPit->text());
 
   std::vector<std::filesystem::path> inputs;
   auto push_if_selected = [&](int idx, QLineEdit* e) {
     if (!e) return;
     const bool checked = (idx < fileChecks_.size() && fileChecks_[idx] && fileChecks_[idx]->isChecked());
-    if (checked && !e->text().trimmed().isEmpty()) inputs.emplace_back(e->text().toStdString());
+    if (checked && !e->text().trimmed().isEmpty()) inputs.emplace_back(brokkr::gui::path_from_qstring(e->text()));
   };
 
   push_if_selected(0, editBL);

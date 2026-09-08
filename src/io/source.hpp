@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "core/path_utf8.hpp"
 #include "core/status.hpp"
 #include "io/random_access.hpp"
 #include "io/tar.hpp"
@@ -27,6 +28,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace brokkr::io {
 
@@ -51,9 +53,48 @@ std::unique_ptr<ByteSource> open_tar_entry(RandomAccessSourcePtr src, const TarE
 brokkr::core::Result<std::unique_ptr<ByteSource>> open_tar_entry(const std::filesystem::path& tar_path,
                                                                  const TarEntry& entry) noexcept;
 
+inline std::string tar_basename(std::string_view path_like) {
+  bool valid_utf8 = true;
+  for (std::size_t i = 0; i < path_like.size();) {
+    const auto c = static_cast<unsigned char>(path_like[i]);
+    std::size_t continuation = 0;
+    if (c <= 0x7f) {
+      ++i;
+      continue;
+    }
+    if (c >= 0xc2 && c <= 0xdf) continuation = 1;
+    else if (c >= 0xe0 && c <= 0xef) continuation = 2;
+    else if (c >= 0xf0 && c <= 0xf4) continuation = 3;
+    else {
+      valid_utf8 = false;
+      break;
+    }
+    if (i + continuation >= path_like.size()) {
+      valid_utf8 = false;
+      break;
+    }
+    for (std::size_t j = 1; j <= continuation; ++j) {
+      if ((static_cast<unsigned char>(path_like[i + j]) & 0xc0) != 0x80) {
+        valid_utf8 = false;
+        break;
+      }
+    }
+    if (!valid_utf8) break;
+    if ((c == 0xe0 && static_cast<unsigned char>(path_like[i + 1]) < 0xa0) ||
+        (c == 0xed && static_cast<unsigned char>(path_like[i + 1]) >= 0xa0) ||
+        (c == 0xf0 && static_cast<unsigned char>(path_like[i + 1]) < 0x90) ||
+        (c == 0xf4 && static_cast<unsigned char>(path_like[i + 1]) >= 0x90)) {
+      valid_utf8 = false;
+      break;
+    }
+    i += continuation + 1;
+  }
+  const auto separator = valid_utf8 ? path_like.find_last_of("/\\") : path_like.find_last_of('/');
+  return std::string(separator == std::string_view::npos ? path_like : path_like.substr(separator + 1));
+}
+
 inline std::string basename(std::string_view path_like) {
-  std::filesystem::path p(path_like);
-  return p.filename().string();
+  return brokkr::core::path_to_utf8(brokkr::core::path_from_utf8(path_like).filename());
 }
 
 } // namespace brokkr::io

@@ -16,6 +16,7 @@
  */
 
 #include "app/md5_xxh3_cache.hpp"
+#include "core/path_utf8.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -140,10 +141,10 @@ std::filesystem::path temporary_cache_file(const std::filesystem::path& cache_fi
 brokkr::core::Status ensure_replaceable_now(const std::filesystem::path& path) noexcept {
   std::error_code ec;
   if (!std::filesystem::exists(path, ec)) {
-    if (ec) return brokkr::core::failf("Cannot inspect cache file {}: {}", path.string(), ec.message());
+    if (ec) return brokkr::core::failf("Cannot inspect cache file {}: {}", brokkr::core::path_to_utf8(path), ec.message());
     return {};
   }
-  if (ec) return brokkr::core::failf("Cannot inspect cache file {}: {}", path.string(), ec.message());
+  if (ec) return brokkr::core::failf("Cannot inspect cache file {}: {}", brokkr::core::path_to_utf8(path), ec.message());
 
   HANDLE h = CreateFileW(path.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -154,20 +155,20 @@ brokkr::core::Status ensure_replaceable_now(const std::filesystem::path& path) n
 
   const DWORD err = GetLastError();
   if (err == ERROR_SHARING_VIOLATION || err == ERROR_LOCK_VIOLATION || err == ERROR_ACCESS_DENIED) {
-    return brokkr::core::failf("Cache file busy, skipping save: {}", path.string());
+    return brokkr::core::failf("Cache file busy, skipping save: {}", brokkr::core::path_to_utf8(path));
   }
   if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) return {};
-  return brokkr::core::failf("Cannot access cache file {} for replace: {}", path.string(), err);
+  return brokkr::core::failf("Cannot access cache file {} for replace: {}", brokkr::core::path_to_utf8(path), err);
 }
 #endif
 
 brokkr::core::Result<ParsedCacheFile> parse_cache_file(const std::filesystem::path& path) noexcept {
   std::error_code ec;
   if (!std::filesystem::exists(path, ec)) return ParsedCacheFile{};
-  if (ec) return brokkr::core::failf("Cannot access cache file {}: {}", path.string(), ec.message());
+  if (ec) return brokkr::core::failf("Cannot access cache file {}: {}", brokkr::core::path_to_utf8(path), ec.message());
 
   const auto size = std::filesystem::file_size(path, ec);
-  if (ec) return brokkr::core::failf("Cannot stat cache file {}: {}", path.string(), ec.message());
+  if (ec) return brokkr::core::failf("Cannot stat cache file {}: {}", brokkr::core::path_to_utf8(path), ec.message());
   if (size > kMaxCacheFileBytes) {
     ParsedCacheFile parsed;
     parsed.saw_corruption = true;
@@ -175,7 +176,7 @@ brokkr::core::Result<ParsedCacheFile> parse_cache_file(const std::filesystem::pa
   }
 
   std::ifstream in(path);
-  if (!in.is_open()) return brokkr::core::failf("Cannot open cache file {}", path.string());
+  if (!in.is_open()) return brokkr::core::failf("Cannot open cache file {}", brokkr::core::path_to_utf8(path));
 
   ParsedCacheFile parsed;
   std::string line;
@@ -231,7 +232,7 @@ brokkr::core::Result<ParsedCacheFile> parse_cache_file(const std::filesystem::pa
     parsed.entries.push_back(std::move(entry));
   }
 
-  if (!in.eof() && in.fail()) return brokkr::core::failf("Cannot read cache file {}", path.string());
+  if (!in.eof() && in.fail()) return brokkr::core::failf("Cannot read cache file {}", brokkr::core::path_to_utf8(path));
 
   if (!parsed.has_header && !parsed.entries.empty()) parsed.saw_corruption = true;
 
@@ -253,22 +254,22 @@ brokkr::core::Status replace_cache_file(const std::filesystem::path& src,
     const DWORD replace_error = GetLastError();
     if (replace_error == ERROR_FILE_NOT_FOUND || replace_error == ERROR_PATH_NOT_FOUND) {
       if (MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return {};
-      return brokkr::core::failf("Cannot move cache file {} into place: {}", dst.string(), GetLastError());
+      return brokkr::core::failf("Cannot move cache file {} into place: {}", brokkr::core::path_to_utf8(dst), GetLastError());
     }
-    return brokkr::core::failf("Cannot replace cache file {}: {}", dst.string(), replace_error);
+    return brokkr::core::failf("Cannot replace cache file {}: {}", brokkr::core::path_to_utf8(dst), replace_error);
   }
   return {};
 #else
   std::error_code ec;
   if (std::filesystem::exists(dst, ec) && !ec) {
     std::filesystem::copy_file(dst, backup, std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) return brokkr::core::failf("Cannot back up cache file {}: {}", backup.string(), ec.message());
+    if (ec) return brokkr::core::failf("Cannot back up cache file {}: {}", brokkr::core::path_to_utf8(backup), ec.message());
   } else if (ec) {
-    return brokkr::core::failf("Cannot inspect cache file {}: {}", dst.string(), ec.message());
+    return brokkr::core::failf("Cannot inspect cache file {}: {}", brokkr::core::path_to_utf8(dst), ec.message());
   }
 
   std::filesystem::rename(src, dst, ec);
-  if (ec) return brokkr::core::failf("Cannot replace cache file {}: {}", dst.string(), ec.message());
+  if (ec) return brokkr::core::failf("Cannot replace cache file {}: {}", brokkr::core::path_to_utf8(dst), ec.message());
   return {};
 #endif
 }
@@ -312,14 +313,14 @@ brokkr::core::Status save_md5_xxh3_cache(const std::filesystem::path& cache_file
   std::error_code ec;
   const auto parent = cache_file.parent_path();
   if (!parent.empty()) std::filesystem::create_directories(parent, ec);
-  if (ec) return brokkr::core::failf("Cannot create cache directory {}: {}", parent.string(), ec.message());
+  if (ec) return brokkr::core::failf("Cannot create cache directory {}: {}", brokkr::core::path_to_utf8(parent), ec.message());
 
   const auto tmp_file = temporary_cache_file(cache_file);
   const auto bak_file = backup_cache_file(cache_file);
 
   {
     std::ofstream out(tmp_file, std::ios::trunc);
-    if (!out.is_open()) return brokkr::core::failf("Cannot write cache file {}", tmp_file.string());
+    if (!out.is_open()) return brokkr::core::failf("Cannot write cache file {}", brokkr::core::path_to_utf8(tmp_file));
 
     out << kCacheHeader << '\n';
     for (const auto& entry : entries) {
@@ -328,7 +329,7 @@ brokkr::core::Status save_md5_xxh3_cache(const std::filesystem::path& cache_file
     }
 
     out.flush();
-    if (!out.good()) return brokkr::core::failf("Cannot flush cache file {}", tmp_file.string());
+    if (!out.good()) return brokkr::core::failf("Cannot flush cache file {}", brokkr::core::path_to_utf8(tmp_file));
   }
 
   auto verify_tmp = parse_cache_file(tmp_file);
@@ -340,7 +341,7 @@ brokkr::core::Status save_md5_xxh3_cache(const std::filesystem::path& cache_file
   if (!verify_tmp->has_header || verify_tmp->saw_corruption) {
     std::error_code rm_ec;
     std::filesystem::remove(tmp_file, rm_ec);
-    return brokkr::core::failf("Refusing to install malformed cache file {}", tmp_file.string());
+    return brokkr::core::failf("Refusing to install malformed cache file {}", brokkr::core::path_to_utf8(tmp_file));
   }
 
   auto replace_st = replace_cache_file(tmp_file, cache_file, bak_file);

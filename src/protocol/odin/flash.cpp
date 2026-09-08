@@ -245,7 +245,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io:
       const auto& entries = tars[i]->entries();
       for (std::size_t j = 0; j < entries.size(); ++j) {
         if (is_download_list_name(entries[j].name)) continue;
-        const std::string sb = io::basename(entries[j].name);
+        const std::string sb = io::tar_basename(entries[j].name);
         const std::string base = compute_basename(sb);
         if (base.empty()) continue;
         record(base, i, j);
@@ -269,7 +269,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io:
       for (std::size_t j = 0; j < entries.size(); ++j) {
         const auto& e = entries[j];
         if (is_download_list_name(e.name)) continue;
-        const std::string sb = io::basename(e.name);
+        const std::string sb = io::tar_basename(e.name);
         const std::string base = compute_basename(sb);
         if (base.empty()) continue;
 

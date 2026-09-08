@@ -16,11 +16,13 @@
  */
 
 #include "app/cli_mode.hpp"
+#include "app/cli_args.hpp"
 
 #include "app/download_mode.hpp"
 #include "app/md5_verify.hpp"
 #include "app/pit_file.hpp"
 #include "app/samsung_usb.hpp"
+#include "core/path_utf8.hpp"
 #include "core/status.hpp"
 #include "io/source.hpp"
 #include "platform/platform_all.hpp"
@@ -55,23 +57,6 @@ namespace {
 
 constexpr std::uint16_t kWirelessPort = 13579;
 
-struct CliArgs {
-  bool help = false;
-  bool list = false;
-  bool reboot_download = false;
-  bool wireless = false;
-  bool no_reboot = false;
-
-  std::optional<std::string> target;
-  std::optional<std::string> pit;
-
-  std::optional<std::string> bl;
-  std::optional<std::string> ap;
-  std::optional<std::string> cp;
-  std::optional<std::string> csc;
-  std::optional<std::string> userdata;
-};
-
 struct UsbSession {
   std::string sysname;
   std::uint64_t connection_id = 0;
@@ -94,7 +79,11 @@ bool is_cli_trigger(std::string_view arg) {
 
 void configure_cli_logger() {
   auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+#if defined(_WIN32)
+  sink->set_pattern("%^%v%$");
+#else
   sink->set_pattern("%v");
+#endif
   auto logger = std::make_shared<spdlog::logger>("cli", spdlog::sinks_init_list{sink});
 #ifndef NDEBUG
   logger->set_level(spdlog::level::debug);
@@ -127,90 +116,6 @@ void print_usage() {
       << "  - If no valid CLI option is present, GUI mode is launched\n";
 }
 
-brokkr::core::Result<CliArgs> parse_cli_args(int argc, char* argv[]) {
-  CliArgs out;
-
-  auto require_value = [&](int& i, const char* flag) -> brokkr::core::Result<std::string> {
-    if (i + 1 >= argc) return brokkr::core::fail(std::string("Missing value for ") + flag);
-    ++i;
-    return std::string(argv[i]);
-  };
-
-  for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
-
-    if (arg == "-h" || arg == "--help") {
-      out.help = true;
-      continue;
-    }
-    if (arg == "--list") {
-      out.list = true;
-      continue;
-    }
-    if (arg == "--reboot-download") {
-      out.reboot_download = true;
-      continue;
-    }
-    if (arg == "--wireless") {
-      out.wireless = true;
-      continue;
-    }
-    if (arg == "--no-reboot") {
-      out.no_reboot = true;
-      continue;
-    }
-    if (arg == "--target") {
-      BRK_TRYV(v, require_value(i, "--target"));
-      out.target = std::move(v);
-      continue;
-    }
-    if (arg == "--use-pit") {
-      BRK_TRYV(v, require_value(i, "--use-pit"));
-      out.pit = std::move(v);
-      continue;
-    }
-    if (arg == "-b") {
-      BRK_TRYV(v, require_value(i, "-b"));
-      out.bl = std::move(v);
-      continue;
-    }
-    if (arg == "-a") {
-      BRK_TRYV(v, require_value(i, "-a"));
-      out.ap = std::move(v);
-      continue;
-    }
-    if (arg == "-c") {
-      BRK_TRYV(v, require_value(i, "-c"));
-      out.cp = std::move(v);
-      continue;
-    }
-    if (arg == "-s") {
-      BRK_TRYV(v, require_value(i, "-s"));
-      out.csc = std::move(v);
-      continue;
-    }
-    if (arg == "-u") {
-      BRK_TRYV(v, require_value(i, "-u"));
-      out.userdata = std::move(v);
-      continue;
-    }
-
-    return brokkr::core::fail("Unknown argument: " + arg);
-  }
-
-  return out;
-}
-
-std::vector<std::filesystem::path> collect_inputs_in_gui_order(const CliArgs& args) {
-  std::vector<std::filesystem::path> out;
-  if (args.bl) out.emplace_back(*args.bl);
-  if (args.ap) out.emplace_back(*args.ap);
-  if (args.cp) out.emplace_back(*args.cp);
-  if (args.csc) out.emplace_back(*args.csc);
-  if (args.userdata) out.emplace_back(*args.userdata);
-  return out;
-}
-
 bool has_any_file_selected(const CliArgs& args) {
   return args.bl.has_value() || args.ap.has_value() || args.cp.has_value() || args.csc.has_value() ||
          args.userdata.has_value() || args.pit.has_value();
@@ -219,7 +124,7 @@ bool has_any_file_selected(const CliArgs& args) {
 std::shared_ptr<const std::vector<std::byte>> load_pit_if_needed(const CliArgs& args) {
   if (!args.pit) return {};
 
-  auto r = read_pit_file(*args.pit);
+  auto r = read_pit_file(brokkr::core::path_from_utf8(*args.pit));
   if (!r) {
     spdlog::error("{}", r.error());
     return {};
@@ -482,11 +387,8 @@ int run_flash_cli(const CliArgs& args) {
     }
 
     for (const auto& job : *jobsr) {
-      std::string name = std::filesystem::path(job.display_name).filename().string();
+      std::string name = brokkr::io::basename(job.display_name);
       if (name.empty()) name = job.display_name;
-
-      if (name.size() >= 11)
-        name = name.substr(0, 10) + "...";
 
       spdlog::info("Checking MD5/XXH3 on {}", name);
     }
@@ -560,7 +462,7 @@ int run_cli(int argc, char* argv[]) {
     return 2;
   }
 
-  auto argsr = parse_cli_args(argc, argv);
+  auto argsr = parse_process_cli_args(argc, argv);
   if (!argsr) {
     spdlog::error("{}", argsr.error());
     print_usage();

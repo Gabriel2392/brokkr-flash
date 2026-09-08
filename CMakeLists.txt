@@ -331,15 +331,17 @@ endif()
 
 find_package(Threads REQUIRED)
 target_include_directories(brokkr PRIVATE src src-gui)
+target_sources(brokkr PRIVATE src/app/cli_args.cpp)
 
+add_library(brokkr-cxx-compat INTERFACE)
 if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
-    target_include_directories(brokkr PRIVATE "${function2_SOURCE_DIR}/include")
+    target_include_directories(brokkr-cxx-compat INTERFACE "${function2_SOURCE_DIR}/include")
     if (MSVC)
-        target_compile_options(brokkr PRIVATE
+        target_compile_options(brokkr-cxx-compat INTERFACE
             $<$<COMPILE_LANGUAGE:CXX>:/FI${BROKKR_MOF_SHIM}>
         )
     else()
-        target_compile_options(brokkr PRIVATE
+        target_compile_options(brokkr-cxx-compat INTERFACE
             $<$<COMPILE_LANGUAGE:CXX>:-include>
             $<$<COMPILE_LANGUAGE:CXX>:${BROKKR_MOF_SHIM}>
         )
@@ -347,6 +349,7 @@ if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
 endif()
 
 target_link_libraries(brokkr PRIVATE
+    brokkr-cxx-compat
     Threads::Threads
     spdlog::spdlog_header_only
     fmt::fmt-header-only
@@ -360,11 +363,12 @@ target_link_libraries(brokkr PRIVATE
 set_target_properties(brokkr PROPERTIES AUTOMOC ON AUTORCC ON)
 
 if (WIN32)
-    target_link_libraries(brokkr PRIVATE dwmapi)
+    target_link_libraries(brokkr PRIVATE dwmapi shell32)
+    target_compile_definitions(brokkr PRIVATE SPDLOG_WCHAR_TO_UTF8_SUPPORT SPDLOG_UTF8_TO_WCHAR_CONSOLE)
 endif()
 
 if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    target_compile_options(brokkr PRIVATE /Zc:__cplusplus)
+    target_compile_options(brokkr-cxx-compat INTERFACE /Zc:__cplusplus)
 endif()
 
 if(WIN32)

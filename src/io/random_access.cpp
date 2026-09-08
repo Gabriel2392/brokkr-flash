@@ -16,6 +16,7 @@
  */
 
 #include "io/random_access.hpp"
+#include "core/path_utf8.hpp"
 
 #include <algorithm>
 #include <system_error>
@@ -46,12 +47,12 @@ std::string identity_of(const std::filesystem::path& path) {
   std::error_code ec;
 
   auto canonical = std::filesystem::weakly_canonical(path, ec);
-  if (!ec) return canonical.generic_string();
+  if (!ec) return brokkr::core::path_to_utf8_generic(canonical);
 
   auto absolute = std::filesystem::absolute(path, ec);
-  if (!ec) return absolute.lexically_normal().generic_string();
+  if (!ec) return brokkr::core::path_to_utf8_generic(absolute.lexically_normal());
 
-  return path.lexically_normal().generic_string();
+  return brokkr::core::path_to_utf8_generic(path.lexically_normal());
 }
 
 #if defined(_WIN32)
@@ -182,16 +183,16 @@ brokkr::core::Result<RandomAccessSourcePtr> adopt_fd(int owned_fd, std::string l
 
 brokkr::core::Result<RandomAccessSourcePtr> open_file_source(const std::filesystem::path& path) noexcept {
   std::error_code stat_ec;
-  if (!std::filesystem::is_regular_file(path, stat_ec)) return brokkr::core::failf("Not a regular file: {}", path.string());
+  if (!std::filesystem::is_regular_file(path, stat_ec)) return brokkr::core::failf("Not a regular file: {}", brokkr::core::path_to_utf8(path));
 #if defined(_WIN32)
   HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-  if (handle == INVALID_HANDLE_VALUE) return brokkr::core::failf("Cannot open: {}", path.string());
+  if (handle == INVALID_HANDLE_VALUE) return brokkr::core::failf("Cannot open: {}", brokkr::core::path_to_utf8(path));
 
   BY_HANDLE_FILE_INFORMATION info{};
   if (!GetFileInformationByHandle(handle, &info)) {
     CloseHandle(handle);
-    return brokkr::core::failf("Cannot stat: {}", path.string());
+    return brokkr::core::failf("Cannot stat: {}", brokkr::core::path_to_utf8(path));
   }
 
   const std::uint64_t size = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
@@ -200,7 +201,7 @@ brokkr::core::Result<RandomAccessSourcePtr> open_file_source(const std::filesyst
   ticks.LowPart = info.ftLastWriteTime.dwLowDateTime;
   ticks.HighPart = info.ftLastWriteTime.dwHighDateTime;
 
-  return RandomAccessSourcePtr(std::make_shared<WindowsSource>(handle, path.string(), identity_of(path), size,
+  return RandomAccessSourcePtr(std::make_shared<WindowsSource>(handle, brokkr::core::path_to_utf8(path), identity_of(path), size,
                                                               static_cast<std::int64_t>(ticks.QuadPart / 10000)));
 #else
   const int fd = ::open(path.c_str(), O_RDONLY
@@ -208,9 +209,9 @@ brokkr::core::Result<RandomAccessSourcePtr> open_file_source(const std::filesyst
                                           | O_CLOEXEC
   #endif
   );
-  if (fd < 0) return brokkr::core::failf("Cannot open: {}: {}", path.string(), std::strerror(errno));
+  if (fd < 0) return brokkr::core::failf("Cannot open: {}: {}", brokkr::core::path_to_utf8(path), std::strerror(errno));
 
-  return adopt_fd(fd, path.string(), identity_of(path));
+  return adopt_fd(fd, brokkr::core::path_to_utf8(path), identity_of(path));
 #endif
 }
 

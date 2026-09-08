@@ -20,9 +20,11 @@
 #include "app/md5_xxh3_cache.hpp"
 
 #include "core/prefetcher.hpp"
+#include "core/path_utf8.hpp"
 #include "core/str.hpp"
 #include "core/thread_pool.hpp"
 
+#include "io/source.hpp"
 #include "io/tar.hpp"
 #include "platform/platform_all.hpp"
 #include "third_party/md5/md5.h"
@@ -148,7 +150,7 @@ static bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>&
 }
 
 static bool is_md5_wrapped_tar_name(std::string_view label) noexcept {
-  return brokkr::core::ends_with_ci(std::filesystem::path(label).filename().string(), ".md5");
+  return brokkr::core::ends_with_ci(brokkr::io::basename(label), ".md5");
 }
 
 static SessionVerifyKey make_session_verify_key(const Md5Job& job) {
@@ -392,7 +394,7 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesy
   sources.reserve(inputs.size());
 
   for (const auto& p : inputs) {
-    if (!is_md5_wrapped_tar_name(p.string())) continue;
+    if (!is_md5_wrapped_tar_name(brokkr::core::path_to_utf8(p))) continue;
 
     BRK_TRYV(source, brokkr::io::open_file_source(p));
     sources.push_back(std::move(source));
@@ -442,7 +444,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     cache_file = md5_xxh3_cache_file(*cache_dir);
     auto loaded = load_md5_xxh3_cache(cache_file);
     if (!loaded) {
-      spdlog::warn("MD5/XXH3 cache load failed ({}): {}", cache_file.string(), loaded.error());
+      spdlog::warn("MD5/XXH3 cache load failed ({}): {}", brokkr::core::path_to_utf8(cache_file), loaded.error());
     } else {
       cache_entries = std::move(*loaded);
       cache_enabled = true;
@@ -503,7 +505,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
     if (should_save_cache) {
       auto cache_st = save_md5_xxh3_cache(cache_file, std::move(cache_snapshot), kMd5Xxh3CacheMaxEntries);
-      if (!cache_st) spdlog::warn("MD5/XXH3 cache save failed ({}): {}", cache_file.string(), cache_st.error());
+      if (!cache_st) spdlog::warn("MD5/XXH3 cache save failed ({}): {}", brokkr::core::path_to_utf8(cache_file), cache_st.error());
     }
   };
 
