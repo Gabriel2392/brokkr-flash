@@ -508,7 +508,6 @@ set_tests_properties(md5 md5_xxh3_cache endian file_paths desktop_paths PROPERTI
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open-Source Implementation of Samsung Odin3")
-set(CPACK_PACKAGE_CONTACT "roynatech@gmail.com")
 set(CPACK_GENERATOR "ZIP;TGZ")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "${PROJECT_NAME}")
 
@@ -573,7 +572,7 @@ endif()
 
 if (LINUX OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND CPACK_GENERATOR DEB)
-  set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Soo Hwan Na <roynatech@gmail.com>")
+  set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Gabriel2392")
   set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6")
   set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
