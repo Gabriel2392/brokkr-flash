@@ -41,6 +41,7 @@
 #include <spdlog/spdlog.h>
 
 #pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "cfgmgr32.lib")
 
 struct UsbDeviceInfo {
   uint16_t vendor = 0;
@@ -136,6 +137,18 @@ std::optional<std::uint64_t> last_arrival(HDEVINFO set, SP_DEVINFO_DATA& device)
   return value;
 }
 
+bool is_started(DEVINST dev) {
+  ULONG status = 0;
+  ULONG problem = 0;
+  return CM_Get_DevNode_Status(&status, &problem, dev, 0) == CR_SUCCESS && (status & DN_STARTED) != 0;
+}
+
+bool port_exists(const char* port) {
+  char target[512];
+  if (QueryDosDeviceA(port, target, sizeof(target)) != 0) return true;
+  return GetLastError() == ERROR_INSUFFICIENT_BUFFER;
+}
+
 uint16_t extract_hex4(const std::string& str, const std::string& key) {
   std::string lower_str = str;
   for (char& c : lower_str) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -197,6 +210,12 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
     if (!found_port) {
       size = sizeof(portName);
       found_port = (RegQueryValueExA(hKey, "AttachedTo", nullptr, &type, (LPBYTE)portName, &size) == ERROR_SUCCESS);
+    }
+
+    // Windows can still list a port that is gone, e.g. one left by a previous connection.
+    if (found_port && !(is_started(devInfoData.DevInst) && port_exists(portName))) {
+      spdlog::debug("Skipping stale port: {} (VID: 0x{:04x}, PID: 0x{:04x})", portName, vid, pid);
+      found_port = false;
     }
 
     if (found_port) {
