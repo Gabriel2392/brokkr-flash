@@ -922,3 +922,32 @@ jobs:
           draft: false
           prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
           files: artifacts/*
+
+  # ═══════════════════════════════════════════════════
+  #  Homebrew cask (stable releases only)
+  # ═══════════════════════════════════════════════════
+  homebrew:
+    name: Update Homebrew cask
+    needs: [prepare, release]
+    if: needs.prepare.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+    steps:
+      - name: No tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the Homebrew cask was not updated to ${{ needs.prepare.outputs.tag }}."
+
+      - uses: actions/checkout@v7
+        if: env.TAP_TOKEN != ''
+        with:
+          repository: Gabriel2392/homebrew-brokkr
+          token: ${{ env.TAP_TOKEN }}
+
+      - name: Point the cask at this release
+        if: env.TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: .github/scripts/update-cask --push "$TAG"
