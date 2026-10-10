@@ -123,6 +123,12 @@ each other on this port).
 
 ## macOS Notes
 
+### Homebrew
+
+```bash
+brew install --cask gabriel2392/brokkr/brokkr
+```
+
 ### "Brokkr can't be opened because the developer cannot be verified"
 
 Brokkr is not notarized with Apple, so the system Gatekeeper will refuse to launch it on first
