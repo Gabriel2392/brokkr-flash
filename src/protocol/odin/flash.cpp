@@ -77,7 +77,7 @@ static brokkr::core::Result<std::vector<std::string>> parse_download_list(std::s
 
     if (line.empty()) continue;
     std::string name(line);
-    if (!seen.insert(name).second) return brokkr::core::fail("download-list.txt contains duplicate entry: " + name);
+    if (!seen.insert(name).second) continue;
     names.push_back(std::move(name));
   }
 
