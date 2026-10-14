@@ -18,6 +18,7 @@
 #include "platform/linux/usbfs_conn.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -114,11 +115,12 @@ int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
   const auto eps = dev_.endpoints();
   if (eps.bulk_in == 0) return -1;
 
+  std::array<std::uint8_t, 1024> buf;
   usbdevfs_bulktransfer zlp{};
   zlp.ep = eps.bulk_in;
   zlp.timeout = 10;
-  zlp.len = 0;
-  zlp.data = nullptr;
+  zlp.len = buf.size();
+  zlp.data = buf.data();
   (void)::ioctl(dev_.fd(), USBDEVFS_BULK, &zlp);
   return 0;
 }

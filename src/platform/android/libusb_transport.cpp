@@ -21,6 +21,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <format>
@@ -305,8 +306,9 @@ int LibusbUsbTransport::recv_zlp(unsigned /*retries*/) {
   std::lock_guard<std::mutex> lock(io_mutex_);
   if (handle_ == nullptr) return -1;
 
+  std::array<unsigned char, 1024> buf;
   int transferred = 0;
-  const int rc = libusb_bulk_transfer(handle_, in_ep_, nullptr, 0, &transferred,
+  const int rc = libusb_bulk_transfer(handle_, in_ep_, buf.data(), static_cast<int>(buf.size()), &transferred,
                                       static_cast<unsigned int>(kZlpRecvTimeoutMs));
   if (rc == LIBUSB_ERROR_NO_DEVICE) {
     spdlog::debug("Device disconnected during recv_zlp ({})", libusb_error_name(rc));

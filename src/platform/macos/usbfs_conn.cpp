@@ -18,6 +18,7 @@
 #include "platform/macos/usbfs_conn.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 #include <IOKit/usb/IOUSBLib.h>
@@ -111,8 +112,9 @@ int UsbFsConnection::recv_zlp(unsigned /*retries*/) {
   auto ifc = static_cast<IOUSBInterfaceInterface300**>(dev_.usb_interface());
   if (!ifc) return -1;
 
-  UInt32 bytesRead = 0;
-  (void)(*ifc)->ReadPipeTO(ifc, dev_.pipe_in_ref(), nullptr, &bytesRead, 10, 10);
+  std::array<std::uint8_t, 1024> buf;
+  UInt32 bytesRead = buf.size();
+  (void)(*ifc)->ReadPipeTO(ifc, dev_.pipe_in_ref(), buf.data(), &bytesRead, 10, 10);
   return 0;
 }
 
