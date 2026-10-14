@@ -34,7 +34,7 @@ jobs:
   # ═══════════════════════════════════════════════════
   prepare:
     name: Resolve version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
       full_version: ${{ steps.ver.outputs.full_version }}
@@ -723,7 +723,7 @@ jobs:
     name: Android APK
     needs: [prepare]
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
@@ -845,7 +845,7 @@ jobs:
       github.event_name != 'pull_request' &&
       inputs.release_type != 'beta' &&
       (github.ref == 'refs/heads/main' || inputs.release_type == 'stable')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -872,7 +872,7 @@ jobs:
     name: Publish release
     if: github.event_name == 'workflow_dispatch' && inputs.release_type != 'none'
     needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86, android_apk]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v7
@@ -930,7 +930,7 @@ jobs:
     name: Update Homebrew cask
     needs: [prepare, release]
     if: needs.prepare.outputs.prerelease != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
