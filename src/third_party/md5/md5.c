@@ -1,138 +1,166 @@
-/*********************************************************************
-* Filename:   md5.c
-* Author:     Brad Conte (brad AT bradconte.com)
-* Copyright:
-* Disclaimer: This code is presented "as is" without any guarantees.
-* Details:    Implementation of the MD5 hashing algorithm.
-                                  Algorithm specification can be found here:
-                                   * http://tools.ietf.org/html/rfc1321
-                                  This implementation uses little endian MD5_BYTE order.
-*********************************************************************/
+/*
+ * Copyright (c) 2026 Gabriel2392
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 
-/*************************** HEADER FILES ***************************/
 #include "md5.h"
-#include <stdlib.h>
+
 #include <string.h>
 
-/****************************** MACROS ******************************/
-#define ROTLEFT(a, b) ((a << b) | (a >> (32 - b)))
+#if defined(_MSC_VER) && !defined(__clang__)
+  #include <stdlib.h>
+  #define MD5_ROTL(v, n) _rotl((v), (n))
+#else
+  #define MD5_ROTL(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
+#endif
 
-#define F(x, y, z) ((x & y) | (~x & z))
-#define G(x, y, z) ((x & z) | (y & ~z))
-#define H(x, y, z) (x ^ y ^ z)
-#define I(x, y, z) (y ^ (x | ~z))
+#if defined(__GNUC__) || defined(__clang__)
+  #define MD5_PIN(v) __asm__("" : "+r"(v))
+#else
+  #define MD5_PIN(v) ((void)0)
+#endif
 
-#define FF(a, b, c, d, m, s, t)                                                                                        \
-  {                                                                                                                    \
-    a += F(b, c, d) + m + t;                                                                                           \
-    a = b + ROTLEFT(a, s);                                                                                             \
-  }
-#define GG(a, b, c, d, m, s, t)                                                                                        \
-  {                                                                                                                    \
-    a += G(b, c, d) + m + t;                                                                                           \
-    a = b + ROTLEFT(a, s);                                                                                             \
-  }
-#define HH(a, b, c, d, m, s, t)                                                                                        \
-  {                                                                                                                    \
-    a += H(b, c, d) + m + t;                                                                                           \
-    a = b + ROTLEFT(a, s);                                                                                             \
-  }
-#define II(a, b, c, d, m, s, t)                                                                                        \
-  {                                                                                                                    \
-    a += I(b, c, d) + m + t;                                                                                           \
-    a = b + ROTLEFT(a, s);                                                                                             \
-  }
+#define MD5_STEP_F(a, b, c, d, x, k, s)                                                                                \
+  do {                                                                                                                 \
+    MD5_WORD t_ = (a) + (x) + (k);                                                                                     \
+    MD5_PIN(t_);                                                                                                       \
+    (a) = MD5_ROTL(t_ + ((((c) ^ (d)) & (b)) ^ (d)), s) + (b);                                                         \
+  } while (0)
 
-/*********************** FUNCTION DEFINITIONS ***********************/
-void md5_transform(MD5_CTX* ctx, const MD5_BYTE data[]) {
-  MD5_WORD a, b, c, d, m[16], i, j;
+#define MD5_STEP_G(a, b, c, d, x, k, s)                                                                                \
+  do {                                                                                                                 \
+    MD5_WORD t_ = (a) + (x) + (k) + ((c) & ~(d));                                                                      \
+    MD5_PIN(t_);                                                                                                       \
+    (a) = MD5_ROTL(t_ + ((d) & (b)), s) + (b);                                                                         \
+  } while (0)
 
-#ifndef BROKKR_BIG_ENDIAN
-  // MD5 specifies big endian MD5_BYTE order, but this implementation assumes a little
-  // endian MD5_BYTE order CPU. Reverse all the bytes upon input, and re-reverse them
-  // on output (in md5_final()).
-  for (i = 0, j = 0; i < 16; ++i, j += 4)
-    m[i] = (data[j]) + (data[j + 1] << 8) + (data[j + 2] << 16) + (data[j + 3] << 24);
-#endif // !BROKKR_BIG_ENDIAN
+#define MD5_STEP_H(a, b, c, d, x, k, s)                                                                                \
+  do {                                                                                                                 \
+    MD5_WORD t_ = (a) + (x) + (k);                                                                                     \
+    MD5_PIN(t_);                                                                                                       \
+    (a) = MD5_ROTL(t_ + (((c) ^ (d)) ^ (b)), s) + (b);                                                                 \
+  } while (0)
 
-  a = ctx->state[0];
-  b = ctx->state[1];
-  c = ctx->state[2];
-  d = ctx->state[3];
+#define MD5_STEP_I(a, b, c, d, x, k, s)                                                                                \
+  do {                                                                                                                 \
+    MD5_WORD t_ = (a) + (x) + (k);                                                                                     \
+    MD5_PIN(t_);                                                                                                       \
+    (a) = MD5_ROTL(t_ + ((c) ^ ((b) | ~(d))), s) + (b);                                                                \
+  } while (0)
 
-  FF(a, b, c, d, m[0], 7, 0xd76aa478);
-  FF(d, a, b, c, m[1], 12, 0xe8c7b756);
-  FF(c, d, a, b, m[2], 17, 0x242070db);
-  FF(b, c, d, a, m[3], 22, 0xc1bdceee);
-  FF(a, b, c, d, m[4], 7, 0xf57c0faf);
-  FF(d, a, b, c, m[5], 12, 0x4787c62a);
-  FF(c, d, a, b, m[6], 17, 0xa8304613);
-  FF(b, c, d, a, m[7], 22, 0xfd469501);
-  FF(a, b, c, d, m[8], 7, 0x698098d8);
-  FF(d, a, b, c, m[9], 12, 0x8b44f7af);
-  FF(c, d, a, b, m[10], 17, 0xffff5bb1);
-  FF(b, c, d, a, m[11], 22, 0x895cd7be);
-  FF(a, b, c, d, m[12], 7, 0x6b901122);
-  FF(d, a, b, c, m[13], 12, 0xfd987193);
-  FF(c, d, a, b, m[14], 17, 0xa679438e);
-  FF(b, c, d, a, m[15], 22, 0x49b40821);
-
-  GG(a, b, c, d, m[1], 5, 0xf61e2562);
-  GG(d, a, b, c, m[6], 9, 0xc040b340);
-  GG(c, d, a, b, m[11], 14, 0x265e5a51);
-  GG(b, c, d, a, m[0], 20, 0xe9b6c7aa);
-  GG(a, b, c, d, m[5], 5, 0xd62f105d);
-  GG(d, a, b, c, m[10], 9, 0x02441453);
-  GG(c, d, a, b, m[15], 14, 0xd8a1e681);
-  GG(b, c, d, a, m[4], 20, 0xe7d3fbc8);
-  GG(a, b, c, d, m[9], 5, 0x21e1cde6);
-  GG(d, a, b, c, m[14], 9, 0xc33707d6);
-  GG(c, d, a, b, m[3], 14, 0xf4d50d87);
-  GG(b, c, d, a, m[8], 20, 0x455a14ed);
-  GG(a, b, c, d, m[13], 5, 0xa9e3e905);
-  GG(d, a, b, c, m[2], 9, 0xfcefa3f8);
-  GG(c, d, a, b, m[7], 14, 0x676f02d9);
-  GG(b, c, d, a, m[12], 20, 0x8d2a4c8a);
-
-  HH(a, b, c, d, m[5], 4, 0xfffa3942);
-  HH(d, a, b, c, m[8], 11, 0x8771f681);
-  HH(c, d, a, b, m[11], 16, 0x6d9d6122);
-  HH(b, c, d, a, m[14], 23, 0xfde5380c);
-  HH(a, b, c, d, m[1], 4, 0xa4beea44);
-  HH(d, a, b, c, m[4], 11, 0x4bdecfa9);
-  HH(c, d, a, b, m[7], 16, 0xf6bb4b60);
-  HH(b, c, d, a, m[10], 23, 0xbebfbc70);
-  HH(a, b, c, d, m[13], 4, 0x289b7ec6);
-  HH(d, a, b, c, m[0], 11, 0xeaa127fa);
-  HH(c, d, a, b, m[3], 16, 0xd4ef3085);
-  HH(b, c, d, a, m[6], 23, 0x04881d05);
-  HH(a, b, c, d, m[9], 4, 0xd9d4d039);
-  HH(d, a, b, c, m[12], 11, 0xe6db99e5);
-  HH(c, d, a, b, m[15], 16, 0x1fa27cf8);
-  HH(b, c, d, a, m[2], 23, 0xc4ac5665);
-
-  II(a, b, c, d, m[0], 6, 0xf4292244);
-  II(d, a, b, c, m[7], 10, 0x432aff97);
-  II(c, d, a, b, m[14], 15, 0xab9423a7);
-  II(b, c, d, a, m[5], 21, 0xfc93a039);
-  II(a, b, c, d, m[12], 6, 0x655b59c3);
-  II(d, a, b, c, m[3], 10, 0x8f0ccc92);
-  II(c, d, a, b, m[10], 15, 0xffeff47d);
-  II(b, c, d, a, m[1], 21, 0x85845dd1);
-  II(a, b, c, d, m[8], 6, 0x6fa87e4f);
-  II(d, a, b, c, m[15], 10, 0xfe2ce6e0);
-  II(c, d, a, b, m[6], 15, 0xa3014314);
-  II(b, c, d, a, m[13], 21, 0x4e0811a1);
-  II(a, b, c, d, m[4], 6, 0xf7537e82);
-  II(d, a, b, c, m[11], 10, 0xbd3af235);
-  II(c, d, a, b, m[2], 15, 0x2ad7d2bb);
-  II(b, c, d, a, m[9], 21, 0xeb86d391);
-
-  ctx->state[0] += a;
-  ctx->state[1] += b;
-  ctx->state[2] += c;
-  ctx->state[3] += d;
+#if defined(BROKKR_MD5_X64_ASM)
+void md5_blocks_x64(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks);
+  #define md5_blocks md5_blocks_x64
+#else
+static MD5_WORD md5_load(const MD5_BYTE* p) {
+  #if defined(BROKKR_BIG_ENDIAN)
+  return (MD5_WORD)p[0] | ((MD5_WORD)p[1] << 8) | ((MD5_WORD)p[2] << 16) | ((MD5_WORD)p[3] << 24);
+  #else
+  MD5_WORD v;
+  memcpy(&v, p, sizeof v);
+  return v;
+  #endif
 }
+
+static void md5_blocks(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks) {
+  MD5_WORD a = state[0], b = state[1], c = state[2], d = state[3];
+  MD5_WORD x[16];
+  int i;
+
+  while (blocks--) {
+    const MD5_WORD aa = a, bb = b, cc = c, dd = d;
+    for (i = 0; i < 16; ++i) x[i] = md5_load(data + 4 * i);
+
+    MD5_STEP_F(a, b, c, d, x[0], 0xd76aa478u, 7);
+    MD5_STEP_F(d, a, b, c, x[1], 0xe8c7b756u, 12);
+    MD5_STEP_F(c, d, a, b, x[2], 0x242070dbu, 17);
+    MD5_STEP_F(b, c, d, a, x[3], 0xc1bdceeeu, 22);
+    MD5_STEP_F(a, b, c, d, x[4], 0xf57c0fafu, 7);
+    MD5_STEP_F(d, a, b, c, x[5], 0x4787c62au, 12);
+    MD5_STEP_F(c, d, a, b, x[6], 0xa8304613u, 17);
+    MD5_STEP_F(b, c, d, a, x[7], 0xfd469501u, 22);
+    MD5_STEP_F(a, b, c, d, x[8], 0x698098d8u, 7);
+    MD5_STEP_F(d, a, b, c, x[9], 0x8b44f7afu, 12);
+    MD5_STEP_F(c, d, a, b, x[10], 0xffff5bb1u, 17);
+    MD5_STEP_F(b, c, d, a, x[11], 0x895cd7beu, 22);
+    MD5_STEP_F(a, b, c, d, x[12], 0x6b901122u, 7);
+    MD5_STEP_F(d, a, b, c, x[13], 0xfd987193u, 12);
+    MD5_STEP_F(c, d, a, b, x[14], 0xa679438eu, 17);
+    MD5_STEP_F(b, c, d, a, x[15], 0x49b40821u, 22);
+    MD5_STEP_G(a, b, c, d, x[1], 0xf61e2562u, 5);
+    MD5_STEP_G(d, a, b, c, x[6], 0xc040b340u, 9);
+    MD5_STEP_G(c, d, a, b, x[11], 0x265e5a51u, 14);
+    MD5_STEP_G(b, c, d, a, x[0], 0xe9b6c7aau, 20);
+    MD5_STEP_G(a, b, c, d, x[5], 0xd62f105du, 5);
+    MD5_STEP_G(d, a, b, c, x[10], 0x02441453u, 9);
+    MD5_STEP_G(c, d, a, b, x[15], 0xd8a1e681u, 14);
+    MD5_STEP_G(b, c, d, a, x[4], 0xe7d3fbc8u, 20);
+    MD5_STEP_G(a, b, c, d, x[9], 0x21e1cde6u, 5);
+    MD5_STEP_G(d, a, b, c, x[14], 0xc33707d6u, 9);
+    MD5_STEP_G(c, d, a, b, x[3], 0xf4d50d87u, 14);
+    MD5_STEP_G(b, c, d, a, x[8], 0x455a14edu, 20);
+    MD5_STEP_G(a, b, c, d, x[13], 0xa9e3e905u, 5);
+    MD5_STEP_G(d, a, b, c, x[2], 0xfcefa3f8u, 9);
+    MD5_STEP_G(c, d, a, b, x[7], 0x676f02d9u, 14);
+    MD5_STEP_G(b, c, d, a, x[12], 0x8d2a4c8au, 20);
+    MD5_STEP_H(a, b, c, d, x[5], 0xfffa3942u, 4);
+    MD5_STEP_H(d, a, b, c, x[8], 0x8771f681u, 11);
+    MD5_STEP_H(c, d, a, b, x[11], 0x6d9d6122u, 16);
+    MD5_STEP_H(b, c, d, a, x[14], 0xfde5380cu, 23);
+    MD5_STEP_H(a, b, c, d, x[1], 0xa4beea44u, 4);
+    MD5_STEP_H(d, a, b, c, x[4], 0x4bdecfa9u, 11);
+    MD5_STEP_H(c, d, a, b, x[7], 0xf6bb4b60u, 16);
+    MD5_STEP_H(b, c, d, a, x[10], 0xbebfbc70u, 23);
+    MD5_STEP_H(a, b, c, d, x[13], 0x289b7ec6u, 4);
+    MD5_STEP_H(d, a, b, c, x[0], 0xeaa127fau, 11);
+    MD5_STEP_H(c, d, a, b, x[3], 0xd4ef3085u, 16);
+    MD5_STEP_H(b, c, d, a, x[6], 0x04881d05u, 23);
+    MD5_STEP_H(a, b, c, d, x[9], 0xd9d4d039u, 4);
+    MD5_STEP_H(d, a, b, c, x[12], 0xe6db99e5u, 11);
+    MD5_STEP_H(c, d, a, b, x[15], 0x1fa27cf8u, 16);
+    MD5_STEP_H(b, c, d, a, x[2], 0xc4ac5665u, 23);
+    MD5_STEP_I(a, b, c, d, x[0], 0xf4292244u, 6);
+    MD5_STEP_I(d, a, b, c, x[7], 0x432aff97u, 10);
+    MD5_STEP_I(c, d, a, b, x[14], 0xab9423a7u, 15);
+    MD5_STEP_I(b, c, d, a, x[5], 0xfc93a039u, 21);
+    MD5_STEP_I(a, b, c, d, x[12], 0x655b59c3u, 6);
+    MD5_STEP_I(d, a, b, c, x[3], 0x8f0ccc92u, 10);
+    MD5_STEP_I(c, d, a, b, x[10], 0xffeff47du, 15);
+    MD5_STEP_I(b, c, d, a, x[1], 0x85845dd1u, 21);
+    MD5_STEP_I(a, b, c, d, x[8], 0x6fa87e4fu, 6);
+    MD5_STEP_I(d, a, b, c, x[15], 0xfe2ce6e0u, 10);
+    MD5_STEP_I(c, d, a, b, x[6], 0xa3014314u, 15);
+    MD5_STEP_I(b, c, d, a, x[13], 0x4e0811a1u, 21);
+    MD5_STEP_I(a, b, c, d, x[4], 0xf7537e82u, 6);
+    MD5_STEP_I(d, a, b, c, x[11], 0xbd3af235u, 10);
+    MD5_STEP_I(c, d, a, b, x[2], 0x2ad7d2bbu, 15);
+    MD5_STEP_I(b, c, d, a, x[9], 0xeb86d391u, 21);
+
+    a += aa;
+    b += bb;
+    c += cc;
+    d += dd;
+    data += 64;
+  }
+
+  state[0] = a;
+  state[1] = b;
+  state[2] = c;
+  state[3] = d;
+}
+#endif
 
 void md5_init(MD5_CTX* ctx) {
   ctx->datalen = 0;
@@ -144,69 +172,52 @@ void md5_init(MD5_CTX* ctx) {
 }
 
 void md5_update(MD5_CTX* ctx, const MD5_BYTE data[], size_t len) {
-  size_t i = 0;
+  ctx->bitlen += (unsigned long long)len << 3;
 
   if (ctx->datalen) {
-    size_t fill = 64 - ctx->datalen;
+    const size_t fill = 64 - ctx->datalen;
     if (len < fill) {
       memcpy(ctx->data + ctx->datalen, data, len);
       ctx->datalen += (MD5_WORD)len;
       return;
     }
     memcpy(ctx->data + ctx->datalen, data, fill);
-    md5_transform(ctx, ctx->data);
-    ctx->bitlen += 512;
+    md5_blocks(ctx->state, ctx->data, 1);
     ctx->datalen = 0;
-    i = fill;
+    data += fill;
+    len -= fill;
   }
 
-  for (; i + 64 <= len; i += 64) {
-    md5_transform(ctx, data + i);
-    ctx->bitlen += 512;
+  if (len >= 64) {
+    md5_blocks(ctx->state, data, len / 64);
+    data += len & ~(size_t)63;
+    len &= 63;
   }
 
-  if (i < len) {
-    memcpy(ctx->data, data + i, len - i);
-    ctx->datalen = (MD5_WORD)(len - i);
+  if (len) {
+    memcpy(ctx->data, data, len);
+    ctx->datalen = (MD5_WORD)len;
   }
 }
 
 void md5_final(MD5_CTX* ctx, MD5_BYTE hash[]) {
-  size_t i;
+  const unsigned long long bits = ctx->bitlen;
+  size_t i = ctx->datalen;
 
-  i = ctx->datalen;
-
-  // Pad whatever data is left in the buffer.
-  if (ctx->datalen < 56) {
-    ctx->data[i++] = 0x80;
-    while (i < 56) ctx->data[i++] = 0x00;
-  } else if (ctx->datalen >= 56) {
-    ctx->data[i++] = 0x80;
-    while (i < 64) ctx->data[i++] = 0x00;
-    md5_transform(ctx, ctx->data);
-    memset(ctx->data, 0, 56);
+  ctx->data[i++] = 0x80;
+  if (i > 56) {
+    memset(ctx->data + i, 0, 64 - i);
+    md5_blocks(ctx->state, ctx->data, 1);
+    i = 0;
   }
+  memset(ctx->data + i, 0, 56 - i);
+  for (i = 0; i < 8; ++i) ctx->data[56 + i] = (MD5_BYTE)(bits >> (8 * i));
+  md5_blocks(ctx->state, ctx->data, 1);
 
-  // Append to the padding the total message's length in bits and transform.
-  ctx->bitlen += ctx->datalen * 8;
-  ctx->data[56] = ctx->bitlen;
-  ctx->data[57] = ctx->bitlen >> 8;
-  ctx->data[58] = ctx->bitlen >> 16;
-  ctx->data[59] = ctx->bitlen >> 24;
-  ctx->data[60] = ctx->bitlen >> 32;
-  ctx->data[61] = ctx->bitlen >> 40;
-  ctx->data[62] = ctx->bitlen >> 48;
-  ctx->data[63] = ctx->bitlen >> 56;
-  md5_transform(ctx, ctx->data);
-
-#ifndef BROKKR_BIG_ENDIAN
-  // Since this implementation uses little endian MD5_BYTE ordering and MD uses big endian,
-  // reverse all the bytes when copying the final state to the output hash.
   for (i = 0; i < 4; ++i) {
-    hash[i] = (ctx->state[0] >> (i * 8)) & 0x000000ff;
-    hash[i + 4] = (ctx->state[1] >> (i * 8)) & 0x000000ff;
-    hash[i + 8] = (ctx->state[2] >> (i * 8)) & 0x000000ff;
-    hash[i + 12] = (ctx->state[3] >> (i * 8)) & 0x000000ff;
+    hash[i] = (MD5_BYTE)(ctx->state[0] >> (8 * i));
+    hash[i + 4] = (MD5_BYTE)(ctx->state[1] >> (8 * i));
+    hash[i + 8] = (MD5_BYTE)(ctx->state[2] >> (8 * i));
+    hash[i + 12] = (MD5_BYTE)(ctx->state[3] >> (8 * i));
   }
-#endif // !BROKKR_BIG_ENDIAN
 }

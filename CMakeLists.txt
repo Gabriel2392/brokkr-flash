@@ -212,6 +212,13 @@ target_sources(brokkr-lib INTERFACE
     src/app/md5_verify.cpp
 )
 
+if (MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    enable_language(ASM_MASM)
+    add_library(brokkr-md5-asm OBJECT src/third_party/md5/md5_x64.asm)
+    target_sources(brokkr-lib INTERFACE $<TARGET_OBJECTS:brokkr-md5-asm>)
+    target_compile_definitions(brokkr-lib INTERFACE BROKKR_MD5_X64_ASM)
+endif()
+
 include(TestBigEndian)
 test_big_endian(BROKKR_IS_BIG_ENDIAN)
 if (BROKKR_IS_BIG_ENDIAN)
@@ -458,6 +465,10 @@ add_executable(test_md5
     src/third_party/md5/md5.c
 )
 target_include_directories(test_md5 PRIVATE src)
+if (TARGET brokkr-md5-asm)
+    target_sources(test_md5 PRIVATE $<TARGET_OBJECTS:brokkr-md5-asm>)
+    target_compile_definitions(test_md5 PRIVATE BROKKR_MD5_X64_ASM)
+endif()
 add_test(NAME md5 COMMAND test_md5)
 
 add_executable(test_md5_xxh3_cache
@@ -490,6 +501,9 @@ add_executable(test_file_paths
     src/third_party/lz4/lz4.c
 )
 target_include_directories(test_file_paths PRIVATE src)
+if (TARGET brokkr-md5-asm)
+    target_sources(test_file_paths PRIVATE $<TARGET_OBJECTS:brokkr-md5-asm>)
+endif()
 target_compile_definitions(test_file_paths PRIVATE
     $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
     $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
