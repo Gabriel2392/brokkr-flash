@@ -24,6 +24,8 @@
 #elif defined(__APPLE__)
 #  include <pthread.h>
 #  include <sys/qos.h>
+#elif defined(_WIN32)
+#  include <windows.h>
 #endif
 
 namespace brokkr::core {
@@ -35,6 +37,13 @@ inline void bump_thread_priority(int nice_value = -8) noexcept {
 #elif defined(__APPLE__)
   (void)nice_value;
   (void)::pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#elif defined(_WIN32)
+  (void)nice_value;
+  THREAD_POWER_THROTTLING_STATE state{};
+  state.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
+  state.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+  state.StateMask = 0;
+  (void)::SetThreadInformation(::GetCurrentThread(), ThreadPowerThrottling, &state, sizeof state);
 #else
   (void)nice_value;
 #endif
