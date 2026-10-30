@@ -199,6 +199,8 @@ target_sources(brokkr-lib INTERFACE
     src/io/source.cpp
     src/io/lz4_frame.cpp
     src/third_party/md5/md5.c
+    src/third_party/xxhash/xxhash.c
+    src/third_party/xxhash/xxhash_dispatch.c
     src/third_party/lz4/lz4.c
     src/protocol/odin/odin_cmd.cpp
     src/protocol/odin/pit.cpp
@@ -481,6 +483,8 @@ add_executable(test_file_paths
     src/app/md5_verify.cpp
     src/app/md5_xxh3_cache.cpp
     src/third_party/md5/md5.c
+    src/third_party/xxhash/xxhash.c
+    src/third_party/xxhash/xxhash_dispatch.c
     src/third_party/lz4/lz4.c
 )
 target_include_directories(test_file_paths PRIVATE src)
