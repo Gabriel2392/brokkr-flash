@@ -22,6 +22,7 @@
 #include "core/path_utf8.hpp"
 #include "core/str.hpp"
 #include "core/thread_pool.hpp"
+#include "core/thread_priority.hpp"
 
 #include "io/sequential_reader.hpp"
 #include "io/source.hpp"
@@ -38,6 +39,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <semaphore>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -190,12 +192,33 @@ struct Md5Xxh3Consumer {
     state_ = XXH3_createState();
     if (!state_) return brokkr::core::fail("Cannot allocate XXH3 state");
     if (XXH3_64bits_reset(state_) != XXH_OK) return brokkr::core::fail("Cannot reset XXH3 state");
+    try {
+      xxh3_thread_ = std::thread([this] {
+        brokkr::core::bump_thread_priority(-4);
+        for (;;) {
+          go_.acquire();
+          if (stop_) return;
+          xxh3_ok_ = XXH3_64bits_update(state_, job_data_, job_size_) == XXH_OK;
+          done_.release();
+        }
+      });
+    } catch (...) {
+    }
     return {};
   }
 
   brokkr::core::Status update(const unsigned char* data, std::size_t size) noexcept {
-    md5_update(&md5_, data, size);
-    if (XXH3_64bits_update(state_, data, size) != XXH_OK) return brokkr::core::fail("XXH3 update failed");
+    if (xxh3_thread_.joinable()) {
+      job_data_ = data;
+      job_size_ = size;
+      go_.release();
+      md5_update(&md5_, data, size);
+      done_.acquire();
+    } else {
+      md5_update(&md5_, data, size);
+      xxh3_ok_ = XXH3_64bits_update(state_, data, size) == XXH_OK;
+    }
+    if (!xxh3_ok_) return brokkr::core::fail("XXH3 update failed");
     return {};
   }
 
@@ -207,11 +230,24 @@ struct Md5Xxh3Consumer {
   }
 
   ~Md5Xxh3Consumer() {
+    if (xxh3_thread_.joinable()) {
+      stop_ = true;
+      go_.release();
+      xxh3_thread_.join();
+    }
     if (state_) XXH3_freeState(state_);
   }
 
   MD5_CTX md5_{};
   XXH3_state_t* state_ = nullptr;
+
+  std::binary_semaphore go_{0};
+  std::binary_semaphore done_{0};
+  const unsigned char* job_data_ = nullptr;
+  std::size_t job_size_ = 0;
+  bool xxh3_ok_ = true;
+  bool stop_ = false;
+  std::thread xxh3_thread_;
 };
 
 template <class Consumer>
