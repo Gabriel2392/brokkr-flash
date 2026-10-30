@@ -34,6 +34,7 @@ typedef struct {
   MD5_WORD datalen;
   unsigned long long bitlen;
   MD5_WORD state[4];
+  void (*blocks)(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks);
 } MD5_CTX;
 
 void md5_init(MD5_CTX* ctx);

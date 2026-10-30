@@ -60,9 +60,12 @@
     (a) = MD5_ROTL(t_ + ((c) ^ ((b) | ~(d))), s) + (b);                                                                \
   } while (0)
 
+typedef void (*md5_blocks_fn)(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks);
+
 #if defined(BROKKR_MD5_X64_ASM)
 void md5_blocks_x64(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks);
-  #define md5_blocks md5_blocks_x64
+void md5_blocks_x64_avx512(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks);
+  #define md5_blocks_base md5_blocks_x64
 #else
 static MD5_WORD md5_load(const MD5_BYTE* p) {
   #if defined(BROKKR_BIG_ENDIAN)
@@ -74,7 +77,7 @@ static MD5_WORD md5_load(const MD5_BYTE* p) {
   #endif
 }
 
-static void md5_blocks(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks) {
+static void md5_blocks_base(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks) {
   MD5_WORD a = state[0], b = state[1], c = state[2], d = state[3];
   MD5_WORD x[16];
   int i;
@@ -162,6 +165,150 @@ static void md5_blocks(MD5_WORD state[4], const MD5_BYTE* data, size_t blocks) {
 }
 #endif
 
+#if !defined(BROKKR_MD5_X64_ASM) && (defined(__x86_64__) || defined(_M_X64)) &&                                        \
+    (defined(__GNUC__) || defined(__clang__))
+  #include <cpuid.h>
+  #include <immintrin.h>
+
+  #define MD5_HAVE_AVX512 1
+  #define MD5_VPIN(v) __asm__("" : "+v"(v))
+
+  #define MD5_STEP_AVX512(a, b, c, d, w, k, imm, s)                                                                    \
+    do {                                                                                                               \
+      __m128i t_ = _mm_add_epi32((a), _mm_cvtsi32_si128((int)((w) + (k))));                                            \
+      MD5_VPIN(t_);                                                                                                    \
+      (a) = _mm_add_epi32(_mm_rol_epi32(_mm_add_epi32(t_, _mm_ternarylogic_epi32((b), (c), (d), (imm))), (s)), (b));   \
+    } while (0)
+
+__attribute__((target("avx512f,avx512vl"))) static void md5_blocks_avx512(MD5_WORD state[4], const MD5_BYTE* data,
+                                                                          size_t blocks) {
+  __m128i a = _mm_cvtsi32_si128((int)state[0]);
+  __m128i b = _mm_cvtsi32_si128((int)state[1]);
+  __m128i c = _mm_cvtsi32_si128((int)state[2]);
+  __m128i d = _mm_cvtsi32_si128((int)state[3]);
+  MD5_WORD x[16];
+  int i;
+
+  while (blocks--) {
+    const __m128i aa = a, bb = b, cc = c, dd = d;
+    for (i = 0; i < 16; ++i) x[i] = md5_load(data + 4 * i);
+
+    MD5_STEP_AVX512(a, b, c, d, x[0], 0xd76aa478u, 0xca, 7);
+    MD5_STEP_AVX512(d, a, b, c, x[1], 0xe8c7b756u, 0xca, 12);
+    MD5_STEP_AVX512(c, d, a, b, x[2], 0x242070dbu, 0xca, 17);
+    MD5_STEP_AVX512(b, c, d, a, x[3], 0xc1bdceeeu, 0xca, 22);
+    MD5_STEP_AVX512(a, b, c, d, x[4], 0xf57c0fafu, 0xca, 7);
+    MD5_STEP_AVX512(d, a, b, c, x[5], 0x4787c62au, 0xca, 12);
+    MD5_STEP_AVX512(c, d, a, b, x[6], 0xa8304613u, 0xca, 17);
+    MD5_STEP_AVX512(b, c, d, a, x[7], 0xfd469501u, 0xca, 22);
+    MD5_STEP_AVX512(a, b, c, d, x[8], 0x698098d8u, 0xca, 7);
+    MD5_STEP_AVX512(d, a, b, c, x[9], 0x8b44f7afu, 0xca, 12);
+    MD5_STEP_AVX512(c, d, a, b, x[10], 0xffff5bb1u, 0xca, 17);
+    MD5_STEP_AVX512(b, c, d, a, x[11], 0x895cd7beu, 0xca, 22);
+    MD5_STEP_AVX512(a, b, c, d, x[12], 0x6b901122u, 0xca, 7);
+    MD5_STEP_AVX512(d, a, b, c, x[13], 0xfd987193u, 0xca, 12);
+    MD5_STEP_AVX512(c, d, a, b, x[14], 0xa679438eu, 0xca, 17);
+    MD5_STEP_AVX512(b, c, d, a, x[15], 0x49b40821u, 0xca, 22);
+    MD5_STEP_AVX512(a, b, c, d, x[1], 0xf61e2562u, 0xe4, 5);
+    MD5_STEP_AVX512(d, a, b, c, x[6], 0xc040b340u, 0xe4, 9);
+    MD5_STEP_AVX512(c, d, a, b, x[11], 0x265e5a51u, 0xe4, 14);
+    MD5_STEP_AVX512(b, c, d, a, x[0], 0xe9b6c7aau, 0xe4, 20);
+    MD5_STEP_AVX512(a, b, c, d, x[5], 0xd62f105du, 0xe4, 5);
+    MD5_STEP_AVX512(d, a, b, c, x[10], 0x02441453u, 0xe4, 9);
+    MD5_STEP_AVX512(c, d, a, b, x[15], 0xd8a1e681u, 0xe4, 14);
+    MD5_STEP_AVX512(b, c, d, a, x[4], 0xe7d3fbc8u, 0xe4, 20);
+    MD5_STEP_AVX512(a, b, c, d, x[9], 0x21e1cde6u, 0xe4, 5);
+    MD5_STEP_AVX512(d, a, b, c, x[14], 0xc33707d6u, 0xe4, 9);
+    MD5_STEP_AVX512(c, d, a, b, x[3], 0xf4d50d87u, 0xe4, 14);
+    MD5_STEP_AVX512(b, c, d, a, x[8], 0x455a14edu, 0xe4, 20);
+    MD5_STEP_AVX512(a, b, c, d, x[13], 0xa9e3e905u, 0xe4, 5);
+    MD5_STEP_AVX512(d, a, b, c, x[2], 0xfcefa3f8u, 0xe4, 9);
+    MD5_STEP_AVX512(c, d, a, b, x[7], 0x676f02d9u, 0xe4, 14);
+    MD5_STEP_AVX512(b, c, d, a, x[12], 0x8d2a4c8au, 0xe4, 20);
+    MD5_STEP_AVX512(a, b, c, d, x[5], 0xfffa3942u, 0x96, 4);
+    MD5_STEP_AVX512(d, a, b, c, x[8], 0x8771f681u, 0x96, 11);
+    MD5_STEP_AVX512(c, d, a, b, x[11], 0x6d9d6122u, 0x96, 16);
+    MD5_STEP_AVX512(b, c, d, a, x[14], 0xfde5380cu, 0x96, 23);
+    MD5_STEP_AVX512(a, b, c, d, x[1], 0xa4beea44u, 0x96, 4);
+    MD5_STEP_AVX512(d, a, b, c, x[4], 0x4bdecfa9u, 0x96, 11);
+    MD5_STEP_AVX512(c, d, a, b, x[7], 0xf6bb4b60u, 0x96, 16);
+    MD5_STEP_AVX512(b, c, d, a, x[10], 0xbebfbc70u, 0x96, 23);
+    MD5_STEP_AVX512(a, b, c, d, x[13], 0x289b7ec6u, 0x96, 4);
+    MD5_STEP_AVX512(d, a, b, c, x[0], 0xeaa127fau, 0x96, 11);
+    MD5_STEP_AVX512(c, d, a, b, x[3], 0xd4ef3085u, 0x96, 16);
+    MD5_STEP_AVX512(b, c, d, a, x[6], 0x04881d05u, 0x96, 23);
+    MD5_STEP_AVX512(a, b, c, d, x[9], 0xd9d4d039u, 0x96, 4);
+    MD5_STEP_AVX512(d, a, b, c, x[12], 0xe6db99e5u, 0x96, 11);
+    MD5_STEP_AVX512(c, d, a, b, x[15], 0x1fa27cf8u, 0x96, 16);
+    MD5_STEP_AVX512(b, c, d, a, x[2], 0xc4ac5665u, 0x96, 23);
+    MD5_STEP_AVX512(a, b, c, d, x[0], 0xf4292244u, 0x39, 6);
+    MD5_STEP_AVX512(d, a, b, c, x[7], 0x432aff97u, 0x39, 10);
+    MD5_STEP_AVX512(c, d, a, b, x[14], 0xab9423a7u, 0x39, 15);
+    MD5_STEP_AVX512(b, c, d, a, x[5], 0xfc93a039u, 0x39, 21);
+    MD5_STEP_AVX512(a, b, c, d, x[12], 0x655b59c3u, 0x39, 6);
+    MD5_STEP_AVX512(d, a, b, c, x[3], 0x8f0ccc92u, 0x39, 10);
+    MD5_STEP_AVX512(c, d, a, b, x[10], 0xffeff47du, 0x39, 15);
+    MD5_STEP_AVX512(b, c, d, a, x[1], 0x85845dd1u, 0x39, 21);
+    MD5_STEP_AVX512(a, b, c, d, x[8], 0x6fa87e4fu, 0x39, 6);
+    MD5_STEP_AVX512(d, a, b, c, x[15], 0xfe2ce6e0u, 0x39, 10);
+    MD5_STEP_AVX512(c, d, a, b, x[6], 0xa3014314u, 0x39, 15);
+    MD5_STEP_AVX512(b, c, d, a, x[13], 0x4e0811a1u, 0x39, 21);
+    MD5_STEP_AVX512(a, b, c, d, x[4], 0xf7537e82u, 0x39, 6);
+    MD5_STEP_AVX512(d, a, b, c, x[11], 0xbd3af235u, 0x39, 10);
+    MD5_STEP_AVX512(c, d, a, b, x[2], 0x2ad7d2bbu, 0x39, 15);
+    MD5_STEP_AVX512(b, c, d, a, x[9], 0xeb86d391u, 0x39, 21);
+
+    a = _mm_add_epi32(a, aa);
+    b = _mm_add_epi32(b, bb);
+    c = _mm_add_epi32(c, cc);
+    d = _mm_add_epi32(d, dd);
+    data += 64;
+  }
+
+  state[0] = (MD5_WORD)_mm_cvtsi128_si32(a);
+  state[1] = (MD5_WORD)_mm_cvtsi128_si32(b);
+  state[2] = (MD5_WORD)_mm_cvtsi128_si32(c);
+  state[3] = (MD5_WORD)_mm_cvtsi128_si32(d);
+}
+
+static int md5_cpu_has_avx512(void) {
+  unsigned int eax, ebx, ecx, edx, xcr0_lo, xcr0_hi;
+  if (__get_cpuid_max(0, 0) < 7) return 0;
+  __cpuid(1, eax, ebx, ecx, edx);
+  if (!(ecx & (1u << 27))) return 0;
+  __cpuid_count(7, 0, eax, ebx, ecx, edx);
+  if (!(ebx & (1u << 16)) || !(ebx & (1u << 31))) return 0;
+  __asm__("xgetbv" : "=a"(xcr0_lo), "=d"(xcr0_hi) : "c"(0));
+  (void)xcr0_hi;
+  return (xcr0_lo & 0xE6) == 0xE6;
+}
+#endif
+
+#if defined(BROKKR_MD5_X64_ASM)
+  #include <intrin.h>
+
+  #define MD5_HAVE_AVX512 1
+  #define md5_blocks_avx512 md5_blocks_x64_avx512
+
+static int md5_cpu_has_avx512(void) {
+  int r[4];
+  __cpuid(r, 0);
+  if (r[0] < 7) return 0;
+  __cpuid(r, 1);
+  if (!(r[2] & (1 << 27))) return 0;
+  __cpuidex(r, 7, 0);
+  if (!(r[1] & (1 << 16)) || !(r[1] & (1u << 31))) return 0;
+  return (_xgetbv(0) & 0xE6) == 0xE6;
+}
+#endif
+
+static md5_blocks_fn md5_select_blocks(void) {
+#if defined(MD5_HAVE_AVX512)
+  if (md5_cpu_has_avx512()) return md5_blocks_avx512;
+#endif
+  return md5_blocks_base;
+}
+
 void md5_init(MD5_CTX* ctx) {
   ctx->datalen = 0;
   ctx->bitlen = 0;
@@ -169,6 +316,7 @@ void md5_init(MD5_CTX* ctx) {
   ctx->state[1] = 0xEFCDAB89;
   ctx->state[2] = 0x98BADCFE;
   ctx->state[3] = 0x10325476;
+  ctx->blocks = md5_select_blocks();
 }
 
 void md5_update(MD5_CTX* ctx, const MD5_BYTE data[], size_t len) {
@@ -182,14 +330,14 @@ void md5_update(MD5_CTX* ctx, const MD5_BYTE data[], size_t len) {
       return;
     }
     memcpy(ctx->data + ctx->datalen, data, fill);
-    md5_blocks(ctx->state, ctx->data, 1);
+    ctx->blocks(ctx->state, ctx->data, 1);
     ctx->datalen = 0;
     data += fill;
     len -= fill;
   }
 
   if (len >= 64) {
-    md5_blocks(ctx->state, data, len / 64);
+    ctx->blocks(ctx->state, data, len / 64);
     data += len & ~(size_t)63;
     len &= 63;
   }
@@ -207,12 +355,12 @@ void md5_final(MD5_CTX* ctx, MD5_BYTE hash[]) {
   ctx->data[i++] = 0x80;
   if (i > 56) {
     memset(ctx->data + i, 0, 64 - i);
-    md5_blocks(ctx->state, ctx->data, 1);
+    ctx->blocks(ctx->state, ctx->data, 1);
     i = 0;
   }
   memset(ctx->data + i, 0, 56 - i);
   for (i = 0; i < 8; ++i) ctx->data[56 + i] = (MD5_BYTE)(bits >> (8 * i));
-  md5_blocks(ctx->state, ctx->data, 1);
+  ctx->blocks(ctx->state, ctx->data, 1);
 
   for (i = 0; i < 4; ++i) {
     hash[i] = (MD5_BYTE)(ctx->state[0] >> (8 * i));

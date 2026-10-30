@@ -214,7 +214,7 @@ target_sources(brokkr-lib INTERFACE
 
 if (MSVC AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
     enable_language(ASM_MASM)
-    add_library(brokkr-md5-asm OBJECT src/third_party/md5/md5_x64.asm)
+    add_library(brokkr-md5-asm OBJECT src/third_party/md5/md5_x64.asm src/third_party/md5/md5_x64_avx512.asm)
     target_sources(brokkr-lib INTERFACE $<TARGET_OBJECTS:brokkr-md5-asm>)
     target_compile_definitions(brokkr-lib INTERFACE BROKKR_MD5_X64_ASM)
 endif()
