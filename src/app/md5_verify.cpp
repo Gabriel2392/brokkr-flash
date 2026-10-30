@@ -19,6 +19,7 @@
 
 #include "app/md5_xxh3_cache.hpp"
 
+#include "core/elapsed.hpp"
 #include "core/path_utf8.hpp"
 #include "core/str.hpp"
 #include "core/thread_pool.hpp"
@@ -33,6 +34,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -474,6 +476,8 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
     return {};
   }
 
+  const auto verify_started = std::chrono::steady_clock::now();
+
   const std::size_t threads =
       std::min<std::size_t>(pending_jobs.size(),
                             std::min<std::size_t>(kMaxVerifyThreads,
@@ -589,6 +593,8 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
   if (ui.on_item_done) ui.on_item_done(0);
   spdlog::info("{} OK", verify_name);
+  spdlog::info("Integrity verified in {}",
+               brokkr::core::format_elapsed(std::chrono::steady_clock::now() - verify_started));
   return {};
 }
 

@@ -18,6 +18,7 @@
 #include "protocol/odin/group_flasher.hpp"
 
 #include "core/compat.hpp"
+#include "core/elapsed.hpp"
 #include "core/prefetcher.hpp"
 #include "core/str.hpp"
 #include "core/thread_priority.hpp"
@@ -35,6 +36,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <thread>
 #include <utility>
@@ -254,6 +256,9 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   FirstError first_err;
   const auto sm_final = shutdown_mode_final(cfg);
 
+  std::optional<std::chrono::steady_clock::time_point> flash_started;
+  std::optional<std::chrono::steady_clock::time_point> flash_finished;
+
   auto stage = [&](std::string_view s) {
     if (ui.on_stage) ui.on_stage(std::string(s));
   };
@@ -314,6 +319,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     }
     log_summary(total_devices, failed_total);
     if (failed_total > 0 || first_err.has_error()) return first_err.status_or_ok();
+    if (flash_started && flash_finished)
+      spdlog::info("Done ({})", brokkr::core::format_elapsed(*flash_finished - *flash_started));
     if (ui.on_done) ui.on_done();
     return {};
   };
@@ -483,6 +490,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
     stage(use_lz4 ? "Flashing (Speed: Enhanced)" : "Flashing (Speed: Normal)");
     spdlog::info("Flashing has begun!");
+    flash_started = std::chrono::steady_clock::now();
 
     const std::size_t ndevs = active.size();
     if (!ndevs) return brokkr::core::fail("No active devices");
@@ -778,6 +786,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         failed_total += active.size();
         return st;
       }
+      flash_finished = std::chrono::steady_clock::now();
       if (cfg.post_close_delay_ms > 0)
         std::this_thread::sleep_for(std::chrono::milliseconds(cfg.post_close_delay_ms));
     }
