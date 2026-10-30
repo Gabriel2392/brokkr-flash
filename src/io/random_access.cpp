@@ -157,6 +157,9 @@ class PosixSource final : public RandomAccessSource {
   }
 
   void advise_sequential() const noexcept override {
+#if defined(F_RDAHEAD)
+    (void)::fcntl(fd_, F_RDAHEAD, 1);
+#endif
 #if defined(POSIX_FADV_SEQUENTIAL)
     (void)::posix_fadvise(fd_, 0, 0, POSIX_FADV_SEQUENTIAL);
 #endif

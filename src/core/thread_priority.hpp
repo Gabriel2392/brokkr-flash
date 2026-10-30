@@ -21,6 +21,9 @@
 #  include <sys/resource.h>
 #  include <sys/syscall.h>
 #  include <unistd.h>
+#elif defined(__APPLE__)
+#  include <pthread.h>
+#  include <sys/qos.h>
 #endif
 
 namespace brokkr::core {
@@ -29,6 +32,9 @@ inline void bump_thread_priority(int nice_value = -8) noexcept {
 #if defined(BROKKR_PLATFORM_ANDROID)
   const pid_t tid = static_cast<pid_t>(::syscall(SYS_gettid));
   ::setpriority(PRIO_PROCESS, static_cast<id_t>(tid), nice_value);
+#elif defined(__APPLE__)
+  (void)nice_value;
+  (void)::pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
 #else
   (void)nice_value;
 #endif
