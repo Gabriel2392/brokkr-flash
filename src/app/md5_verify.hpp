@@ -33,14 +33,6 @@
 
 namespace brokkr::app {
 
-class HashReader {
- public:
-  virtual ~HashReader() = default;
-
-  virtual brokkr::core::Status open() noexcept = 0;
-  virtual brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept = 0;
-};
-
 struct Md5Job {
   std::string display_name;
   std::string identity_path;
@@ -48,7 +40,7 @@ struct Md5Job {
   std::int64_t identity_write_time = 0;
   std::uint64_t bytes_to_hash = 0;
   std::array<unsigned char, 16> expected{};
-  std::function<brokkr::core::Result<std::unique_ptr<HashReader>>()> open_reader;
+  brokkr::io::RandomAccessSourcePtr source;
 };
 
 brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesystem::path>& inputs) noexcept;

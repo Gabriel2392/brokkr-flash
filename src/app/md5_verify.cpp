@@ -19,11 +19,11 @@
 
 #include "app/md5_xxh3_cache.hpp"
 
-#include "core/prefetcher.hpp"
 #include "core/path_utf8.hpp"
 #include "core/str.hpp"
 #include "core/thread_pool.hpp"
 
+#include "io/sequential_reader.hpp"
 #include "io/source.hpp"
 #include "io/tar.hpp"
 #include "platform/platform_all.hpp"
@@ -55,11 +55,11 @@ constexpr std::size_t kTrailerMaxBytes = 16 * 1024;
 constexpr std::size_t kMd5HexChars = 32;
 constexpr std::size_t kMd5Xxh3CacheMaxEntries = 100;
 
+constexpr std::size_t kHashBufBytes = 4 * 1024 * 1024;
+
 #if defined(BROKKR_PLATFORM_ANDROID)
-constexpr std::size_t kHashBufBytes = 16 * 1024 * 1024;
 constexpr std::size_t kMaxVerifyThreads = 2;
 #else
-constexpr std::size_t kHashBufBytes = 32 * 1024 * 1024;
 constexpr std::size_t kMaxVerifyThreads = std::numeric_limits<std::size_t>::max();
 #endif
 
@@ -106,26 +106,6 @@ std::mutex& session_verify_cache_mutex() {
   static std::mutex mtx;
   return mtx;
 }
-
-class SourceHashReader final : public HashReader {
- public:
-  explicit SourceHashReader(brokkr::io::RandomAccessSourcePtr source) noexcept : source_(std::move(source)) {}
-
-  brokkr::core::Status open() noexcept override {
-    source_->advise_sequential();
-    return {};
-  }
-
-  brokkr::core::Result<std::size_t> read_some(unsigned char* data, std::size_t want) noexcept override {
-    BRK_TRYV(got, source_->read_at(cursor_, std::as_writable_bytes(std::span<unsigned char>(data, want))));
-    cursor_ += got;
-    return got;
-  }
-
- private:
-  brokkr::io::RandomAccessSourcePtr source_;
-  std::uint64_t cursor_ = 0;
-};
 
 static bool is_hex(unsigned char c) noexcept {
   return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
@@ -239,36 +219,13 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const Md5Jo
                                                                      std::atomic_uint64_t& done, std::uint64_t total,
                                                                      const brokkr::odin::Ui& ui,
                                                                      std::atomic<bool>* cancel) noexcept {
-  struct Slot {
-    std::vector<unsigned char> buf;
-    std::size_t n = 0;
-  };
-
   auto cancelled = [&]() noexcept { return cancel != nullptr && cancel->load(std::memory_order_acquire); };
 
   if (cancelled()) return brokkr::core::fail("Verification cancelled");
 
-  if (!job.open_reader) return brokkr::core::fail("Hash reader is not configured");
+  if (!job.source) return brokkr::core::fail("Hash source is not configured");
 
-  BRK_TRYV(reader, job.open_reader());
-  BRK_TRY(reader->open());
-
-  std::uint64_t remaining = bytes_to_hash;
-
-  brokkr::core::TwoSlotPrefetcher<Slot> pf(
-      [&](Slot& s, std::stop_token st) -> brokkr::core::Result<bool> {
-        if (st.stop_requested() || !remaining) return false;
-        if (cancelled()) return brokkr::core::fail("Verification cancelled");
-
-        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, kHashBufBytes));
-        BRK_TRYV(got, reader->read_some(s.buf.data(), want));
-        if (got != want) return brokkr::core::failf("Short read while hashing: {}", job.display_name);
-
-        s.n = got;
-        remaining -= static_cast<std::uint64_t>(got);
-        return true;
-      },
-      [&](Slot& s) { s.buf.resize(kHashBufBytes); });
+  BRK_TRYV(reader, brokkr::io::open_sequential_reader(job.source, bytes_to_hash, kHashBufBytes));
 
   Consumer consumer;
   if constexpr (Consumer::kUsesMd5) {
@@ -281,22 +238,18 @@ static brokkr::core::Result<typename Consumer::Digest> hash_prefetch(const Md5Jo
 
   std::uint64_t processed = 0;
   while (processed < bytes_to_hash) {
-    auto lease = pf.next();
-    if (!lease) break;
+    if (cancelled()) return brokkr::core::fail("Verification cancelled");
 
-    auto& s = lease->get();
-    if (!s.n) break;
+    BRK_TRYV(chunk, reader->next());
+    if (chunk.empty()) break;
 
-    BRK_TRY(consumer.update(s.buf.data(), s.n));
-    processed += static_cast<std::uint64_t>(s.n);
+    BRK_TRY(consumer.update(reinterpret_cast<const unsigned char*>(chunk.data()), chunk.size()));
+    processed += static_cast<std::uint64_t>(chunk.size());
 
-    const auto new_done = done.fetch_add(static_cast<std::uint64_t>(s.n), std::memory_order_relaxed) +
-                          static_cast<std::uint64_t>(s.n);
+    const auto new_done = done.fetch_add(static_cast<std::uint64_t>(chunk.size()), std::memory_order_relaxed) +
+                          static_cast<std::uint64_t>(chunk.size());
     if (ui.on_progress) ui.on_progress(new_done, total, new_done, total);
   }
-
-  auto pst = pf.status();
-  if (!pst) return brokkr::core::fail(std::move(pst.error()));
 
   if (processed != bytes_to_hash) {
     return brokkr::core::failf("Hashing terminated early: {} (processed {}, expected {})", job.display_name, processed,
@@ -365,9 +318,7 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(
   j.identity_write_time = source->write_time();
   j.bytes_to_hash = bytes_to_hash;
   j.expected = expected;
-  j.open_reader = [source]() -> brokkr::core::Result<std::unique_ptr<HashReader>> {
-    return std::unique_ptr<HashReader>(std::make_unique<SourceHashReader>(source));
-  };
+  j.source = source;
   return std::optional<Md5Job>(std::move(j));
 }
 

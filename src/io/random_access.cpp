@@ -77,7 +77,11 @@ class WindowsSource final : public RandomAccessSource {
   std::uint64_t size() const noexcept override { return size_; }
 
   brokkr::core::Result<std::size_t> read_at(std::uint64_t offset, std::span<std::byte> out) const noexcept override {
+    const HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!event) return brokkr::core::failf("Read failed: {}", label_);
+
     std::size_t done = 0;
+    bool ok = true;
     while (done < out.size()) {
       const DWORD want = static_cast<DWORD>(std::min<std::size_t>(out.size() - done, 1u << 30));
       const std::uint64_t at = offset + done;
@@ -85,15 +89,20 @@ class WindowsSource final : public RandomAccessSource {
       OVERLAPPED ov{};
       ov.Offset = static_cast<DWORD>(at & 0xFFFFFFFFull);
       ov.OffsetHigh = static_cast<DWORD>(at >> 32);
+      ov.hEvent = event;
 
       DWORD got = 0;
-      if (!ReadFile(handle_, out.data() + done, want, &got, &ov)) {
-        if (GetLastError() == ERROR_HANDLE_EOF) break;
-        return brokkr::core::failf("Read failed: {}", label_);
+      if ((!ReadFile(handle_, out.data() + done, want, nullptr, &ov) && GetLastError() != ERROR_IO_PENDING) ||
+          !GetOverlappedResult(handle_, &ov, &got, TRUE)) {
+        ok = GetLastError() == ERROR_HANDLE_EOF;
+        break;
       }
       if (got == 0) break;
       done += static_cast<std::size_t>(got);
     }
+
+    CloseHandle(event);
+    if (!ok) return brokkr::core::failf("Read failed: {}", label_);
     return done;
   }
 
@@ -186,7 +195,8 @@ brokkr::core::Result<RandomAccessSourcePtr> open_file_source(const std::filesyst
   if (!std::filesystem::is_regular_file(path, stat_ec)) return brokkr::core::failf("Not a regular file: {}", brokkr::core::path_to_utf8(path));
 #if defined(_WIN32)
   HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+                              nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OVERLAPPED, nullptr);
   if (handle == INVALID_HANDLE_VALUE) return brokkr::core::failf("Cannot open: {}", brokkr::core::path_to_utf8(path));
 
   BY_HANDLE_FILE_INFORMATION info{};

@@ -195,6 +195,7 @@ add_library(brokkr-lib INTERFACE)
 target_sources(brokkr-lib INTERFACE
     src/core/thread_pool.cpp
     src/io/random_access.cpp
+    src/io/sequential_reader.cpp
     src/io/tar.cpp
     src/io/source.cpp
     src/io/lz4_frame.cpp
@@ -475,6 +476,7 @@ add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
     src/io/random_access.cpp
+    src/io/sequential_reader.cpp
     src/io/source.cpp
     src/io/tar.cpp
     src/io/lz4_frame.cpp
