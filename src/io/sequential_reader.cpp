@@ -86,7 +86,7 @@ class ParallelReader final : public SequentialReader {
 
  private:
   void work_() noexcept {
-    brokkr::core::bump_thread_priority(-8);
+    brokkr::core::bump_thread_priority(-4);
     std::unique_lock lk(m_);
     for (;;) {
       cv_.wait(lk,

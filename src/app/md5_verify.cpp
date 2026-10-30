@@ -498,6 +498,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
 
   for (const auto& j : pending_jobs) {
     auto st = pool.submit([&, j]() -> brokkr::core::Status {
+      brokkr::core::bump_thread_priority(-8);
       if (pool.cancelled()) return {};
       if (cancelled()) return brokkr::core::fail("Verification cancelled");
 
