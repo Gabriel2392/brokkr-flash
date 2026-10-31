@@ -22,6 +22,7 @@
 #include "app/md5_verify.hpp"
 #include "app/pit_file.hpp"
 #include "app/samsung_usb.hpp"
+#include "app/wireless_token.hpp"
 #include "core/path_utf8.hpp"
 #include "core/status.hpp"
 #include "io/source.hpp"
@@ -39,6 +40,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -56,6 +58,7 @@ namespace brokkr::app {
 namespace {
 
 constexpr std::uint16_t kWirelessPort = 13579;
+constexpr const char* kWirelessTokenEnv = "BROKKR_WIRELESS_TOKEN";
 
 struct UsbSession {
   std::string sysname;
@@ -71,7 +74,7 @@ struct Provider {
 
 bool is_cli_trigger(std::string_view arg) {
   static const std::unordered_set<std::string_view> kTriggers = {
-      "-h", "--help", "--list", "--reboot-download", "--wireless", "--no-reboot", "--use-pit", "--target",
+      "-h", "--help", "--list", "--reboot-download", "--wireless", "--wireless-bind", "--no-reboot", "--use-pit", "--target",
       "-b", "-a", "-c", "-s", "-u",
   };
   return kTriggers.contains(arg);
@@ -109,6 +112,8 @@ void print_usage() {
       << "  --use-pit <path.pit>       Optional PIT file\n"
       << "  --no-reboot                Do not reboot at end\n"
       << "  --wireless                 Flash via wireless listener\n"
+      << "  --wireless-bind <ip>       Address the wireless listener binds to (default 0.0.0.0)\n"
+      << "                             Set BROKKR_WIRELESS_TOKEN to require a shared secret\n"
       << "  --target <sysname>         Same target semantics as GUI\n\n"
       << "Notes:\n"
       << "  - At least one file is required from: -b -a -c -s -u --use-pit\n"
@@ -243,14 +248,24 @@ brokkr::core::Result<Provider> make_provider(const CliArgs& args, const brokkr::
 
   if (args.wireless) {
     brokkr::platform::TcpListener listener;
-    BRK_TRY(listener.bind_and_listen("0.0.0.0", kWirelessPort));
+    BRK_TRY(listener.bind_and_listen(args.wireless_bind, kWirelessPort));
 
-    spdlog::info("Waiting for connection on port {}", kWirelessPort);
+    // Optional shared secret. Unset means the listener accepts any peer, as before.
+    const char* token_env = std::getenv(kWirelessTokenEnv);
+    const std::string token = token_env ? token_env : "";
+
+    spdlog::info("Waiting for connection on {}:{} (token {})", args.wireless_bind, kWirelessPort,
+                 token.empty() ? "not set" : "required");
 
     for (;;) {
       auto ar = listener.accept_one();
       if (ar) {
-        p.wireless_conn = std::make_unique<brokkr::platform::TcpConnection>(std::move(*ar));
+        auto conn = std::make_unique<brokkr::platform::TcpConnection>(std::move(*ar));
+        if (!brokkr::app::wireless_token_matches(*conn, token)) {
+          spdlog::warn("Wireless peer {} did not send the token; closing it", conn->peer_label());
+          continue;
+        }
+        p.wireless_conn = std::move(conn);
         break;
       }
       if (ar.error() != "accept: timeout") return brokkr::core::fail(std::move(ar.error()));

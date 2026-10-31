@@ -14,6 +14,7 @@ struct CliArgs {
   bool list = false;
   bool reboot_download = false;
   bool wireless = false;
+  std::string wireless_bind = "0.0.0.0";
   bool no_reboot = false;
 
   std::optional<std::string> target;
