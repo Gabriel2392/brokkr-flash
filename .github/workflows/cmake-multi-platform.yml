@@ -23,7 +23,7 @@ on:
         default: "beta1"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   QT_VERSION: "6.8.3"
@@ -34,6 +34,8 @@ jobs:
   # ═══════════════════════════════════════════════════
   prepare:
     name: Resolve version
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -836,6 +838,8 @@ jobs:
   # ═══════════════════════════════════════════════════
   screenshots:
     name: Update README screenshots
+    permissions:
+      contents: write
     needs: [linux_appimage, windows_installer, macos_app]
     if: >-
       always() &&
@@ -870,6 +874,8 @@ jobs:
 
   release:
     name: Publish release
+    permissions:
+      contents: write
     if: github.event_name == 'workflow_dispatch' && inputs.release_type != 'none'
     needs: [prepare, linux_appimage, linux_appimage_arm64, windows_installer, macos_app, macos_app_x86, android_apk]
     runs-on: ubuntu-24.04
