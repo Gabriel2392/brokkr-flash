@@ -341,7 +341,7 @@ endif()
 
 find_package(Threads REQUIRED)
 target_include_directories(brokkr PRIVATE src src-gui)
-target_sources(brokkr PRIVATE src/app/cli_args.cpp)
+target_sources(brokkr PRIVATE src/app/cli_args.cpp src/app/wireless_token.cpp)
 
 add_library(brokkr-cxx-compat INTERFACE)
 if (NOT HAS_STD_MOVE_ONLY_FUNCTION)
@@ -482,6 +482,22 @@ add_test(NAME md5_xxh3_cache COMMAND test_md5_xxh3_cache)
 add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
+
+if (NOT WIN32)
+    add_executable(test_wireless_token
+        tests/test_wireless_token.cpp
+        src/app/wireless_token.cpp
+        src/platform/posix-common/tcp_transport.cpp
+    )
+    target_include_directories(test_wireless_token PRIVATE src)
+    target_compile_definitions(test_wireless_token PRIVATE
+        $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    )
+    target_link_libraries(test_wireless_token PRIVATE
+        Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+    )
+    add_test(NAME wireless_token COMMAND test_wireless_token)
+endif()
 
 add_executable(test_file_paths
     tests/test_file_paths.cpp

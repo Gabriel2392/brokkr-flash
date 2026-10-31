@@ -43,6 +43,11 @@ brokkr::core::Result<CliArgs> parse_cli_args(int argc, char* argv[]) {
       out.wireless = true;
       continue;
     }
+    if (arg == "--wireless-bind") {
+      BRK_TRYV(v, require_value(i, "--wireless-bind"));
+      out.wireless_bind = std::move(v);
+      continue;
+    }
     if (arg == "--no-reboot") {
       out.no_reboot = true;
       continue;
