@@ -135,11 +135,10 @@ bool TcpConnection::connected() const noexcept {
 
   if (r == 0) return true;
 
-  if (pfd.revents & POLLHUP) return false;
-
   if (pfd.revents & POLLRDNORM) {
     char c = 0;
     const int n = ::recv(fd_, &c, 1, MSG_PEEK);
+    if (n > 0) return true;
     if (n == 0) return false;
     if (n < 0) {
       const int err = WSAGetLastError();
@@ -147,6 +146,8 @@ bool TcpConnection::connected() const noexcept {
       return false;
     }
   }
+
+  if (pfd.revents & POLLHUP) return false;
 
   return true;
 }
@@ -257,7 +258,8 @@ int TcpConnection::recv_(std::span<std::uint8_t> data) {
       if (err == WSAEINTR) continue;
       return -1;
     }
-    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+    if (pfd.revents & POLLNVAL) return -1;
+    if ((pfd.revents & (POLLERR | POLLHUP)) && !(pfd.revents & POLLRDNORM)) return -1;
 
     const int n = ::recv(fd_, reinterpret_cast<char*>(data.data()), static_cast<int>(data.size()), 0);
     if (n > 0) return n;
