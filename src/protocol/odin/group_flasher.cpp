@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -187,9 +188,198 @@ static Step st_end(bool comp, u64 end_sz, std::int32_t part_id, std::int32_t bin
               .last = last};
 }
 
-template <class PF, class MakeContrib>
-static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& cur, const std::size_t pkt,
-                                            const bool comp, const std::int32_t part_id, const std::int32_t bin_type,
+static bool streams_lz4(const FlashItem& item, bool use_lz4) noexcept {
+  return item.spec.lz4 && use_lz4 &&
+         (item.spec.lz4_block_size == static_cast<std::size_t>(detail::kOneMiB) ||
+          item.spec.size <= item.spec.lz4_block_size);
+}
+
+struct Window {
+  std::vector<std::byte> buf;
+  u64 begin = 0, end = 0, rounded = 0;
+  bool last = false;
+  std::size_t lz4_block_size = 0;
+  u64 lz4_content_size = 0;
+  std::optional<brokkr::core::Error> error;
+  bool setup_failed = false;
+  const std::byte* data() const { return buf.data(); }
+};
+
+class WindowPrefetcher {
+ public:
+  using Lease = brokkr::core::TwoSlotPrefetcher<Window>::Lease;
+
+  WindowPrefetcher(const std::vector<FlashItem>& items, bool use_lz4, std::size_t pkt, u64 buffer_bytes)
+      : items_(items),
+        use_lz4_(use_lz4),
+        pkt_(pkt),
+        buffer_bytes_(buffer_bytes),
+        pf_([this](Window& w, std::stop_token stop) { return fill_(w, stop); }) {}
+
+  bool use_lz4() const noexcept { return use_lz4_; }
+  std::optional<Lease> next() noexcept { return pf_.next(); }
+
+ private:
+  brokkr::core::Result<bool> fill_(Window& w, std::stop_token stop) noexcept {
+    if (stop.stop_requested() || failed_ || item_ >= items_.size()) return false;
+
+    w.error.reset();
+    w.setup_failed = false;
+
+    try {
+      if (!open_) {
+        auto opened = open_item_(items_[item_]);
+        if (!opened) {
+          fail_(w, std::move(opened.error()), true);
+          return true;
+        }
+      }
+      w.lz4_block_size = block_;
+      w.lz4_content_size = total_;
+
+      auto r = stream_ ? read_lz4_(w) : read_raw_(w);
+      if (!r) {
+        fail_(w, std::move(r.error()), false);
+        return true;
+      }
+
+      if (w.last) close_item_();
+      return true;
+    } catch (const std::exception& e) {
+      fail_(w, e.what(), !open_);
+      return true;
+    }
+  }
+
+  brokkr::core::Status open_item_(const FlashItem& item) {
+    window_ = detail::xmit_window_bytes(item.part, buffer_bytes_);
+    stream_ = streams_lz4(item, use_lz4_);
+    window_decomp_ = 0;
+    total_ = 0;
+    sent_ = 0;
+    block_ = 0;
+
+    if (stream_) {
+      BRK_TRYV(src, item.spec.open());
+      BRK_TRYV(reader, io::Lz4BlockStreamReader::open(std::move(src)));
+
+      total_ = reader.content_size();
+      if (!total_) return brokkr::core::fail("LZ4 content size is zero: " + item.spec.display);
+
+      block_ = reader.block_size();
+      if (block_ != static_cast<std::size_t>(detail::kOneMiB) && total_ > block_)
+        return brokkr::core::fail("LZ4 stream needs 1MiB blocks unless the image fits in one block: " +
+                                  item.spec.display);
+
+      window_decomp_ = detail::lz4_window_decomp_bytes(window_, block_);
+      if (!window_decomp_) return brokkr::core::fail("Transfer window smaller than one LZ4 block: " + item.spec.display);
+
+      lz4_.emplace(std::move(reader));
+    } else {
+      BRK_TRYV(src, item.spec.open());
+      if (item.spec.lz4) {
+        BRK_TRYV(decomp, io::open_lz4_decompressed(std::move(src)));
+        raw_ = std::move(decomp);
+      } else {
+        raw_ = std::move(src);
+      }
+
+      total_ = raw_->size();
+      if (!total_) return brokkr::core::fail("Empty source: " + item.spec.display);
+    }
+
+    open_ = true;
+    return {};
+  }
+
+  brokkr::core::Status read_raw_(Window& w) {
+    const u64 actual = std::min<u64>(total_ - sent_, window_);
+    const u64 rounded = detail::round_up64(actual, pkt_);
+    const auto n = static_cast<std::size_t>(actual);
+    const auto r = static_cast<std::size_t>(rounded);
+
+    if (w.buf.capacity() < r) {
+      w.buf.clear();
+      w.buf.reserve(r);
+    }
+    w.buf.resize(r);
+
+    BRK_TRY(io::read_exact(*raw_, std::span<std::byte>(w.buf.data(), n)));
+    if (r > n) std::memset(w.buf.data() + n, 0, r - n);
+
+    w.begin = detail::round_up64(actual, detail::kXmitStartAlign);
+    w.end = actual;
+    w.rounded = rounded;
+    w.last = sent_ + actual >= total_;
+
+    sent_ += actual;
+    return {};
+  }
+
+  brokkr::core::Status read_lz4_(Window& w) {
+    const u64 rem = total_ - sent_;
+    const bool last = rem <= window_decomp_;
+    const u64 decomp = last ? rem : window_decomp_;
+    const std::size_t blocks = last ? lz4_->blocks_remaining() : static_cast<std::size_t>(decomp / block_);
+
+    w.buf.clear();
+    w.buf.reserve(blocks * (block_ + 4));
+
+    BRK_TRY(lz4_->read_n_blocks(blocks, w.buf));
+
+    const u64 comp = w.buf.size();
+    const u64 rounded = detail::round_up64(comp, pkt_);
+    w.buf.reserve(static_cast<std::size_t>(rounded));
+    w.buf.resize(static_cast<std::size_t>(rounded), std::byte{0});
+
+    w.begin = comp;
+    w.end = decomp;
+    w.rounded = rounded;
+    w.last = last;
+
+    sent_ += decomp;
+    return {};
+  }
+
+  void close_item_() noexcept {
+    raw_.reset();
+    lz4_.reset();
+    open_ = false;
+    ++item_;
+  }
+
+  void fail_(Window& w, brokkr::core::Error e, bool setup) noexcept {
+    w.error = std::move(e);
+    w.setup_failed = setup;
+    failed_ = true;
+    raw_.reset();
+    lz4_.reset();
+  }
+
+  const std::vector<FlashItem>& items_;
+  const bool use_lz4_;
+  const std::size_t pkt_;
+  const u64 buffer_bytes_;
+
+  std::size_t item_ = 0;
+  bool open_ = false;
+  bool failed_ = false;
+  bool stream_ = false;
+  u64 window_ = 0;
+  u64 window_decomp_ = 0;
+  u64 total_ = 0;
+  u64 sent_ = 0;
+  std::size_t block_ = 0;
+  std::unique_ptr<io::ByteSource> raw_;
+  std::optional<io::Lz4BlockStreamReader> lz4_;
+
+  brokkr::core::TwoSlotPrefetcher<Window> pf_;
+};
+
+template <class MakeContrib>
+static brokkr::core::Status send_prefetched(WindowPrefetcher& pf, std::optional<WindowPrefetcher::Lease> lease,
+                                            std::barrier<>& sync, Step& cur, const std::size_t pkt, const bool comp,
+                                            const std::int32_t part_id, const std::int32_t bin_type,
                                             const std::int32_t dev_type, const u64 total_bytes, const u64 item_total,
                                             u64& overall_done, u64& item_done, const Ui& ui,
                                             std::atomic_uint32_t& failed_count, const std::size_t ndevs,
@@ -205,10 +395,12 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
   for (;;) {
     if (failed_count.load(std::memory_order_relaxed) >= ndevs) break;
 
-    auto lease = pf.next();
+    if (!lease) lease = pf.next();
     if (!lease) break;
 
     auto& w = lease->get();
+    if (w.error) return brokkr::core::fail(*w.error);
+
     const u64 rounded = static_cast<u64>(w.rounded);
     const u64 packets = rounded / pkt64;
 
@@ -231,9 +423,10 @@ static brokkr::core::Status send_prefetched(PF& pf, std::barrier<>& sync, Step& 
 
     emit(st_end(comp, w.end, part_id, bin_type, dev_type, w.last));
     if (w.last || (failed_count.load(std::memory_order_relaxed) >= ndevs)) break;
+    lease.reset();
   }
 
-  return pf.status();
+  return {};
 }
 
 } // namespace
@@ -334,6 +527,12 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   std::vector<FlashItem> items;
   std::vector<ImageSpec> effective_sources;
   u64 total = 0;
+  std::optional<WindowPrefetcher> prefetcher;
+
+  auto lz4_usable = [&] {
+    return any_lz4(effective_sources) &&
+           std::ranges::all_of(active, [](Target* d) { return d->init.supports_compressed_download(); });
+  };
 
   auto shutdown_active = [&](OdinCommands::ShutdownMode m, std::string_view stg) -> brokkr::core::Status {
     log_shutdown_action(m);
@@ -436,6 +635,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
     total = 0;
     for (const auto& it : items) BRK_TRY(detail::checked_add_u64(total, it.spec.size, "TOTALSIZE"));
 
+    if (!items.empty()) prefetcher.emplace(items, lz4_usable(), pkt, cfg.buffer_bytes);
+
     plan.clear();
     plan.reserve(items.size() + (has_pit ? 1u : 0u));
 
@@ -485,8 +686,8 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
   });
 
   steps.emplace_back([&] -> brokkr::core::Status {
-    const bool use_lz4 = any_lz4(effective_sources) &&
-                         std::ranges::all_of(active, [](Target* d) { return d->init.supports_compressed_download(); });
+    const bool use_lz4 = lz4_usable();
+    if (prefetcher && prefetcher->use_lz4() != use_lz4) prefetcher.emplace(items, use_lz4, pkt, cfg.buffer_bytes);
 
     stage(use_lz4 ? "Flashing (Speed: Enhanced)" : "Flashing (Speed: Normal)");
     spdlog::info("Flashing has begun!");
@@ -592,146 +793,39 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
         const u64 window = detail::xmit_window_bytes(item.part, cfg.buffer_bytes);
         u64 item_done = 0;
 
-        const bool stream_lz4 = item.spec.lz4 && use_lz4 &&
-                                (item.spec.lz4_block_size == static_cast<std::size_t>(detail::kOneMiB) ||
-                                 item.spec.size <= item.spec.lz4_block_size);
+        const bool stream_lz4 = streams_lz4(item, use_lz4);
 
         spdlog::debug(
             "Flash item: part_id={} dev_type={} name='{}' pit_file='{}' source='{}' size={} window={} lz4={} mode={}",
             item.part.id, item.part.dev_type, item.part.name, item.part.file_name, item.spec.display, item.spec.size,
             window, item.spec.lz4, stream_lz4 ? "compressed-stream" : "raw");
 
-        if (stream_lz4) {
-          struct Slot {
-            std::vector<std::byte> stream;
-            u64 begin = 0, end = 0, rounded = 0;
-            bool last = false;
-            const std::byte* data() const { return stream.data(); }
-          };
+        auto first = prefetcher->next();
+        if (first && first->get().setup_failed) return brokkr::core::fail(*first->get().error);
 
-          BRK_TRYV(src0, item.spec.open());
-          BRK_TRYV(reader, io::Lz4BlockStreamReader::open(std::move(src0)));
-
-          const u64 total_decomp = reader.content_size();
-          if (!total_decomp) return brokkr::core::fail("LZ4 content size is zero: " + item.spec.display);
-
-          const std::size_t block_sz = reader.block_size();
-          if (block_sz != static_cast<std::size_t>(detail::kOneMiB) && total_decomp > block_sz)
-            return brokkr::core::fail("LZ4 stream needs 1MiB blocks unless the image fits in one block: " +
-                                      item.spec.display);
-
+        if (stream_lz4 && first) {
+          const std::size_t block_sz = first->get().lz4_block_size;
           const u64 window_decomp = detail::lz4_window_decomp_bytes(window, block_sz);
-          if (!window_decomp)
-            return brokkr::core::fail("Transfer window smaller than one LZ4 block: " + item.spec.display);
-
-          const auto max_blocks = static_cast<std::size_t>(window_decomp / block_sz);
-
           spdlog::debug("LZ4 stream: block_size={} total_decomp={} window_decomp={} blocks/window={}", block_sz,
-                        total_decomp, window_decomp, max_blocks);
+                        first->get().lz4_content_size, window_decomp, window_decomp / block_sz);
+        }
 
-          u64 sent = 0;
+        if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
 
-          brokkr::core::TwoSlotPrefetcher<Slot> pf(
-              [&](Slot& s, std::stop_token stt) -> brokkr::core::Result<bool> {
-                if (stt.stop_requested() || sent >= total_decomp) return false;
-
-                const u64 rem = total_decomp - sent;
-                const bool last = rem <= window_decomp;
-                const u64 decomp_sz = last ? rem : window_decomp;
-
-                const std::size_t blocks =
-                    last ? reader.blocks_remaining() : static_cast<std::size_t>(decomp_sz / block_sz);
-
-                s.stream.clear();
-                s.stream.reserve(blocks * (block_sz + 4));
-
-                BRK_TRYV(comp, reader.read_n_blocks(blocks, s.stream));
-                const u64 comp_sz = static_cast<u64>(comp);
-                const u64 rounded_sz = detail::round_up64(comp_sz, pkt);
-
-                s.stream.resize(static_cast<std::size_t>(rounded_sz), std::byte{0});
-                s.begin = comp_sz;
-                s.end = decomp_sz;
-                s.rounded = rounded_sz;
-                s.last = last;
-
-                sent += decomp_sz;
-                return true;
-              },
-              [&](Slot& s) { s.stream.reserve(max_blocks * (block_sz + 4)); });
-
-          if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
-
-          BRK_TRY(send_prefetched(pf, sync, cur, pkt, true, item.part.id, item.part.bin_type, item.part.dev_type, total,
-                                  item_total, overall_done, item_done, ui, failed_count, ndevs,
-                                  [&](const Slot& w, u64 packets) {
+        if (stream_lz4) {
+          BRK_TRY(send_prefetched(*prefetcher, std::move(first), sync, cur, pkt, true, item.part.id, item.part.bin_type,
+                                  item.part.dev_type, total, item_total, overall_done, item_done, ui, failed_count,
+                                  ndevs, [&](const Window& w, u64 packets) {
                                     return [end = w.end, packets](u64 p) {
                                       const auto c1 = ((p + 1) * end) / packets;
                                       const auto c0 = (p * end) / packets;
                                       return c1 - c0;
                                     };
                                   }));
-
         } else {
-          struct Slot {
-            std::vector<std::byte> buf;
-            u64 begin = 0, end = 0;
-            std::size_t rounded = 0;
-            bool last = false;
-            const std::byte* data() const { return buf.data(); }
-          };
-
-          std::unique_ptr<io::ByteSource> src;
-
-          if (item.spec.lz4) {
-            BRK_TRYV(s0, item.spec.open());
-            BRK_TRYV(d0, io::open_lz4_decompressed(std::move(s0)));
-            src = std::move(d0);
-          } else {
-            BRK_TRYV(s0, item.spec.open());
-            src = std::move(s0);
-          }
-
-          const u64 file_sz = src->size();
-          if (!file_sz) return brokkr::core::fail("Empty source: " + item.spec.display);
-
-          const std::size_t max_rounded =
-              static_cast<std::size_t>(detail::round_up64(window, static_cast<u64>(pkt)));
-          u64 sent = 0;
-
-          brokkr::core::TwoSlotPrefetcher<Slot> pf(
-              [&](Slot& s, std::stop_token stt) -> brokkr::core::Result<bool> {
-                if (stt.stop_requested() || sent >= file_sz) return false;
-
-                const u64 rem = file_sz - sent;
-                const u64 actual = std::min<u64>(rem, window);
-                const u64 rounded_u64 = detail::round_up64(actual, pkt);
-                const auto rounded = static_cast<std::size_t>(rounded_u64);
-
-                s.buf.resize(rounded);
-
-                auto rst = io::read_exact(*src, std::span<std::byte>(s.buf.data(), static_cast<std::size_t>(actual)));
-                if (!rst) return brokkr::core::fail(std::move(rst.error()));
-
-                if (rounded_u64 > actual)
-                  std::memset(s.buf.data() + static_cast<std::size_t>(actual), 0,
-                              rounded - static_cast<std::size_t>(actual));
-
-                s.rounded = rounded;
-                s.begin = detail::round_up64(actual, detail::kXmitStartAlign);
-                s.end = actual;
-                s.last = (sent + actual >= file_sz);
-
-                sent += actual;
-                return true;
-              },
-              [&](Slot& s) { s.buf.reserve(max_rounded); });
-
-          if (ui.on_progress) ui.on_progress(overall_done, total, item_done, item_total);
-
-          BRK_TRY(send_prefetched(pf, sync, cur, pkt, false, item.part.id, item.part.bin_type, item.part.dev_type,
-                                  total, item_total, overall_done, item_done, ui, failed_count, ndevs,
-                                  [&](const Slot& w, u64 /*packets*/) {
+          BRK_TRY(send_prefetched(*prefetcher, std::move(first), sync, cur, pkt, false, item.part.id,
+                                  item.part.bin_type, item.part.dev_type, total, item_total, overall_done, item_done,
+                                  ui, failed_count, ndevs, [&](const Window& w, u64 /*packets*/) {
                                     u64 rem2 = w.end;
                                     const u64 pkt64 = static_cast<u64>(pkt);
                                     return [rem2, pkt64](u64 /*p*/) mutable {
@@ -750,6 +844,7 @@ brokkr::core::Status flash(std::vector<Target*>& devs, const std::vector<ImageSp
 
     auto cst = coordinator();
     if (!cst) berr.set(std::move(cst));
+    prefetcher.reset();
 
     emit({.op = Step::Op::Quit});
     for (auto& t : workers)
