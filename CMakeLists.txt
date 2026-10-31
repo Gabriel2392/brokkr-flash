@@ -483,6 +483,43 @@ add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
 
+add_executable(test_tar_malformed
+    tests/test_tar_malformed.cpp
+    src/io/tar.cpp
+    src/io/source.cpp
+    src/io/random_access.cpp
+    src/io/sequential_reader.cpp
+    src/io/lz4_frame.cpp
+    src/third_party/lz4/lz4.c
+)
+target_include_directories(test_tar_malformed PRIVATE src)
+target_compile_definitions(test_tar_malformed PRIVATE
+    $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_link_libraries(test_tar_malformed PRIVATE
+    brokkr-cxx-compat Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+)
+add_test(NAME tar_malformed COMMAND test_tar_malformed)
+
+add_executable(test_lz4_malformed
+    tests/test_lz4_malformed.cpp
+    src/io/lz4_frame.cpp
+    src/io/source.cpp
+    src/io/random_access.cpp
+    src/io/sequential_reader.cpp
+    src/third_party/lz4/lz4.c
+)
+target_include_directories(test_lz4_malformed PRIVATE src)
+target_compile_definitions(test_lz4_malformed PRIVATE
+    $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_link_libraries(test_lz4_malformed PRIVATE
+    brokkr-cxx-compat Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+)
+add_test(NAME lz4_malformed COMMAND test_lz4_malformed)
+
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
