@@ -121,6 +121,8 @@ void TcpConnection::set_timeout_ms(int ms) noexcept {
 
 std::string TcpConnection::peer_label() const { return fmt::format("{}:{}", peer_ip_, peer_port_); }
 
+// TCP is bounded by timeout_ms_ rather than a retry count, so `retries` is ignored here.
+// The USB transports count retries instead.
 int TcpConnection::send(std::span<const std::uint8_t> data, unsigned /*retries*/) {
   const int n = send_(data);
   if (n < 0) close_();
@@ -190,6 +192,7 @@ int TcpConnection::send_(std::span<const std::uint8_t> data) {
   return static_cast<int>(data.size());
 }
 
+// Bounded by timeout_ms_, not a retry count. See send() above.
 int TcpConnection::recv(std::span<std::uint8_t> data, unsigned /*retries*/) {
   const int n = recv_(data);
   if (n < 0) close_();
