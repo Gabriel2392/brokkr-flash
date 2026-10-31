@@ -98,24 +98,27 @@ Two ways to fix it:
 The wireless listener binds TCP port **13579** on `0.0.0.0`. If your firewall blocks incoming
 connections, the connection won't happen.
 
+Open the port only to your local network. Replace `192.168.1.0/24` with the subnet your phone is on
+(for example, the one shown by `ip addr` or the Wi-Fi settings).
+
 For `ufw`:
 
 ```bash
-sudo ufw allow 13579/tcp
+sudo ufw allow from 192.168.1.0/24 to any port 13579 proto tcp
 sudo ufw reload
 ```
 
 For `firewalld`:
 
 ```bash
-sudo firewall-cmd --add-port=13579/tcp --permanent
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="13579" protocol="tcp" accept'
 sudo firewall-cmd --reload
 ```
 
 For `iptables`:
 
 ```bash
-sudo iptables -A INPUT -p tcp --dport 13579 -j ACCEPT
+sudo iptables -A INPUT -p tcp -s 192.168.1.0/24 --dport 13579 -j ACCEPT
 ```
 
 Both the host and the client must be on the same network (or at least be able to route TCP to
