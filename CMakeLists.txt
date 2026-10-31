@@ -483,6 +483,21 @@ add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
 
+if (NOT WIN32)
+    add_executable(test_tcp_recv_buffered
+        tests/test_tcp_recv_buffered.cpp
+        src/platform/posix-common/tcp_transport.cpp
+    )
+    target_include_directories(test_tcp_recv_buffered PRIVATE src)
+    target_compile_definitions(test_tcp_recv_buffered PRIVATE
+        $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    )
+    target_link_libraries(test_tcp_recv_buffered PRIVATE
+        Threads::Threads spdlog::spdlog_header_only fmt::fmt-header-only
+    )
+    add_test(NAME tcp_recv_buffered COMMAND test_tcp_recv_buffered)
+endif()
+
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
