@@ -483,6 +483,20 @@ add_executable(test_endian tests/test_endian.cpp)
 target_include_directories(test_endian PRIVATE src)
 add_test(NAME endian COMMAND test_endian)
 
+add_executable(test_pit_parse
+    tests/test_pit_parse.cpp
+    src/protocol/odin/pit.cpp
+)
+target_include_directories(test_pit_parse PRIVATE src)
+target_compile_definitions(test_pit_parse PRIVATE
+    $<TARGET_PROPERTY:brokkr-platform,INTERFACE_COMPILE_DEFINITIONS>
+    $<TARGET_PROPERTY:brokkr-lib,INTERFACE_COMPILE_DEFINITIONS>
+)
+target_link_libraries(test_pit_parse PRIVATE
+    brokkr-cxx-compat spdlog::spdlog_header_only fmt::fmt-header-only
+)
+add_test(NAME pit_parse COMMAND test_pit_parse)
+
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
