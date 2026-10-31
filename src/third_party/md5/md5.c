@@ -302,7 +302,8 @@ __attribute__((target("avx512f,avx512vl"))) static void md5_blocks_avx512(MD5_WO
 
 static int md5_cpu_has_avx512(void) {
   unsigned int eax, ebx, ecx, edx, xcr0_lo, xcr0_hi;
-  if (__get_cpuid_max(0, 0) < 7) return 0;
+  __cpuid(0, eax, ebx, ecx, edx);
+  if (eax < 7 || ebx != 0x756e6547u || edx != 0x49656e69u || ecx != 0x6c65746eu) return 0;
   __cpuid(1, eax, ebx, ecx, edx);
   if (!(ecx & (1u << 27))) return 0;
   __cpuid_count(7, 0, eax, ebx, ecx, edx);
@@ -322,7 +323,7 @@ static int md5_cpu_has_avx512(void) {
 static int md5_cpu_has_avx512(void) {
   int r[4];
   __cpuid(r, 0);
-  if (r[0] < 7) return 0;
+  if (r[0] < 7 || r[1] != 0x756e6547 || r[3] != 0x49656e69 || r[2] != 0x6c65746e) return 0;
   __cpuid(r, 1);
   if (!(r[2] & (1 << 27))) return 0;
   __cpuidex(r, 7, 0);
