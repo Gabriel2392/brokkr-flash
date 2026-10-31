@@ -197,7 +197,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io:
     const auto& p = inputs[i];
     if (!io::TarArchive::is_tar_file(*p)) {
       if (!options.allow_raw_files)
-        return brokkr::core::failf("Raw single-image flashing is not supported: {}", p->label());
+        return brokkr::core::failf("Not a valid tar archive: {}", p->label());
       continue;
     }
 
