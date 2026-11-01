@@ -37,6 +37,10 @@ namespace {
 
 static bool is_lz4_name(std::string_view base) { return brokkr::core::ends_with_ci(base, ".lz4"); }
 
+static bool is_tar_name(std::string_view base) {
+  return brokkr::core::ends_with_ci(base, ".tar") || brokkr::core::ends_with_ci(base, ".tar.md5");
+}
+
 static std::string strip_lz4_suffix(std::string s) {
   if (s.size() >= 4 && brokkr::core::ends_with_ci(s, ".lz4")) s.resize(s.size() - 4);
   return s;
@@ -196,7 +200,7 @@ brokkr::core::Result<std::vector<ImageSpec>> expand_inputs(const std::vector<io:
   for (std::size_t i = 0; i < inputs.size(); ++i) {
     const auto& p = inputs[i];
     if (!io::TarArchive::is_tar_file(*p)) {
-      if (!options.allow_raw_files)
+      if (!options.allow_raw_files || is_tar_name(io::basename(p->label())))
         return brokkr::core::failf("Not a valid tar archive: {}", p->label());
       continue;
     }
