@@ -84,7 +84,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
         break;
       }
       if (kr == kIOReturnNoDevice || kr == kIOReturnNotResponding) {
-        spdlog::warn("Device disconnected during send (IOReturn=0x{:08x})", static_cast<unsigned>(kr));
+        spdlog::info("Device disconnected");
         connected_ = false;
         return -1;
       }
@@ -141,7 +141,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
       if (ok_or_underrun(kr)) break;
       if (kr == kIOReturnNoDevice || kr == kIOReturnNotResponding) {
-        spdlog::warn("Device disconnected during recv (IOReturn=0x{:08x})", static_cast<unsigned>(kr));
+        spdlog::info("Device disconnected");
         connected_ = false;
         return -1;
       }

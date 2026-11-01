@@ -220,7 +220,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
                                        timeout_ms_);
     done += r.bytes;
     if (r.disconnected) {
-      spdlog::warn("Device disconnected during send (errno={})", r.error);
+      spdlog::info("Device disconnected");
       connected_ = false;
       return -1;
     }
@@ -283,7 +283,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
                                        true, timeout_ms_);
     done += r.bytes;
     if (r.disconnected) {
-      spdlog::warn("Device disconnected during recv (errno={})", r.error);
+      spdlog::info("Device disconnected");
       connected_ = false;
       return -1;
     }

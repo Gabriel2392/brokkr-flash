@@ -199,7 +199,7 @@ int LibusbUsbTransport::send(std::span<const std::uint8_t> data, unsigned retrie
         rc == LIBUSB_ERROR_PIPE) {
       // PIPE is terminal: clearing a halt on a yanked device can hang the
       // ioctl path long enough to freeze the phone.
-      spdlog::debug("Device disconnected during send ({})", libusb_error_name(rc));
+      spdlog::info("Device disconnected");
       connected_.store(false, std::memory_order_release);
       return -1;
     }
@@ -283,7 +283,7 @@ int LibusbUsbTransport::recv(std::span<std::uint8_t> data, unsigned retries) {
 
     if (rc == LIBUSB_ERROR_NO_DEVICE || rc == LIBUSB_ERROR_IO || rc == LIBUSB_ERROR_NOT_FOUND ||
         rc == LIBUSB_ERROR_PIPE) {
-      spdlog::debug("Device disconnected during recv ({})", libusb_error_name(rc));
+      spdlog::info("Device disconnected");
       connected_.store(false, std::memory_order_release);
       return -1;
     }
@@ -311,7 +311,7 @@ int LibusbUsbTransport::recv_zlp(unsigned /*retries*/) {
   const int rc = libusb_bulk_transfer(handle_, in_ep_, buf.data(), static_cast<int>(buf.size()), &transferred,
                                       static_cast<unsigned int>(kZlpRecvTimeoutMs));
   if (rc == LIBUSB_ERROR_NO_DEVICE) {
-    spdlog::debug("Device disconnected during recv_zlp ({})", libusb_error_name(rc));
+    spdlog::info("Device disconnected");
     connected_.store(false, std::memory_order_release);
     return -1;
   }

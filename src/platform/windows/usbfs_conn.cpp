@@ -70,7 +70,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
   if (!::SetCommTimeouts(dev_.handle(), &timeouts)) {
     const DWORD err = ::GetLastError();
     if (is_disconnect_error(err)) {
-      spdlog::error("SetCommTimeouts failed with disconnect error: {}", err);
+      spdlog::info("Device disconnected");
       connected_ = false;
       return -1;
     }
@@ -105,7 +105,7 @@ int UsbFsConnection::send(std::span<const std::uint8_t> data, unsigned retries) 
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
-        spdlog::warn("Device disconnected");
+        spdlog::info("Device disconnected");
         connected_ = false;
         return -1;
       }
@@ -145,7 +145,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
   if (!::SetCommTimeouts(dev_.handle(), &timeouts)) {
     const DWORD err = ::GetLastError();
     if (is_disconnect_error(err)) {
-      spdlog::error("SetCommTimeouts failed with disconnect error: {}", err);
+      spdlog::info("Device disconnected");
       connected_ = false;
       return -1;
     }
@@ -181,7 +181,7 @@ int UsbFsConnection::recv(std::span<std::uint8_t> data, unsigned retries) {
 
       const DWORD err = ::GetLastError();
       if (is_disconnect_error(err)) {
-        spdlog::warn("Device disconnected");
+        spdlog::info("Device disconnected");
         connected_ = false;
         return -1;
       }
