@@ -501,6 +501,17 @@ target_link_libraries(test_tcp_recv_buffered PRIVATE
 )
 add_test(NAME tcp_recv_buffered COMMAND test_tcp_recv_buffered)
 
+if (NOT WIN32)
+    add_executable(test_signal_shield
+        tests/test_signal_shield.cpp
+        src/platform/posix-common/signal_shield.cpp
+    )
+    target_include_directories(test_signal_shield PRIVATE src)
+    target_link_libraries(test_signal_shield PRIVATE Threads::Threads)
+    add_test(NAME signal_shield COMMAND test_signal_shield)
+    set_tests_properties(signal_shield PROPERTIES TIMEOUT 120)
+endif()
+
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp

@@ -17,24 +17,35 @@
 
 #include "signal_shield.hpp"
 
+#include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <cstddef>
 #include <utility>
 
 namespace brokkr::core {
 
 namespace {
 
+constexpr std::array kSignals{SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGTSTP};
+
+std::atomic_flag g_active;
+std::array<struct sigaction, kSignals.size()> g_old_actions{};
+
+int g_pipe_rd = -1;
+std::atomic<int> g_pipe_wr{-1};
+
 sigset_t make_set() {
   sigset_t set{};
   sigemptyset(&set);
 
-  sigaddset(&set, SIGINT);
-  sigaddset(&set, SIGTERM);
-  sigaddset(&set, SIGHUP);
-  sigaddset(&set, SIGQUIT);
-  sigaddset(&set, SIGTSTP);
+  for (const int signo : kSignals) sigaddset(&set, signo);
 
   return set;
 }
@@ -49,6 +60,33 @@ const char* sig_desc(int signo) {
     default: return "SIGNAL";
   }
 }
+
+bool open_pipe() {
+  if (g_pipe_rd >= 0) return true;
+
+  int fds[2];
+  if (::pipe(fds) != 0) return false;
+  for (const int fd : fds) (void)::fcntl(fd, F_SETFD, FD_CLOEXEC);
+  (void)::fcntl(fds[1], F_SETFL, O_NONBLOCK);
+
+  g_pipe_rd = fds[0];
+  g_pipe_wr.store(fds[1]);
+  return true;
+}
+
+void drain_pipe() {
+  pollfd pfd{g_pipe_rd, POLLIN, 0};
+  unsigned char b = 0;
+  while (::poll(&pfd, 1, 0) > 0 && ::read(g_pipe_rd, &b, 1) == 1) {}
+}
+
+void notify(unsigned char b) noexcept {
+  const int saved_errno = errno;
+  while (::write(g_pipe_wr.load(), &b, 1) < 0 && errno == EINTR) {}
+  errno = saved_errno;
+}
+
+void on_signal(int signo) { notify(static_cast<unsigned char>(signo)); }
 
 } // namespace
 
@@ -78,9 +116,12 @@ void SignalShield::stop_and_restore_() noexcept {
   if (active_) {
     watcher_.request_stop();
 
-    ::pthread_kill(watcher_.native_handle(), SIGTERM);
+    notify(0);
 
     if (watcher_.joinable()) watcher_.join();
+
+    for (std::size_t i = 0; i < kSignals.size(); ++i) (void)::sigaction(kSignals[i], &g_old_actions[i], nullptr);
+    g_active.clear();
     active_ = false;
   }
 
@@ -93,12 +134,22 @@ void SignalShield::stop_and_restore_() noexcept {
 std::optional<SignalShield> SignalShield::enable(Callback cb) {
   ::signal(SIGPIPE, SIG_IGN);
 
+  if (g_active.test_and_set()) return std::nullopt;
+
   const sigset_t set = make_set();
 
   sigset_t old{};
-  if (::pthread_sigmask(SIG_BLOCK, &set, &old) != 0) {
+  if (!open_pipe() || ::pthread_sigmask(SIG_BLOCK, &set, &old) != 0) {
+    g_active.clear();
     return std::nullopt;
   }
+  drain_pipe();
+
+  struct sigaction sa {};
+  sa.sa_handler = on_signal;
+  sa.sa_flags = SA_RESTART;
+  sigfillset(&sa.sa_mask);
+  for (std::size_t i = 0; i < kSignals.size(); ++i) (void)::sigaction(kSignals[i], &sa, &g_old_actions[i]);
 
   SignalShield sh(std::move(cb));
   sh.active_ = true;
@@ -106,15 +157,17 @@ std::optional<SignalShield> SignalShield::enable(Callback cb) {
   sh.have_old_mask_ = true;
 
   sh.watcher_ = std::jthread([cb2 = sh.cb_](std::stop_token st) mutable {
-    sigset_t waitset = make_set();
+    const sigset_t waitset = make_set();
+    (void)::pthread_sigmask(SIG_UNBLOCK, &waitset, nullptr);
+
     int count = 0;
 
     for (;;) {
-      int signo = 0;
-      const int r = ::sigwait(&waitset, &signo);
-      if (r != 0) continue;
+      unsigned char signo = 0;
+      const ssize_t r = ::read(g_pipe_rd, &signo, 1);
+      if (r < 0 && errno == EINTR) continue;
 
-      if (st.stop_requested()) break;
+      if (r != 1 || st.stop_requested()) break;
 
       ++count;
       if (cb2) cb2(sig_desc(signo), count);
