@@ -204,7 +204,7 @@ brokkr::core::Result<std::vector<UsbSession>> pick_usb(const CliArgs& args) {
     auto info = select_samsung_target(*args.target);
     if (!info) return brokkr::core::fail("Target sysname not found.");
     if (!is_odin_product(info->product)) {
-      return brokkr::core::fail("The device is not in Odin Mode, reboot to download mode first.");
+      return brokkr::core::fail("The device is not in Odin Mode. Reboot into Download Mode first.");
     }
     BRK_TRY(add(*info));
     return out;

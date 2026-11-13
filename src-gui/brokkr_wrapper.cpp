@@ -550,7 +550,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   cmbRebootAction->addItem("No Reboot");
   optLayout->addWidget(cmbRebootAction);
 
-  btnRebootDownloadMode_ = new QPushButton("Try to Reboot the device(s) into Download Mode", this);
+  btnRebootDownloadMode_ = new QPushButton("Try to Reboot into Download Mode", this);
   btnRebootDownloadMode_->setEnabled(false);
   optLayout->addWidget(btnRebootDownloadMode_);
 
@@ -2103,9 +2103,9 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
     box.setText(text + "\n\n" + unlock_screen_notice());
 
     auto* ok_btn = box.addButton(QMessageBox::Ok);
-    auto* reboot_btn = box.addButton("Try to Reboot them into Download Mode", QMessageBox::ActionRole);
+    auto* reboot_btn = box.addButton("Try to Reboot into Download Mode", QMessageBox::ActionRole);
     QAbstractButton* ignore_btn = nullptr;
-    if (allowIgnore) ignore_btn = box.addButton("Ignore them", QMessageBox::AcceptRole);
+    if (allowIgnore) ignore_btn = box.addButton("Ignore", QMessageBox::AcceptRole);
 
     box.setDefaultButton(qobject_cast<QPushButton*>(ok_btn));
     box.exec();
@@ -2120,7 +2120,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
   const QString tgt = editTarget ? editTarget->text().trimmed() : QString{};
   if (!tgt.isEmpty()) {
     if (auto one = select_samsung_target(tgt); one && !is_odin_product(one->product)) {
-      return show_odin_popup("The device is not in Odin Mode, reboot to download mode first.", false);
+      return show_odin_popup("The device is not in Odin Mode. Reboot into Download Mode first.", false);
     }
   }
 
@@ -2142,7 +2142,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
   const int total = static_cast<int>(all_samsung.size());
 
   if (total == 1) {
-    return show_odin_popup("The device is not in Odin Mode, reboot to download mode first.", false);
+    return show_odin_popup("The device is not in Odin Mode. Reboot into Download Mode first.", false);
   }
 
   if (odin_count == 0) {
