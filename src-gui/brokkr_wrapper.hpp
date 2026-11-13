@@ -46,6 +46,7 @@ class QSocketNotifier;
 #include <IOKit/usb/IOUSBLib.h>
 #endif
 
+class DeviceGridArea;
 class DeviceSquare;
 
 class BrokkrWrapper : public QWidget {
@@ -96,11 +97,11 @@ class BrokkrWrapper : public QWidget {
 
   void setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit);
 
-  void rebuildDeviceBoxes_(int boxCount, bool singleRow);
+  void rebuildDeviceBoxes_(int boxCount);
   void refreshDeviceBoxes_();
   void updateActionButtons_();
   void updateRebootDownloadButton_();
-  void applyWindowHeightToContents_();
+  void fitWindowToDeviceRows_();
 
   bool canRunStart_(QString* whyNot = nullptr) const;
   bool confirmOdinModeDevicesForStart_();
@@ -137,7 +138,7 @@ class BrokkrWrapper : public QWidget {
  private:
   static constexpr int kBoxesNormal = 8;
   static constexpr int kMassDlMaxBoxes = 24;
-  static constexpr int kBoxesColsMany = 8;
+  static constexpr int kBoxesPerRow = 8;
 
   QStringList connectedDevices_;
   std::vector<brokkr::app::DeviceSession> sessions_;
@@ -148,9 +149,11 @@ class BrokkrWrapper : public QWidget {
   bool overflowDevices_ = false;
   std::size_t overflowCount_ = 0;
 
-  int baseWindowHeight_ = 600;
+  int heightBeforeRows_ = 0;
+  int heightWithRows_ = 0;
 
   QGroupBox* idComGroup_ = nullptr;
+  DeviceGridArea* deviceArea_ = nullptr;
   QGridLayout* idComLayout_ = nullptr;
   QWidget* headerWidget_ = nullptr;
   QWidget* ledContainer_ = nullptr;

@@ -23,15 +23,18 @@
 #include <QPalette>
 #include <QPen>
 #include <QRegularExpression>
+#include <QScreen>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSet>
 #include <QSizePolicy>
-#include <QSpacerItem>
 #include <QStringList>
 #include <QTabWidget>
 #include <QTextCursor>
 #include <QUrl>
 #include <QVariantAnimation>
 #include <QVBoxLayout>
+#include <QWindow>
 
 #include <algorithm>
 #include <atomic>
@@ -200,6 +203,39 @@ class DeviceSquare final : public QWidget {
   QColor bot_;
   QString text_;
   QVariantAnimation anim_{};
+};
+
+class DeviceGridArea final : public QScrollArea {
+ public:
+  explicit DeviceGridArea(QWidget* grid, QWidget* parent = nullptr) : QScrollArea(parent) {
+    setFrameShape(QFrame::NoFrame);
+    setFocusPolicy(Qt::NoFocus);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    setWidgetResizable(true);
+    setWidget(grid);
+    viewport()->setAutoFillBackground(false);
+    grid->setAutoFillBackground(false);
+  }
+
+  QSize sizeHint() const override { return widget()->sizeHint(); }
+
+  QSize minimumSizeHint() const override {
+    const QSize all = widget()->minimumSizeHint();
+    const QLayout* rows = widget()->layout();
+    if (!rows || rows->count() == 0) return all;
+
+    const QMargins m = rows->contentsMargins();
+    const int oneRow = rows->itemAt(0)->minimumSize().height() + m.top() + m.bottom();
+    if (oneRow >= all.height()) return all;
+    return {all.width() + verticalScrollBar()->sizeHint().width(), oneRow};
+  }
+
+ protected:
+  bool event(QEvent* e) override {
+    if (e->type() == QEvent::LayoutRequest) updateGeometry();
+    return QScrollArea::event(e);
+  }
 };
 
 namespace {
@@ -411,7 +447,6 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
   apply_windows_titlebar_theme(reinterpret_cast<HWND>(winId()),
                                palette().color(QPalette::Window).lightness() < 128);
 #endif
-  baseWindowHeight_ = height();
 
   spdlog::set_default_logger(make_qt_logger(this));
 
@@ -460,11 +495,18 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     idComGroup_->setPalette(pal);
     idComGroup_->setAutoFillBackground(true);
   }
-  idComLayout_ = new QGridLayout(idComGroup_);
+  auto* deviceGrid = new QWidget();
+  idComLayout_ = new QGridLayout(deviceGrid);
   idComLayout_->setSpacing(6);
   idComLayout_->setContentsMargins(8, 8, 8, 8);
+  for (int col = 0; col < kBoxesPerRow; ++col) idComLayout_->setColumnStretch(col, 1);
 
-  rebuildDeviceBoxes_(kBoxesNormal, true);
+  deviceArea_ = new DeviceGridArea(deviceGrid, idComGroup_);
+  auto* idComOuter = new QVBoxLayout(idComGroup_);
+  idComOuter->setContentsMargins(0, 0, 0, 0);
+  idComOuter->addWidget(deviceArea_);
+
+  rebuildDeviceBoxes_(kBoxesNormal);
   mainLayout->addWidget(idComGroup_);
 
   auto* middleLayout = new QHBoxLayout();
@@ -596,16 +638,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       return;
     }
 
-    if (!checked) {
-      rebuildDeviceBoxes_(kBoxesNormal, true);
-      layout()->invalidate();
-      layout()->activate();
-      setMinimumHeight(0);
-      resize(width(), baseWindowHeight_);
-    } else {
-      rebuildDeviceBoxes_(kMassDlMaxBoxes, false);
-      applyWindowHeightToContents_();
-    }
+    rebuildDeviceBoxes_(checked ? kMassDlMaxBoxes : kBoxesNormal);
 
     refreshDeviceBoxes_();
     updateActionButtons_();
@@ -632,11 +665,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
       shown_.clear();
       connectedDevices_.clear();
 
-      rebuildDeviceBoxes_(1, true);
-      layout()->invalidate();
-      layout()->activate();
-      setMinimumHeight(0);
-      resize(width(), baseWindowHeight_);
+      rebuildDeviceBoxes_(1);
 
       startWirelessListener_();
     } else {
@@ -644,11 +673,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
       if (btnManyDevices_) btnManyDevices_->setEnabled(true);
 
-      rebuildDeviceBoxes_(kBoxesNormal, true);
-      layout()->invalidate();
-      layout()->activate();
-      setMinimumHeight(0);
-      resize(width(), baseWindowHeight_);
+      rebuildDeviceBoxes_(kBoxesNormal);
 
       if (usbStateSaved_) {
         slots_ = std::move(usbSlots_);
@@ -1850,15 +1875,30 @@ void BrokkrWrapper::showResults_() {
   }
 }
 
-void BrokkrWrapper::applyWindowHeightToContents_() {
-  if (!layout()) return;
-  layout()->invalidate();
-  layout()->activate();
-  const int want = layout()->sizeHint().height() + 30;
-  if (height() < want) resize(width(), want);
+void BrokkrWrapper::fitWindowToDeviceRows_() {
+  Qt::WindowStates state = windowState();
+  if (const QWindow* handle = windowHandle()) state |= handle->windowStates();
+  const bool sizeIsOurs = !(state & (Qt::WindowMinimized | Qt::WindowMaximized | Qt::WindowFullScreen));
+
+  if (devSquares_.size() <= kBoxesPerRow) {
+    if (sizeIsOurs && heightWithRows_ > 0 && height() == heightWithRows_) resize(width(), heightBeforeRows_);
+    heightBeforeRows_ = heightWithRows_ = 0;
+    return;
+  }
+
+  if (!sizeIsOurs || heightWithRows_ > 0) return;
+
+  const QMargins frame = windowHandle() ? windowHandle()->frameMargins() : QMargins();
+  const int tallest = screen()->availableGeometry().height() - frame.top() - frame.bottom();
+  const int target = std::min(sizeHint().height(), tallest);
+  if (target <= height()) return;
+
+  heightBeforeRows_ = height();
+  heightWithRows_ = target;
+  resize(width(), target);
 }
 
-void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
+void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount) {
   while (idComLayout_->count() > 0) {
     QLayoutItem* it = idComLayout_->takeAt(0);
     if (!it) break;
@@ -1866,28 +1906,13 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
     delete it;
   }
 
-  for (int c = 0; c < kMassDlMaxBoxes + 2; ++c) idComLayout_->setColumnStretch(c, 0);
-  for (int r = 0; r < (kMassDlMaxBoxes / std::max(1, kBoxesColsMany)) + 2; ++r) idComLayout_->setRowStretch(r, 0);
-
   comBoxes.clear();
   devSquares_.clear();
 
-  const bool singleCellNoStretch = (singleRow && boxCount == 1);
+  QWidget* grid = idComLayout_->parentWidget();
 
-  int fixedCellW = -1;
-  if (singleCellNoStretch) {
-    const int cols = kBoxesNormal;
-    int sp = idComLayout_->horizontalSpacing();
-    if (sp < 0) sp = idComLayout_->spacing();
-    const auto m = idComLayout_->contentsMargins();
-    const int avail = std::max(0, idComGroup_->contentsRect().width() - m.left() - m.right());
-    const int totalSp = std::max(0, (cols - 1) * std::max(0, sp));
-    fixedCellW = (cols > 0) ? ((avail - totalSp) / cols) : -1;
-    if (fixedCellW < 30) fixedCellW = 30;
-  }
-
-  auto make_cell = [&](int row, int col) {
-    auto* cell = new QWidget(idComGroup_);
+  for (int i = 0; i < boxCount; ++i) {
+    auto* cell = new QWidget(grid);
     auto* v = new QVBoxLayout(cell);
     v->setContentsMargins(0, 0, 0, 0);
     v->setSpacing(2);
@@ -1909,49 +1934,20 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
     boxFont.setPointSize(9);
     box->setFont(boxFont);
 
-    if (singleCellNoStretch && fixedCellW > 0) {
-      cell->setFixedWidth(fixedCellW);
-      box->setFixedWidth(fixedCellW);
-      sq->setMinimumWidth(fixedCellW);
-      sq->setMaximumWidth(fixedCellW);
-    }
-
     v->addWidget(sq);
     v->addWidget(box);
 
-    idComLayout_->addWidget(cell, row, col);
+    idComLayout_->addWidget(cell, i / kBoxesPerRow, i % kBoxesPerRow);
+    cell->show();
 
     devSquares_.append(sq);
     comBoxes.append(box);
-  };
-
-  if (singleRow) {
-    if (boxCount > 0) make_cell(0, 0);
-
-    if (singleCellNoStretch) {
-      idComLayout_->setColumnStretch(0, 0);
-      idComLayout_->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum), 0, 1);
-      idComLayout_->setColumnStretch(1, 1);
-    } else {
-      for (int col = 1; col < boxCount; ++col) make_cell(0, col);
-      for (int col = 0; col < boxCount; ++col) idComLayout_->setColumnStretch(col, 1);
-    }
-
-    slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
-    slotActive_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
-    if (results_.size() < static_cast<std::size_t>(devSquares_.size()))
-      results_.resize(static_cast<std::size_t>(devSquares_.size()), brokkr::app::SlotResult::None);
-    updateSlots_(sessions_);
-    showResults_();
-    return;
   }
 
-  for (int c = 0; c < kBoxesColsMany; ++c) idComLayout_->setColumnStretch(c, 1);
-
-  for (int i = 0; i < boxCount; ++i) {
-    const int row = i / kBoxesColsMany;
-    const int col = i % kBoxesColsMany;
-    make_cell(row, col);
+  for (int col = boxCount; col < kBoxesPerRow; ++col) {
+    auto* filler = new QWidget(grid);
+    idComLayout_->addWidget(filler, 0, col);
+    filler->show();
   }
 
   slotFailed_.assign(static_cast<std::size_t>(devSquares_.size()), 0);
@@ -1960,6 +1956,11 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount, bool singleRow) {
     results_.resize(static_cast<std::size_t>(devSquares_.size()), brokkr::app::SlotResult::None);
   updateSlots_(sessions_);
   showResults_();
+
+  idComLayout_->activate();
+  deviceArea_->updateGeometry();
+  idComGroup_->updateGeometry();
+  fitWindowToDeviceRows_();
 }
 
 void BrokkrWrapper::refreshDeviceBoxes_() {
