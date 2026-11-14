@@ -17,14 +17,13 @@
 
 #include "platform/macos/sysfs_usb.hpp"
 
-#include <algorithm>
+#include "core/utils.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <charconv>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -122,11 +121,6 @@ std::optional<std::uint64_t> get_registry_entry_id(io_service_t service) {
   return id;
 }
 
-bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t>& allowed) {
-  if (allowed.empty()) return true;
-  return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
-}
-
 struct Match {
   UsbDeviceSysfsInfo info;
 };
@@ -156,7 +150,7 @@ void enumerate_class(const char* className, const EnumerateFilter& filter, std::
 
     spdlog::debug("Found USB device: Loc: 0x{:08x} (VID: 0x{:04x}, PID: 0x{:04x})", locationID, vendor, product);
 
-    if (vendor != filter.vendor || !product_allowed(product, filter.products)) {
+    if (vendor != filter.vendor || !brokkr::core::matches_filter_or_all<std::uint16_t>(filter.products, product)) {
       IOObjectRelease(service);
       continue;
     }
@@ -179,24 +173,6 @@ void enumerate_class(const char* className, const EnumerateFilter& filter, std::
   }
 
   IOObjectRelease(iter);
-}
-
-static std::optional<std::uint32_t> parse_u32_sysname(std::string_view sysname) {
-  while (!sysname.empty() && (sysname.front() == ' ' || sysname.front() == '\t')) sysname.remove_prefix(1);
-  while (!sysname.empty() &&
-         (sysname.back() == ' ' || sysname.back() == '\t' || sysname.back() == '\r' || sysname.back() == '\n'))
-    sysname.remove_suffix(1);
-
-  int base = 10;
-  if (sysname.size() >= 2 && sysname[0] == '0' && (sysname[1] == 'x' || sysname[1] == 'X')) {
-    base = 16;
-    sysname.remove_prefix(2);
-  }
-
-  std::uint32_t v = 0;
-  auto [ptr, ec] = std::from_chars(sysname.data(), sysname.data() + sysname.size(), v, base);
-  if (ec != std::errc{} || ptr != sysname.data() + sysname.size()) return std::nullopt;
-  return v;
 }
 
 } // namespace
@@ -247,7 +223,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
 }
 
 std::optional<UsbDeviceSysfsInfo> find_by_sysname(std::string_view sysname) {
-  const auto loc = parse_u32_sysname(sysname);
+  const auto loc = brokkr::core::parse_u32_auto(sysname);
   if (!loc) {
     spdlog::debug("Invalid sysname format: '{}'", sysname);
     return std::nullopt;

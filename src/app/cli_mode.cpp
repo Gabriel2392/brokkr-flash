@@ -24,19 +24,19 @@
 #include "app/samsung_usb.hpp"
 #include "core/path_utf8.hpp"
 #include "core/status.hpp"
+#include "core/utils.hpp"
 #include "io/source.hpp"
 #include "platform/platform_all.hpp"
 #include "protocol/odin/flash.hpp"
-#include "protocol/odin/group_flasher.hpp"
+#include "protocol/odin/image.hpp"
+#include "protocol/odin/pit.hpp"
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <atomic>
-#include <charconv>
 #include <chrono>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -134,15 +134,8 @@ std::shared_ptr<const std::vector<std::byte>> load_pit_if_needed(const CliArgs& 
 }
 
 std::string map_global_error_to_cli_message(const std::string& err) {
-  const auto has_ic = [&](std::string_view needle) {
-    auto it = std::search(err.begin(), err.end(), needle.begin(), needle.end(), [](char a, char b) {
-      return static_cast<char>(std::tolower(static_cast<unsigned char>(a))) ==
-             static_cast<char>(std::tolower(static_cast<unsigned char>(b)));
-    });
-    return it != err.end();
-  };
-
-  if (has_ic("mismatch across devices") || has_ic("differs across devices")) {
+  if (brokkr::core::contains_ci(err, "mismatch across devices") ||
+      brokkr::core::contains_ci(err, "differs across devices")) {
     return "The connected devices do not match!";
   }
 
@@ -338,26 +331,20 @@ int run_flash_cli(const CliArgs& args) {
     // CLI intentionally suppresses percentage/progress bars.
   };
   ui.on_error = [&](const std::string& s) {
-    constexpr std::string_view kDevFailPrefix = "DEVFAIL idx=";
-    if (s.rfind(kDevFailPrefix, 0) == 0) {
+    if (const auto df = brokkr::odin::parse_devfail(s)) {
       saw_per_device_fail.store(true, std::memory_order_relaxed);
-      const auto sp = s.find(' ', kDevFailPrefix.size());
-      if (sp != std::string::npos) {
-        const std::string reason = s.substr(sp + 1);
+      if (df->has_reason) {
+        const std::string reason(df->reason);
         {
           std::lock_guard lk(devfail_mtx);
           devfail_reasons.insert(reason);
         }
 
-        const char* const begin = s.data() + kDevFailPrefix.size();
-        const char* const end = s.data() + sp;
-        int idx = 0;
-        const auto [ptr, ec] = std::from_chars(begin, end, idx);
-        if (ec == std::errc{} && ptr == end && idx >= 0) {
+        if (df->index >= 0) {
           if (reason.empty())
-            spdlog::error("FAIL! (Device {})", idx);
+            spdlog::error("FAIL! (Device {})", df->index);
           else
-            spdlog::error("FAIL! (Device {}) {}", idx, reason);
+            spdlog::error("FAIL! (Device {}) {}", df->index, reason);
           return;
         }
       }

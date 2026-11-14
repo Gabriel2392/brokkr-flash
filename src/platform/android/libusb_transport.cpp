@@ -189,16 +189,12 @@ int LibusbUsbTransport::send(std::span<const std::uint8_t> data, unsigned retrie
     }
 
     if (rc == LIBUSB_ERROR_TIMEOUT) {
-      // A torn-down fd returns -ETIMEDOUT instantly; without this yield the
-      // loop starves system_server and freezes the device.
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       continue;
     }
 
     if (rc == LIBUSB_ERROR_NO_DEVICE || rc == LIBUSB_ERROR_IO || rc == LIBUSB_ERROR_NOT_FOUND ||
         rc == LIBUSB_ERROR_PIPE) {
-      // PIPE is terminal: clearing a halt on a yanked device can hang the
-      // ioctl path long enough to freeze the phone.
       spdlog::info("Device disconnected");
       connected_.store(false, std::memory_order_release);
       return -1;

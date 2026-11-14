@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "core/str.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +33,7 @@ namespace brokkr::odin::pit {
 inline constexpr std::int32_t PIT_MAGIC = 0x12349876;
 
 #pragma pack(push, 1)
-struct PitHeaderWire {
+struct PitHeaderRaw {
   std::int32_t magic;
   std::int32_t count;
   std::int8_t com_tar2[8];
@@ -41,10 +42,10 @@ struct PitHeaderWire {
   std::uint16_t reserved;
 };
 #pragma pack(pop)
-static_assert(sizeof(PitHeaderWire) == 28);
+static_assert(sizeof(PitHeaderRaw) == 28);
 
 #pragma pack(push, 1)
-struct PartitionInfoWire {
+struct PartitionInfoRaw {
   std::int32_t binType;
   std::int32_t devType;
   std::int32_t id;
@@ -61,7 +62,7 @@ struct PartitionInfoWire {
   std::int8_t deltaName[32];
 };
 #pragma pack(pop)
-static_assert(sizeof(PartitionInfoWire) == 4 * 9 + 32 * 3);
+static_assert(sizeof(PartitionInfoRaw) == 4 * 9 + 32 * 3);
 
 struct Partition {
   std::int32_t id = 0;
@@ -73,7 +74,7 @@ struct Partition {
   std::int32_t block_bytes = 0;
   std::int32_t block_size = 0;
   std::uint64_t file_size = 0;
-  std::int32_t wire_block_size = 0;
+  std::int32_t raw_block_size = 0;
 
   std::string name;
   std::string file_name;
@@ -95,3 +96,9 @@ struct PitTable {
 brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept;
 
 } // namespace brokkr::odin::pit
+
+namespace brokkr::odin {
+
+inline bool is_pit_name(std::string_view base) noexcept { return brokkr::core::ends_with_ci(base, ".pit"); }
+
+} // namespace brokkr::odin

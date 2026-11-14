@@ -21,7 +21,7 @@
 
 #include "app/cli_mode.hpp"
 #include "platform/platform_all.hpp"
-#include "brokkr_wrapper.hpp"
+#include "brokkr_gui.hpp"
 
 #if defined(_WIN32)
   #include <windows.h>
@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
     return 2;
   }
 
-  BrokkrWrapper window;
+  BrokkrGui window;
   window.show();
 
   if (const QString shotPath = qEnvironmentVariable("BROKKR_SCREENSHOT"); !shotPath.isEmpty()) {

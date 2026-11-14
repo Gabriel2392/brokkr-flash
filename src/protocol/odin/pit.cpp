@@ -19,6 +19,7 @@
 
 #include "core/endian.hpp"
 #include "core/str.hpp"
+#include "core/utils.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -32,29 +33,10 @@ namespace brokkr::odin::pit {
 
 namespace {
 
-static std::string trim_nul_string(const std::int8_t* p, std::size_t n) {
-  const char* begin = reinterpret_cast<const char*>(p);
-  const char* end = begin + n;
-  const char* nul = static_cast<const char*>(std::memchr(begin, '\0', n));
-  return std::string(begin, nul ? nul : end);
-}
-
-static std::string trim_fixed_field(const std::int8_t* p, std::size_t n) {
-  std::string s = trim_nul_string(p, n);
-  while (!s.empty()) {
-    const unsigned char c = static_cast<unsigned char>(s.back());
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-      s.pop_back();
-    else
-      break;
-  }
-  return s;
-}
-
 static std::int32_t block_bytes_for_dev_type(std::int32_t dev_type) noexcept { return (dev_type == 8) ? 4096 : 512; }
 
 struct RawEntry {
-  PartitionInfoWire w{};
+  PartitionInfoRaw w{};
   std::string name;
   std::string file_name;
 };
@@ -62,9 +44,9 @@ struct RawEntry {
 } // namespace
 
 brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept {
-  if (bytes.size() < sizeof(PitHeaderWire)) return brokkr::core::fail("PIT parse: buffer too small for header");
+  if (bytes.size() < sizeof(PitHeaderRaw)) return brokkr::core::fail("PIT parse: buffer too small for header");
 
-  PitHeaderWire hdr{};
+  PitHeaderRaw hdr{};
   std::memcpy(&hdr, bytes.data(), sizeof(hdr));
 
   hdr.magic = brokkr::core::le_to_host(hdr.magic);
@@ -76,20 +58,20 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   if (hdr.count < 0) return brokkr::core::fail("PIT parse: negative partition count");
 
   const std::size_t count = static_cast<std::size_t>(hdr.count);
-  const std::size_t required = sizeof(PitHeaderWire) + count * sizeof(PartitionInfoWire);
+  const std::size_t required = sizeof(PitHeaderRaw) + count * sizeof(PartitionInfoRaw);
   if (bytes.size() < required) return brokkr::core::fail("PIT parse: buffer smaller than declared partition table");
 
   PitTable out;
-  out.com_tar2 = trim_fixed_field(hdr.com_tar2, sizeof(hdr.com_tar2));
-  out.cpu_bl_id = trim_fixed_field(hdr.cpu_bl_id, sizeof(hdr.cpu_bl_id));
+  out.com_tar2 = brokkr::core::trim_cstr_field(hdr.com_tar2);
+  out.cpu_bl_id = brokkr::core::trim_cstr_field(hdr.cpu_bl_id);
   out.lu_count = hdr.lu_count;
 
   std::vector<RawEntry> raw;
   raw.reserve(count);
 
-  std::size_t off = sizeof(PitHeaderWire);
-  for (std::size_t i = 0; i < count; ++i, off += sizeof(PartitionInfoWire)) {
-    PartitionInfoWire w{};
+  std::size_t off = sizeof(PitHeaderRaw);
+  for (std::size_t i = 0; i < count; ++i, off += sizeof(PartitionInfoRaw)) {
+    PartitionInfoRaw w{};
     std::memcpy(&w, bytes.data() + off, sizeof(w));
 
     w.binType = brokkr::core::le_to_host(w.binType);
@@ -104,8 +86,8 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
 
     RawEntry r;
     r.w = w;
-    r.name = trim_nul_string(w.name, sizeof(w.name));
-    r.file_name = trim_nul_string(w.fileName, sizeof(w.fileName));
+    r.name = brokkr::core::extract_cstr(w.name);
+    r.file_name = brokkr::core::extract_cstr(w.fileName);
     raw.push_back(std::move(r));
   }
 
@@ -117,7 +99,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
   }
 
   const bool blockSize_is_begin_block = (max_blockSize > 4096) && (max_offset <= 4096);
-  auto begin_block_of = [&](const PartitionInfoWire& w) -> std::int32_t {
+  auto begin_block_of = [&](const PartitionInfoRaw& w) -> std::int32_t {
     return blockSize_is_begin_block ? w.blockSize : w.offset;
   };
 
@@ -130,7 +112,7 @@ brokkr::core::Result<PitTable> parse(std::span<const std::byte> bytes) noexcept 
     p.bin_type = r.w.binType;
     p.dev_type = r.w.devType;
     p.attribute = r.w.attribute;
-    p.wire_block_size = r.w.blockSize;
+    p.raw_block_size = r.w.blockSize;
 
     p.begin_block = begin_block_of(r.w);
     p.block_bytes = block_bytes_for_dev_type(p.dev_type);

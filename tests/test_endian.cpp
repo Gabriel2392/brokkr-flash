@@ -65,7 +65,7 @@ static void test_roundtrip_i32() {
   check_eq("roundtrip_i32", rt, v);
 }
 
-// ----- wire-byte verification -----
+// ----- raw byte verification -----
 
 static void test_host_to_le_bytes_u32() {
   constexpr std::uint32_t v = 0x04030201;
@@ -74,7 +74,7 @@ static void test_host_to_le_bytes_u32() {
   unsigned char bytes[4];
   std::memcpy(bytes, &le, 4);
 
-  // LE wire bytes must be 01 02 03 04 regardless of host endianness
+  // LE serialized bytes must be 01 02 03 04 regardless of host endianness
   bool ok = bytes[0] == 0x01 && bytes[1] == 0x02 && bytes[2] == 0x03 && bytes[3] == 0x04;
   check_eq("host_to_le_bytes_u32", ok, true);
 }

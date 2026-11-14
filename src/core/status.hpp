@@ -18,6 +18,8 @@
 #pragma once
 
 #include <expected>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -37,6 +39,29 @@ template <class... Args>
 inline std::unexpected<Error> failf(fmt::format_string<Args...> f, Args&&... args) {
   return fail(fmt::format(f, std::forward<Args>(args)...));
 }
+
+struct FirstError {
+  void set(Status s) noexcept {
+    if (s) return;
+    std::lock_guard lk(m);
+    if (e) return;
+    e = std::move(s.error());
+  }
+
+  Status status_or_ok() noexcept {
+    std::lock_guard lk(m);
+    return e ? Status{std::unexpect, *e} : Status{};
+  }
+
+  bool has_error() noexcept {
+    std::lock_guard lk(m);
+    return e.has_value();
+  }
+
+ private:
+  std::mutex m;
+  std::optional<Error> e;
+};
 
 } // namespace brokkr::core
 

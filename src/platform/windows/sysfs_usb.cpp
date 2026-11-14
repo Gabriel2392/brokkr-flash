@@ -17,8 +17,9 @@
 
 #include "sysfs_usb.hpp"
 
+#include "core/utils.hpp"
+
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -26,8 +27,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
-#include <charconv>
 
 // clang-format off
 #include <windows.h>
@@ -64,11 +63,7 @@ struct PortState {
 std::unordered_map<std::string, PortState> g_ports;
 std::uint64_t g_next_id = 1;
 
-std::string port_key(std::string_view port) {
-  std::string normalized(port);
-  for (auto& c : normalized) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  return normalized;
-}
+std::string port_key(std::string_view port) { return brokkr::core::to_upper_ascii(port); }
 
 std::uint64_t port_id(std::string_view port, std::uint64_t last_arrival) {
   std::lock_guard lock(g_ports_mtx);
@@ -150,8 +145,7 @@ bool port_exists(const char* port) {
 }
 
 uint16_t extract_hex4(const std::string& str, const std::string& key) {
-  std::string lower_str = str;
-  for (char& c : lower_str) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const std::string lower_str = brokkr::core::to_lower_ascii(str);
 
   const size_t pos0 = lower_str.find(key);
   if (pos0 == std::string::npos) return 0;
@@ -159,11 +153,9 @@ uint16_t extract_hex4(const std::string& str, const std::string& key) {
   const size_t pos = pos0 + key.length();
   if (pos + 4 > lower_str.size()) return 0;
 
-  unsigned v = 0;
-  auto sv = std::string_view(lower_str).substr(pos, 4);
-  auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), v, 16);
-  if (ec != std::errc{} || ptr != sv.data() + sv.size() || v > 0xFFFFu) return 0;
-  return static_cast<uint16_t>(v);
+  uint16_t v = 0;
+  if (!brokkr::core::parse_int_exact(std::string_view(lower_str).substr(pos, 4), v, 16)) return 0;
+  return v;
 }
 
 std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
@@ -194,8 +186,7 @@ std::vector<UsbDeviceInfo> enumerate_usb_devices_windows(uint16_t target_vid,
     if (vid == 0) continue;
 
     const bool match_vid = (target_vid == 0 || vid == target_vid);
-    const bool match_pid = allowed_pids.empty() ||
-                           (std::find(allowed_pids.begin(), allowed_pids.end(), pid) != allowed_pids.end());
+    const bool match_pid = brokkr::core::matches_filter_or_all<uint16_t>(allowed_pids, pid);
     if (!match_vid || !match_pid) continue;
 
     HKEY hKey = SetupDiOpenDevRegKey(hDevInfo, &devInfoData, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);

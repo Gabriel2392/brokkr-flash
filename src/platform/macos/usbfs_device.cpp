@@ -17,7 +17,8 @@
 
 #include "platform/macos/usbfs_device.hpp"
 
-#include <charconv>
+#include "core/utils.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -43,23 +44,6 @@ namespace {
 
 static brokkr::core::Status fail_iokit(const char* what, kern_return_t kr) noexcept {
   return brokkr::core::failf("{}: IOKit error 0x{:08x}", what, static_cast<unsigned>(kr));
-}
-
-static std::optional<std::uint32_t> parse_location_id(std::string_view s) noexcept {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n'))
-    s.remove_suffix(1);
-
-  int base = 10;
-  if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-    base = 16;
-    s.remove_prefix(2);
-  }
-
-  std::uint32_t v = 0;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, base);
-  if (ec != std::errc{} || ptr != s.data() + s.size()) return std::nullopt;
-  return v;
 }
 
 } // namespace
@@ -95,7 +79,7 @@ UsbFsDevice& UsbFsDevice::operator=(UsbFsDevice&& o) noexcept {
 brokkr::core::Status UsbFsDevice::open_and_init() noexcept {
   close();
 
-  const auto loc = parse_location_id(devnode_);
+  const auto loc = brokkr::core::parse_u32_auto(devnode_);
   if (!loc) return brokkr::core::failf("Invalid macOS USB locationID sysname: '{}'", devnode_);
 
   io_service_t service = find_device_by_location(*loc);

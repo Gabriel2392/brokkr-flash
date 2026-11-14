@@ -17,9 +17,9 @@
 
 #include "app/md5_xxh3_cache.hpp"
 #include "core/path_utf8.hpp"
+#include "core/utils.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cstdio>
 #include <fstream>
 #include <optional>
@@ -52,38 +52,6 @@ struct ParsedCacheFile {
   bool has_header = false;
   bool saw_corruption = false;
 };
-
-int hex_nibble(unsigned char c) noexcept {
-  if (c >= '0' && c <= '9') return (c - '0');
-  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-  return -1;
-}
-
-bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>& out) noexcept {
-  if (hex32.size() != kMd5HexChars) return false;
-  for (std::size_t i = 0; i < out.size(); ++i) {
-    const int hi = hex_nibble(static_cast<unsigned char>(hex32[2 * i + 0]));
-    const int lo = hex_nibble(static_cast<unsigned char>(hex32[2 * i + 1]));
-    if (hi < 0 || lo < 0) return false;
-    out[i] = static_cast<unsigned char>((hi << 4) | lo);
-  }
-  return true;
-}
-
-bool parse_u64(std::string_view sv, std::uint64_t& out) noexcept {
-  const char* begin = sv.data();
-  const char* end = sv.data() + sv.size();
-  auto [ptr, ec] = std::from_chars(begin, end, out, 10);
-  return ec == std::errc{} && ptr == end;
-}
-
-bool parse_u64_hex(std::string_view sv, std::uint64_t& out) noexcept {
-  const char* begin = sv.data();
-  const char* end = sv.data() + sv.size();
-  auto [ptr, ec] = std::from_chars(begin, end, out, 16);
-  return ec == std::errc{} && ptr == end;
-}
 
 std::uint64_t next_touch(const std::vector<Md5Xxh3CacheEntry>& entries) noexcept {
   std::uint64_t best = 0;
@@ -208,19 +176,19 @@ brokkr::core::Result<ParsedCacheFile> parse_cache_file(const std::filesystem::pa
     }
 
     Md5Xxh3CacheEntry entry;
-    if (!parse_u64(touched_str, entry.touched)) {
+    if (!brokkr::core::parse_int_exact(touched_str, entry.touched, 10)) {
       parsed.saw_corruption = true;
       continue;
     }
-    if (!parse_u64(bytes_str, entry.bytes_to_hash)) {
+    if (!brokkr::core::parse_int_exact(bytes_str, entry.bytes_to_hash, 10)) {
       parsed.saw_corruption = true;
       continue;
     }
-    if (!parse_md5_hex(md5_str, entry.md5)) {
+    if (!brokkr::core::parse_md5_hex(md5_str, entry.md5)) {
       parsed.saw_corruption = true;
       continue;
     }
-    if (xxh3_str.size() != kXxh3HexChars || !parse_u64_hex(xxh3_str, entry.xxh3_64)) {
+    if (xxh3_str.size() != kXxh3HexChars || !brokkr::core::parse_int_exact(xxh3_str, entry.xxh3_64, 16)) {
       parsed.saw_corruption = true;
       continue;
     }
@@ -272,15 +240,7 @@ brokkr::core::Status replace_cache_file(const std::filesystem::path& src,
 
 } // namespace
 
-std::string md5_hex32(const std::array<unsigned char, 16>& digest) {
-  static constexpr char hex[] = "0123456789abcdef";
-  std::string out(kMd5HexChars, '0');
-  for (std::size_t i = 0; i < digest.size(); ++i) {
-    out[2 * i + 0] = hex[(digest[i] >> 4) & 0x0F];
-    out[2 * i + 1] = hex[digest[i] & 0x0F];
-  }
-  return out;
-}
+std::string md5_hex32(const std::array<unsigned char, 16>& digest) { return brokkr::core::format_hex_lower(digest); }
 
 std::string xxh3_hex16(std::uint64_t digest) { return fmt::format("{:016x}", digest); }
 

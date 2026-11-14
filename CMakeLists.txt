@@ -194,6 +194,7 @@ endif()
 add_library(brokkr-lib INTERFACE)
 target_sources(brokkr-lib INTERFACE
     src/core/thread_pool.cpp
+    src/core/utils.cpp
     src/io/random_access.cpp
     src/io/sequential_reader.cpp
     src/io/tar.cpp
@@ -203,10 +204,10 @@ target_sources(brokkr-lib INTERFACE
     src/third_party/xxhash/xxhash.c
     src/third_party/xxhash/xxhash_dispatch.c
     src/third_party/lz4/lz4.c
-    src/protocol/odin/odin_cmd.cpp
+    src/protocol/odin/cmd.cpp
     src/protocol/odin/pit.cpp
+    src/protocol/odin/image.cpp
     src/protocol/odin/flash.cpp
-    src/protocol/odin/group_flasher.cpp
     src/protocol/odin/pit_transfer.cpp
     src/app/md5_xxh3_cache.cpp
     src/app/md5_verify.cpp
@@ -307,8 +308,8 @@ if (WIN32)
         src/app/cli_mode.cpp
         src/app/download_mode.hpp
         src/app/download_mode.cpp
-        src-gui/brokkr_wrapper.hpp
-        src-gui/brokkr_wrapper.cpp
+        src-gui/brokkr_gui.hpp
+        src-gui/brokkr_gui.cpp
         assets/icon.rc
         assets/brokkr.qrc
     )
@@ -321,8 +322,8 @@ elseif (APPLE)
         src/app/cli_mode.cpp
         src/app/download_mode.hpp
         src/app/download_mode.cpp
-        src-gui/brokkr_wrapper.hpp
-        src-gui/brokkr_wrapper.cpp
+        src-gui/brokkr_gui.hpp
+        src-gui/brokkr_gui.cpp
         assets/brokkr.qrc
         assets/brokkr.icns
     )
@@ -333,8 +334,8 @@ else()
         src/app/cli_mode.cpp
         src/app/download_mode.hpp
         src/app/download_mode.cpp
-        src-gui/brokkr_wrapper.hpp
-        src-gui/brokkr_wrapper.cpp
+        src-gui/brokkr_gui.hpp
+        src-gui/brokkr_gui.cpp
         assets/brokkr.qrc
     )
 endif()
@@ -474,6 +475,7 @@ add_test(NAME md5 COMMAND test_md5)
 add_executable(test_md5_xxh3_cache
     tests/test_md5_xxh3_cache.cpp
     src/app/md5_xxh3_cache.cpp
+    src/core/utils.cpp
 )
 target_include_directories(test_md5_xxh3_cache PRIVATE src)
 target_link_libraries(test_md5_xxh3_cache PRIVATE fmt::fmt-header-only)
@@ -515,12 +517,13 @@ endif()
 add_executable(test_file_paths
     tests/test_file_paths.cpp
     src/core/thread_pool.cpp
+    src/core/utils.cpp
     src/io/random_access.cpp
     src/io/sequential_reader.cpp
     src/io/source.cpp
     src/io/tar.cpp
     src/io/lz4_frame.cpp
-    src/protocol/odin/flash.cpp
+    src/protocol/odin/image.cpp
     src/protocol/odin/pit.cpp
     src/app/md5_verify.cpp
     src/app/md5_xxh3_cache.cpp

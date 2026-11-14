@@ -49,10 +49,10 @@ class QSocketNotifier;
 class DeviceGridArea;
 class DeviceSquare;
 
-class BrokkrWrapper : public QWidget {
+class BrokkrGui : public QWidget {
  public:
-  explicit BrokkrWrapper(QWidget* parent = nullptr);
-  ~BrokkrWrapper() override;
+  explicit BrokkrGui(QWidget* parent = nullptr);
+  ~BrokkrGui() override;
 
   int logDeviceCountForLog() const noexcept { return logDevCount_.load(std::memory_order_relaxed); }
 

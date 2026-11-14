@@ -18,7 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
-#include "protocol/odin/odin_cmd.hpp"
+#include "protocol/odin/cmd.hpp"
 #include "protocol/odin/pit.hpp"
 
 #include <cstddef>

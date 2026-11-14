@@ -17,7 +17,8 @@
 
 #include "platform/serial_port.hpp"
 
-#include <cctype>
+#include "core/utils.hpp"
+
 #include <string>
 
 #include <windows.h>
@@ -47,8 +48,7 @@ std::string normalize_com_path(std::string port) {
   if (port.empty()) return {};
   if (port.rfind("\\\\.\\", 0) == 0) return port;
 
-  std::string upper = port;
-  for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  const std::string upper = brokkr::core::to_upper_ascii(port);
   if (upper.rfind("COM", 0) == 0) return std::string("\\\\.\\") + port;
   return {};
 }

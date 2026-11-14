@@ -22,6 +22,8 @@
 #include "platform/android/java_tcp_transport.hpp"
 #include "platform/android/libusb_transport.hpp"
 #include "protocol/odin/flash.hpp"
+#include "protocol/odin/image.hpp"
+#include "protocol/odin/pit.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -316,18 +318,9 @@ class SessionCallbackProxy {
 };
 
 std::optional<std::pair<int, std::string>> parse_devfail(std::string_view message) {
-  constexpr std::string_view prefix = "DEVFAIL idx=";
-  if (!message.starts_with(prefix)) return std::nullopt;
-
-  message.remove_prefix(prefix.size());
-  const auto space = message.find(' ');
-  if (space == std::string_view::npos) return std::nullopt;
-
-  int index = 0;
-  const auto [ptr, ec] = std::from_chars(message.data(), message.data() + space, index);
-  if (ec != std::errc{} || ptr != message.data() + space) return std::nullopt;
-
-  return std::pair<int, std::string>(index, std::string(message.substr(space + 1)));
+  const auto df = brokkr::odin::parse_devfail(message);
+  if (!df || !df->has_reason || df->index < 0) return std::nullopt;
+  return std::pair<int, std::string>(df->index, std::string(df->reason));
 }
 
 struct NativeSession {
@@ -553,7 +546,7 @@ brokkr::core::Status execute_flash(JNIEnv* env, NativeSession& session,
   std::vector<brokkr::odin::ImageSpec> flash_specs;
   flash_specs.reserve(specs.size());
   for (auto& spec : specs) {
-    if (!brokkr::core::ends_with_ci(spec.basename, ".pit")) {
+    if (!brokkr::odin::is_pit_name(spec.basename)) {
       flash_specs.push_back(std::move(spec));
     }
   }

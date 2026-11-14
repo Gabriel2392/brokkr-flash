@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "core/str.hpp"
 #include "io/source.hpp"
 
 #include <cstddef>
@@ -25,9 +26,17 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace brokkr::io {
+
+inline bool is_lz4_name(std::string_view base) noexcept { return brokkr::core::ends_with_ci(base, ".lz4"); }
+
+inline std::string strip_lz4_suffix(std::string s) {
+  if (s.size() >= 4 && brokkr::core::ends_with_ci(s, ".lz4")) s.resize(s.size() - 4);
+  return s;
+}
 
 inline constexpr std::uint64_t LZ4_ONE_MIB = 1024ull * 1024ull;
 

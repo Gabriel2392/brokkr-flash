@@ -1,4 +1,4 @@
-#include "brokkr_wrapper.hpp"
+#include "brokkr_gui.hpp"
 
 #include <QCloseEvent>
 #include <QChildEvent>
@@ -62,7 +62,8 @@
 #include "app/version.hpp"
 #include "path_qt.hpp"
 #include "protocol/odin/flash.hpp"
-#include "protocol/odin/group_flasher.hpp"
+#include "protocol/odin/image.hpp"
+#include "protocol/odin/pit.hpp"
 
 #if defined(BROKKR_PLATFORM_LINUX)
   #include <linux/netlink.h>
@@ -247,7 +248,8 @@ static QString unlock_screen_notice() {
 }
 
 static bool is_pit_drop_name(const QString& file_name) {
-  return file_name.trimmed().toLower().endsWith(".pit");
+  const std::string trimmed = file_name.trimmed().toStdString();
+  return brokkr::odin::is_pit_name(trimmed);
 }
 
 static bool is_token_char(QChar c) { return c.isLetterOrNumber(); }
@@ -372,7 +374,7 @@ static QString human_bytes(std::uint64_t b) {
 template <class Mutex>
 class QtTextSink final : public spdlog::sinks::base_sink<Mutex> {
  public:
-  explicit QtTextSink(BrokkrWrapper* w) : w_(w) {}
+  explicit QtTextSink(BrokkrGui* w) : w_(w) {}
 
  protected:
   void sink_it_(const spdlog::details::log_msg& msg) override {
@@ -393,10 +395,10 @@ class QtTextSink final : public spdlog::sinks::base_sink<Mutex> {
   void flush_() override {}
 
  private:
-  BrokkrWrapper* w_ = nullptr;
+  BrokkrGui* w_ = nullptr;
 };
 
-static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrWrapper* w) {
+static std::shared_ptr<spdlog::logger> make_qt_logger(BrokkrGui* w) {
   auto sink = std::make_shared<QtTextSink<std::mutex>>(w);
   sink->set_pattern("%v");
   auto log = std::make_shared<spdlog::logger>("qt", spdlog::sinks_init_list{sink});
@@ -419,7 +421,7 @@ static std::optional<brokkr::platform::UsbDeviceSysfsInfo> select_odin_target(co
 } // namespace
 
 #if defined(Q_OS_MACOS)
-void BrokkrWrapper::macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
+void BrokkrGui::macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) {
   bool changed = false;
   spdlog::debug("macOS USB device change detected");
   while (io_service_t object = IOIteratorNext(iterator)) {
@@ -429,15 +431,15 @@ void BrokkrWrapper::macOsUsbDeviceChanged(void* refCon, io_iterator_t iterator) 
   }
   spdlog::debug("End of device change events");
   if (changed && refCon) {
-    auto* wrapper = static_cast<BrokkrWrapper*>(refCon);
+    auto* wrapper = static_cast<BrokkrGui*>(refCon);
     spdlog::debug("Requesting USB refresh from macOS device change event");
-    static_cast<BrokkrWrapper*>(refCon)->requestUsbRefresh_();
+    static_cast<BrokkrGui*>(refCon)->requestUsbRefresh_();
   }
   spdlog::debug("Finished processing macOS USB device change events");
 }
 #endif
 
-BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
+BrokkrGui::BrokkrGui(QWidget* parent) : QWidget(parent) {
   setWindowTitle("Brokkr Flash");
   setWindowIcon(QIcon(":/brokkr.ico"));
   resize(850, 600);
@@ -790,7 +792,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 
   mainLayout->addLayout(bottomLayout);
 
-  connect(btnRun, &QPushButton::clicked, this, &BrokkrWrapper::onRunClicked);
+  connect(btnRun, &QPushButton::clicked, this, &BrokkrGui::onRunClicked);
 
   connect(btnReset_, &QPushButton::clicked, this, [this, fileLayout]() {
     if (busy_) return;
@@ -866,12 +868,12 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
     matchDict = (CFMutableDictionaryRef)CFRetain(matchDict);
 
     IOServiceAddMatchingNotification(mac_notify_port_, kIOFirstMatchNotification, matchDict,
-                                     &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_added_iter_);
+                                     &BrokkrGui::macOsUsbDeviceChanged, this, &mac_added_iter_);
 
     macOsUsbDeviceChanged(nullptr, mac_added_iter_);
 
     IOServiceAddMatchingNotification(mac_notify_port_, kIOTerminatedNotification, matchDict,
-                                     &BrokkrWrapper::macOsUsbDeviceChanged, this, &mac_removed_iter_);
+                                     &BrokkrGui::macOsUsbDeviceChanged, this, &mac_removed_iter_);
 
     macOsUsbDeviceChanged(nullptr, mac_removed_iter_);
   }
@@ -909,7 +911,7 @@ BrokkrWrapper::BrokkrWrapper(QWidget* parent) : QWidget(parent) {
 #endif
 }
 
-BrokkrWrapper::~BrokkrWrapper() {
+BrokkrGui::~BrokkrGui() {
   stopWirelessListener_();
 #if defined(BROKKR_PLATFORM_LINUX)
   if (uevent_notifier_) uevent_notifier_->setEnabled(false);
@@ -936,9 +938,9 @@ BrokkrWrapper::~BrokkrWrapper() {
 #endif
 }
 
-void BrokkrWrapper::appendLogLineFromEngine(const QString& html) { appendLogLine_(html); }
+void BrokkrGui::appendLogLineFromEngine(const QString& html) { appendLogLine_(html); }
 
-void BrokkrWrapper::closeEvent(QCloseEvent* e) {
+void BrokkrGui::closeEvent(QCloseEvent* e) {
   if (busy_) {
     QMessageBox::warning(this, "Brokkr Flash", "An operation is in progress. Please wait for it to complete.");
     e->ignore();
@@ -947,7 +949,7 @@ void BrokkrWrapper::closeEvent(QCloseEvent* e) {
   e->accept();
 }
 
-QString BrokkrWrapper::dropSlotName_(int slotId) {
+QString BrokkrGui::dropSlotName_(int slotId) {
   switch (slotId) {
     case kDropSlotBL: return "BL";
     case kDropSlotAP: return "AP";
@@ -959,7 +961,7 @@ QString BrokkrWrapper::dropSlotName_(int slotId) {
   }
 }
 
-int BrokkrWrapper::inferDropSlotFromFileName_(const QString& fileName) {
+int BrokkrGui::inferDropSlotFromFileName_(const QString& fileName) {
   const QString leaf = QFileInfo(fileName).fileName();
   if (leaf.isEmpty()) return kDropSlotUnknown;
 
@@ -977,13 +979,13 @@ int BrokkrWrapper::inferDropSlotFromFileName_(const QString& fileName) {
   return kDropSlotUnknown;
 }
 
-bool BrokkrWrapper::isDropFileAllowedForSlot_(int slotId, const QString& fileName) {
+bool BrokkrGui::isDropFileAllowedForSlot_(int slotId, const QString& fileName) {
   if (slotId == kDropSlotPIT) return is_pit_drop_name(fileName);
   if (slotId >= kDropSlotBL && slotId <= kDropSlotUSERDATA) return !is_pit_drop_name(fileName);
   return false;
 }
 
-QStringList BrokkrWrapper::extractLocalDropFiles_(const QMimeData* mime) const {
+QStringList BrokkrGui::extractLocalDropFiles_(const QMimeData* mime) const {
   QStringList out;
   if (!mime) return out;
 
@@ -1035,7 +1037,7 @@ QStringList BrokkrWrapper::extractLocalDropFiles_(const QMimeData* mime) const {
   return out;
 }
 
-void BrokkrWrapper::bindDropTarget_(QWidget* widget, int slotId) {
+void BrokkrGui::bindDropTarget_(QWidget* widget, int slotId) {
   if (!widget) return;
   widget->setAcceptDrops(true);
   widget->setProperty(kDropSlotProperty, slotId);
@@ -1043,7 +1045,7 @@ void BrokkrWrapper::bindDropTarget_(QWidget* widget, int slotId) {
   widget->installEventFilter(this);
 }
 
-bool BrokkrWrapper::assignDroppedFileToSlot_(int slotId, const QString& localPath, QString* reason, bool* replaced) {
+bool BrokkrGui::assignDroppedFileToSlot_(int slotId, const QString& localPath, QString* reason, bool* replaced) {
   if (replaced) *replaced = false;
 
   QFileInfo fi(localPath);
@@ -1111,7 +1113,7 @@ bool BrokkrWrapper::assignDroppedFileToSlot_(int slotId, const QString& localPat
   return true;
 }
 
-void BrokkrWrapper::handleDroppedFiles_(const QStringList& localFiles, int forcedSlotId) {
+void BrokkrGui::handleDroppedFiles_(const QStringList& localFiles, int forcedSlotId) {
   if (busy_) {
     showBlocked_("Cannot accept files", "Cannot change files while flashing is in progress.");
     return;
@@ -1174,7 +1176,7 @@ void BrokkrWrapper::handleDroppedFiles_(const QStringList& localFiles, int force
   }
 }
 
-void BrokkrWrapper::dragEnterEvent(QDragEnterEvent* e) {
+void BrokkrGui::dragEnterEvent(QDragEnterEvent* e) {
   if (busy_) {
     e->ignore();
     return;
@@ -1187,7 +1189,7 @@ void BrokkrWrapper::dragEnterEvent(QDragEnterEvent* e) {
   e->acceptProposedAction();
 }
 
-void BrokkrWrapper::dragMoveEvent(QDragMoveEvent* e) {
+void BrokkrGui::dragMoveEvent(QDragMoveEvent* e) {
   if (busy_) {
     e->ignore();
     return;
@@ -1200,7 +1202,7 @@ void BrokkrWrapper::dragMoveEvent(QDragMoveEvent* e) {
   e->acceptProposedAction();
 }
 
-void BrokkrWrapper::dropEvent(QDropEvent* e) {
+void BrokkrGui::dropEvent(QDropEvent* e) {
   if (busy_) {
     e->ignore();
     return;
@@ -1218,7 +1220,7 @@ void BrokkrWrapper::dropEvent(QDropEvent* e) {
   e->acceptProposedAction();
 }
 
-bool BrokkrWrapper::eventFilter(QObject* watched, QEvent* event) {
+bool BrokkrGui::eventFilter(QObject* watched, QEvent* event) {
   if (!watched || !event) return QWidget::eventFilter(watched, event);
 
   auto* ww = qobject_cast<QWidget*>(watched);
@@ -1271,7 +1273,7 @@ bool BrokkrWrapper::eventFilter(QObject* watched, QEvent* event) {
   return QWidget::eventFilter(watched, event);
 }
 
-void BrokkrWrapper::childEvent(QChildEvent* e) {
+void BrokkrGui::childEvent(QChildEvent* e) {
   QWidget::childEvent(e);
   if (!e || !e->added()) return;
 
@@ -1287,7 +1289,7 @@ void BrokkrWrapper::childEvent(QChildEvent* e) {
   }
 }
 
-void BrokkrWrapper::changeEvent(QEvent* e) {
+void BrokkrGui::changeEvent(QEvent* e) {
   QWidget::changeEvent(e);
   if (e->type() == QEvent::PaletteChange || e->type() == QEvent::ApplicationPaletteChange) {
     applyHeaderStyle_();
@@ -1310,7 +1312,7 @@ void BrokkrWrapper::changeEvent(QEvent* e) {
 }
 
 #if defined(Q_OS_WIN)
-bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+bool BrokkrGui::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
   (void)eventType;
   MSG* msg = reinterpret_cast<MSG*>(message);
   if (!msg) return false;
@@ -1375,12 +1377,12 @@ bool BrokkrWrapper::nativeEvent(const QByteArray& eventType, void* message, qint
 }
 #endif
 
-void BrokkrWrapper::requestUsbRefresh_() noexcept {
+void BrokkrGui::requestUsbRefresh_() noexcept {
   spdlog::debug("USB refresh requested");
   usbDirty_.store(true, std::memory_order_relaxed);
 }
 
-void BrokkrWrapper::clearSquare_(int slot) {
+void BrokkrGui::clearSquare_(int slot) {
   if (slot < 0) return;
   const auto index = static_cast<std::size_t>(slot);
   if (index >= results_.size()) results_.resize(index + 1, brokkr::app::SlotResult::None);
@@ -1397,7 +1399,7 @@ void BrokkrWrapper::clearSquare_(int slot) {
   }
 }
 
-void BrokkrWrapper::updateSlots_(const std::vector<brokkr::app::DeviceSession>& sessions) {
+void BrokkrGui::updateSlots_(const std::vector<brokkr::app::DeviceSession>& sessions) {
   auto update = brokkr::app::update_slots(slots_, sessions, static_cast<std::size_t>(devSquares_.size()));
   slots_ = std::move(update.devices);
   overflowCount_ = update.overflow;
@@ -1406,25 +1408,25 @@ void BrokkrWrapper::updateSlots_(const std::vector<brokkr::app::DeviceSession>& 
   for (const auto slot : update.added) clearSquare_(static_cast<int>(slot));
 }
 
-bool BrokkrWrapper::isShown_(const brokkr::app::DeviceSession& session) const {
+bool BrokkrGui::isShown_(const brokkr::app::DeviceSession& session) const {
   return std::ranges::find(shown_, session) != shown_.end();
 }
 
-std::vector<std::optional<brokkr::app::DeviceSession>> BrokkrWrapper::shownSlots_() const {
+std::vector<std::optional<brokkr::app::DeviceSession>> BrokkrGui::shownSlots_() const {
   auto out = slots_;
   for (auto& slot : out)
     if (slot && !isShown_(*slot)) slot.reset();
   return out;
 }
 
-QStringList BrokkrWrapper::slotNames_() const {
+QStringList BrokkrGui::slotNames_() const {
   QStringList out;
   out.reserve(static_cast<qsizetype>(slots_.size()));
   for (const auto& slot : slots_) out << (slot && isShown_(*slot) ? QString::fromStdString(slot->sysname) : QString{});
   return out;
 }
 
-void BrokkrWrapper::refreshConnectedDevices_() {
+void BrokkrGui::refreshConnectedDevices_() {
   const auto usb = brokkr::app::enumerate_samsung_targets();
 
   QStringList physicalUsb;
@@ -1558,7 +1560,7 @@ void BrokkrWrapper::refreshConnectedDevices_() {
   updateActionButtons_();
 }
 
-void BrokkrWrapper::startWirelessListener_() {
+void BrokkrGui::startWirelessListener_() {
   if (busy_) return;
 
   stopWirelessListener_();
@@ -1644,7 +1646,7 @@ void BrokkrWrapper::startWirelessListener_() {
   refreshConnectedDevices_();
 }
 
-void BrokkrWrapper::stopWirelessListener_() {
+void BrokkrGui::stopWirelessListener_() {
   brokkr::platform::TcpListener* lst = nullptr;
   {
     std::lock_guard lk(wireless_mtx_);
@@ -1666,14 +1668,14 @@ void BrokkrWrapper::stopWirelessListener_() {
   requestUsbRefresh_();
 }
 
-void BrokkrWrapper::appendLogLine_(const QString& html) {
+void BrokkrGui::appendLogLine_(const QString& html) {
   consoleOutput->append(html);
   QTextCursor cursor = consoleOutput->textCursor();
   cursor.movePosition(QTextCursor::End);
   consoleOutput->setTextCursor(cursor);
 }
 
-void BrokkrWrapper::applyHeaderStyle_() {
+void BrokkrGui::applyHeaderStyle_() {
   if (!headerWidget_) return;
   const int luma = palette().color(QPalette::Window).lightness();
   const bool dark = (luma < 128);
@@ -1688,7 +1690,7 @@ void BrokkrWrapper::applyHeaderStyle_() {
   headerWidget_->setPalette(pal);
 }
 
-void BrokkrWrapper::updateHeaderLeds_() {
+void BrokkrGui::updateHeaderLeds_() {
   if (!ledContainer_) return;
 
   auto* lo = ledContainer_->layout();
@@ -1722,7 +1724,7 @@ void BrokkrWrapper::updateHeaderLeds_() {
   }
 }
 
-void BrokkrWrapper::setControlsEnabled_(bool enabled) {
+void BrokkrGui::setControlsEnabled_(bool enabled) {
   if (tabWidget_) {
     tabWidget_->setEnabled(true);
     if (tabWidget_->count() > 0) tabWidget_->setTabEnabled(0, true);
@@ -1759,14 +1761,14 @@ void BrokkrWrapper::setControlsEnabled_(bool enabled) {
   updateRebootDownloadButton_();
 }
 
-void BrokkrWrapper::setBusy_(bool busy) {
+void BrokkrGui::setBusy_(bool busy) {
   busy_ = busy;
   if (busy_ && tabWidget_) tabWidget_->setCurrentIndex(0);
   setControlsEnabled_(!busy_);
   updateActionButtons_();
 }
 
-void BrokkrWrapper::setSquaresProgress_(double frac, bool animate) {
+void BrokkrGui::setSquaresProgress_(double frac, bool animate) {
   const int n = devSquares_.size();
   for (int i = 0; i < n; ++i) {
     auto* sq = devSquares_[i];
@@ -1780,7 +1782,7 @@ void BrokkrWrapper::setSquaresProgress_(double frac, bool animate) {
   }
 }
 
-void BrokkrWrapper::setSquaresText_(const QString& s) {
+void BrokkrGui::setSquaresText_(const QString& s) {
   const int n = devSquares_.size();
   for (int i = 0; i < n; ++i) {
     auto* sq = devSquares_[i];
@@ -1791,7 +1793,7 @@ void BrokkrWrapper::setSquaresText_(const QString& s) {
   }
 }
 
-void BrokkrWrapper::setSquaresActiveColor_(bool enhanced) {
+void BrokkrGui::setSquaresActiveColor_(bool enhanced) {
   enhanced_speed_ = enhanced;
   const int n = devSquares_.size();
   for (int i = 0; i < n; ++i) {
@@ -1803,7 +1805,7 @@ void BrokkrWrapper::setSquaresActiveColor_(bool enhanced) {
   }
 }
 
-void BrokkrWrapper::setSquaresFinal_(bool ok) {
+void BrokkrGui::setSquaresFinal_(bool ok) {
   if (!ok) {
     const int n = devSquares_.size();
     for (int i = 0; i < n; ++i) {
@@ -1844,7 +1846,7 @@ void BrokkrWrapper::setSquaresFinal_(bool ok) {
   }
 }
 
-void BrokkrWrapper::showResults_() {
+void BrokkrGui::showResults_() {
   const int count = std::min<int>(devSquares_.size(), static_cast<int>(results_.size()));
   for (int i = 0; i < count; ++i) {
     auto* square = devSquares_[i];
@@ -1875,7 +1877,7 @@ void BrokkrWrapper::showResults_() {
   }
 }
 
-void BrokkrWrapper::fitWindowToDeviceRows_() {
+void BrokkrGui::fitWindowToDeviceRows_() {
   Qt::WindowStates state = windowState();
   if (const QWindow* handle = windowHandle()) state |= handle->windowStates();
   const bool sizeIsOurs = !(state & (Qt::WindowMinimized | Qt::WindowMaximized | Qt::WindowFullScreen));
@@ -1898,7 +1900,7 @@ void BrokkrWrapper::fitWindowToDeviceRows_() {
   resize(width(), target);
 }
 
-void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount) {
+void BrokkrGui::rebuildDeviceBoxes_(int boxCount) {
   while (idComLayout_->count() > 0) {
     QLayoutItem* it = idComLayout_->takeAt(0);
     if (!it) break;
@@ -1963,7 +1965,7 @@ void BrokkrWrapper::rebuildDeviceBoxes_(int boxCount) {
   fitWindowToDeviceRows_();
 }
 
-void BrokkrWrapper::refreshDeviceBoxes_() {
+void BrokkrGui::refreshDeviceBoxes_() {
   for (auto* box : comBoxes) {
     box->clear();
     box->setToolTip(QString());
@@ -2048,7 +2050,7 @@ void BrokkrWrapper::refreshDeviceBoxes_() {
   }
 }
 
-bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
+bool BrokkrGui::canRunStart_(QString* whyNot) const {
   const bool wireless = chkWireless->isChecked();
   const bool hasTarget = !editTarget->text().trimmed().isEmpty();
 
@@ -2093,7 +2095,7 @@ bool BrokkrWrapper::canRunStart_(QString* whyNot) const {
   return true;
 }
 
-bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
+bool BrokkrGui::confirmOdinModeDevicesForStart_() {
   if (chkWireless && chkWireless->isChecked()) return true;
 
   auto show_odin_popup = [this](const QString& text, bool allowIgnore) {
@@ -2153,7 +2155,7 @@ bool BrokkrWrapper::confirmOdinModeDevicesForStart_() {
                          true);
 }
 
-void BrokkrWrapper::updateActionButtons_() {
+void BrokkrGui::updateActionButtons_() {
   if (busy_) {
     btnRun->setEnabled(false);
     updateRebootDownloadButton_();
@@ -2165,7 +2167,7 @@ void BrokkrWrapper::updateActionButtons_() {
   updateRebootDownloadButton_();
 }
 
-void BrokkrWrapper::updateRebootDownloadButton_() {
+void BrokkrGui::updateRebootDownloadButton_() {
   if (!btnRebootDownloadMode_) return;
   if (busy_) {
     btnRebootDownloadMode_->setEnabled(false);
@@ -2183,11 +2185,11 @@ void BrokkrWrapper::updateRebootDownloadButton_() {
   btnRebootDownloadMode_->setEnabled(hasNonOdin);
 }
 
-void BrokkrWrapper::showBlocked_(const QString& title, const QString& msg) const {
-  QMessageBox::warning(const_cast<BrokkrWrapper*>(this), title, msg);
+void BrokkrGui::showBlocked_(const QString& title, const QString& msg) const {
+  QMessageBox::warning(const_cast<BrokkrGui*>(this), title, msg);
 }
 
-void BrokkrWrapper::tryRebootIntoDownloadMode_(bool confirm) {
+void BrokkrGui::tryRebootIntoDownloadMode_(bool confirm) {
   if (busy_) return;
 
   int nonOdinCount = 0;
@@ -2247,7 +2249,7 @@ void BrokkrWrapper::tryRebootIntoDownloadMode_(bool confirm) {
   requestUsbRefresh_();
 }
 
-void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {
+void BrokkrGui::setupOdinFileInput(QGridLayout* layout, int row, const QString& label, QLineEdit*& lineEdit) {
   auto* chk = new QCheckBox(this);
   chk->setEnabled(false);
 #if defined(Q_OS_WIN)
@@ -2308,7 +2310,7 @@ void BrokkrWrapper::setupOdinFileInput(QGridLayout* layout, int row, const QStri
   });
 }
 
-void BrokkrWrapper::onRunClicked() {
+void BrokkrGui::onRunClicked() {
   if (busy_) return;
   // Refresh the target.
   refreshConnectedDevices_();
@@ -2322,7 +2324,7 @@ void BrokkrWrapper::onRunClicked() {
   startWorkStart_();
 }
 
-void BrokkrWrapper::startWorkStart_() {
+void BrokkrGui::startWorkStart_() {
   if (busy_) return;
 
   const auto runSlots = shownSlots_();
@@ -2520,13 +2522,11 @@ void BrokkrWrapper::startWorkStart_() {
     };
 
     ui.on_error = [&](const std::string& s) {
-      constexpr std::string_view kDevFailPrefix = "DEVFAIL idx=";
-      if (s.rfind(kDevFailPrefix, 0) == 0) {
+      if (const auto df = brokkr::odin::parse_devfail(s)) {
         sawPerDeviceFail.store(true, std::memory_order_relaxed);
-        const auto sp = s.find(' ', kDevFailPrefix.size());
-        if (sp != std::string::npos) {
+        if (df->has_reason) {
           std::lock_guard lk(devfailMtx);
-          devfailReasons.insert(s.substr(sp + 1));
+          devfailReasons.insert(std::string(df->reason));
         }
       }
       const std::vector<int> mapSnapshot = targetToUiSlots;
@@ -2538,17 +2538,13 @@ void BrokkrWrapper::startWorkStart_() {
             QString shown = qs;
             int idx = -1;
 
-            const QString pref = "DEVFAIL idx=";
-            if (qs.startsWith(pref)) {
-              int p = pref.size();
-              int sp = qs.indexOf(' ', p);
-              if (sp < 0) sp = qs.size();
-              bool okNum = false;
-              idx = qs.mid(p, sp - p).toInt(&okNum);
+            const std::string utf8 = qs.toStdString();
+            if (const auto df = brokkr::odin::parse_devfail(utf8)) {
+              idx = df->index;
               QString reason;
-              if (sp < qs.size()) reason = qs.mid(sp + 1).trimmed();
+              if (df->has_reason) reason = QString::fromUtf8(df->reason.data(), static_cast<int>(df->reason.size())).trimmed();
 
-              if (okNum && idx >= 0) {
+              if (idx >= 0) {
                 int uiIdx = -1;
                 if (static_cast<std::size_t>(idx) < mapSnapshot.size()) uiIdx = mapSnapshot[static_cast<std::size_t>(idx)];
 

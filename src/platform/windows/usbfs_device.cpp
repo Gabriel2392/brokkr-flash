@@ -17,6 +17,8 @@
 
 #include "usbfs_device.hpp"
 
+#include "core/utils.hpp"
+
 #include <cstring>
 #include <utility>
 
@@ -35,8 +37,7 @@ static std::string win32_err(DWORD e) {
   if (n && buf) out.assign(buf, buf + n);
   if (buf) ::LocalFree(buf);
 
-  while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ' || out.back() == '\t'))
-    out.pop_back();
+  out.resize(brokkr::core::rtrim_ascii_ws(out).size());
   if (out.empty()) out = "error " + std::to_string(static_cast<unsigned>(e));
   return out;
 }

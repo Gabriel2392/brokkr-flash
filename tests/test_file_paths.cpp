@@ -4,7 +4,7 @@
 #include "core/path_utf8.hpp"
 #include "io/source.hpp"
 #include "platform/platform_all.hpp"
-#include "protocol/odin/flash.hpp"
+#include "protocol/odin/image.hpp"
 #include "third_party/md5/md5.h"
 
 #include <array>

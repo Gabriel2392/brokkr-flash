@@ -17,6 +17,7 @@
 
 #include "io/lz4_frame.hpp"
 
+#include "core/utils.hpp"
 #include "io/read_exact.hpp"
 
 #include <algorithm>
@@ -34,20 +35,6 @@ namespace brokkr::io {
 namespace {
 
 constexpr std::array<std::byte, 4> kLz4Magic{std::byte{0x04}, std::byte{0x22}, std::byte{0x4D}, std::byte{0x18}};
-
-static std::uint32_t u32_le(std::span<const std::byte, 4> b) {
-  const auto u0 = static_cast<std::uint32_t>(static_cast<unsigned char>(b[0]));
-  const auto u1 = static_cast<std::uint32_t>(static_cast<unsigned char>(b[1]));
-  const auto u2 = static_cast<std::uint32_t>(static_cast<unsigned char>(b[2]));
-  const auto u3 = static_cast<std::uint32_t>(static_cast<unsigned char>(b[3]));
-  return (u0) | (u1 << 8) | (u2 << 16) | (u3 << 24);
-}
-
-static std::uint64_t u64_le(std::span<const std::byte, 8> b) {
-  std::uint64_t v = 0;
-  for (std::size_t i = 0; i < 8; ++i) v |= (static_cast<std::uint64_t>(static_cast<unsigned char>(b[i])) << (8u * i));
-  return v;
-}
 
 static std::size_t max_block_size_from_bd(std::uint8_t bd) {
   const std::uint8_t id = static_cast<std::uint8_t>((bd >> 4) & 0x07u);
@@ -99,7 +86,7 @@ brokkr::core::Result<Lz4FrameHeaderInfo> parse_lz4_frame_header(ByteSource& src)
   std::array<std::byte, 8> cs{};
   st = read_exact(src, std::span<std::byte>(cs.data(), cs.size()));
   if (!st) return brokkr::core::fail(std::move(st.error()));
-  info.content_size = u64_le(std::span<const std::byte, 8>(cs.data(), 8));
+  info.content_size = brokkr::core::read_u64_le(std::span<const std::byte, 8>(cs.data(), 8));
 
   std::array<std::byte, 1> hc{};
   st = read_exact(src, std::span<std::byte>(hc.data(), hc.size()));
@@ -143,7 +130,7 @@ brokkr::core::Result<std::size_t> Lz4BlockStreamReader::read_n_blocks(std::size_
     auto st = read_exact_({szb.data(), szb.size()});
     if (!st) return brokkr::core::fail(std::move(st.error()));
 
-    const std::uint32_t raw_sz = u32_le(std::span<const std::byte, 4>(szb.data(), 4));
+    const std::uint32_t raw_sz = brokkr::core::read_u32_le(std::span<const std::byte, 4>(szb.data(), 4));
     if (raw_sz == 0) return brokkr::core::fail("LZ4: encountered endmark unexpectedly");
 
     const std::uint32_t payload = raw_sz & 0x7FFFFFFFu;
@@ -195,7 +182,7 @@ brokkr::core::Status Lz4DecompressedSource::fill_next_block_() noexcept {
   auto st = read_exact_({szb.data(), szb.size()});
   if (!st) return st;
 
-  const std::uint32_t raw_sz = u32_le(std::span<const std::byte, 4>(szb.data(), 4));
+  const std::uint32_t raw_sz = brokkr::core::read_u32_le(std::span<const std::byte, 4>(szb.data(), 4));
   if (raw_sz == 0) return brokkr::core::fail("LZ4: encountered endmark unexpectedly while decoding");
 
   const bool uncompressed = (raw_sz & 0x80000000u) != 0;

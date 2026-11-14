@@ -15,8 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "protocol/odin/odin_cmd.hpp"
-#include "protocol/odin/odin_wire.hpp"
+#include "protocol/odin/cmd.hpp"
+#include "protocol/odin/packet.hpp"
 
 #include "core/bytes.hpp"
 

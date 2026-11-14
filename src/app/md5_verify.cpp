@@ -24,6 +24,7 @@
 #include "core/str.hpp"
 #include "core/thread_pool.hpp"
 #include "core/thread_priority.hpp"
+#include "core/utils.hpp"
 
 #include "io/sequential_reader.hpp"
 #include "io/source.hpp"
@@ -88,15 +89,11 @@ struct SessionVerifyKey {
 
 struct SessionVerifyKeyHash {
   std::size_t operator()(const SessionVerifyKey& key) const noexcept {
-    auto hash_combine = [](std::size_t seed, std::size_t value) noexcept {
-      return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
-    };
-
     std::size_t seed = std::hash<std::string>{}(key.identity_path);
-    seed = hash_combine(seed, std::hash<std::uint64_t>{}(key.identity_size));
-    seed = hash_combine(seed, std::hash<std::int64_t>{}(key.identity_write_time));
-    seed = hash_combine(seed, std::hash<std::uint64_t>{}(key.bytes_to_hash));
-    for (unsigned char b : key.expected) seed = hash_combine(seed, std::hash<unsigned int>{}(b));
+    seed = brokkr::core::hash_combine(seed, std::hash<std::uint64_t>{}(key.identity_size));
+    seed = brokkr::core::hash_combine(seed, std::hash<std::int64_t>{}(key.identity_write_time));
+    seed = brokkr::core::hash_combine(seed, std::hash<std::uint64_t>{}(key.bytes_to_hash));
+    for (unsigned char b : key.expected) seed = brokkr::core::hash_combine(seed, std::hash<unsigned int>{}(b));
     return seed;
   }
 };
@@ -111,30 +108,9 @@ std::mutex& session_verify_cache_mutex() {
   return mtx;
 }
 
-static bool is_hex(unsigned char c) noexcept {
-  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
-static int hex_nibble(unsigned char c) noexcept {
-  if (c >= '0' && c <= '9') return (c - '0');
-  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-  return -1;
-}
-
-static bool parse_md5_hex(std::string_view hex32, std::array<unsigned char, 16>& out) noexcept {
-  if (hex32.size() != kMd5HexChars) return false;
-  for (std::size_t i = 0; i < out.size(); ++i) {
-    const int hi = hex_nibble(static_cast<unsigned char>(hex32[2 * i + 0]));
-    const int lo = hex_nibble(static_cast<unsigned char>(hex32[2 * i + 1]));
-    if (hi < 0 || lo < 0) return false;
-    out[i] = static_cast<unsigned char>((hi << 4) | lo);
-  }
-  return true;
-}
-
-static bool is_md5_wrapped_tar_name(std::string_view label) noexcept {
-  return brokkr::core::ends_with_ci(brokkr::io::basename(label), ".md5");
+static std::string format_md5_mismatch(const Md5Job& j, const std::array<unsigned char, 16>& actual) {
+  return "MD5 mismatch: " + j.display_name + "\n  expected:   " + md5_hex32(j.expected) + "\n  calculated: " +
+         md5_hex32(actual) + "\n  byte count: " + std::to_string(j.bytes_to_hash);
 }
 
 static SessionVerifyKey make_session_verify_key(const Md5Job& job) {
@@ -323,7 +299,7 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(
 
     bool ok = true;
     for (std::size_t j = 0; j < kMd5HexChars; ++j) {
-      if (!is_hex(static_cast<unsigned char>(tail[static_cast<std::size_t>(start) + j]))) {
+      if (!brokkr::core::is_hex_digit(static_cast<unsigned char>(tail[static_cast<std::size_t>(start) + j]))) {
         ok = false;
         break;
       }
@@ -336,9 +312,9 @@ static brokkr::core::Result<std::optional<Md5Job>> detect_md5_job(
   if (delim < 0) return std::nullopt;
 
   std::array<unsigned char, 16> expected{};
-  if (!parse_md5_hex({tail.data() + static_cast<std::size_t>(delim - static_cast<std::int64_t>(kMd5HexChars)),
-                      kMd5HexChars},
-                     expected)) {
+  if (!brokkr::core::parse_md5_hex(
+          {tail.data() + static_cast<std::size_t>(delim - static_cast<std::int64_t>(kMd5HexChars)), kMd5HexChars},
+          expected)) {
     return std::nullopt;
   }
 
@@ -367,7 +343,7 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs_from_sources(
   std::vector<Md5Job> jobs;
 
   for (const auto& source : inputs) {
-    if (!is_md5_wrapped_tar_name(source->label())) continue;
+    if (!brokkr::io::is_md5_name(brokkr::io::basename(source->label()))) continue;
     if (!brokkr::io::TarArchive::is_tar_file(*source)) continue;
 
     auto r = detect_md5_job(source);
@@ -383,7 +359,7 @@ brokkr::core::Result<std::vector<Md5Job>> md5_jobs(const std::vector<std::filesy
   sources.reserve(inputs.size());
 
   for (const auto& p : inputs) {
-    if (!is_md5_wrapped_tar_name(brokkr::core::path_to_utf8(p))) continue;
+    if (!brokkr::io::is_md5_name(brokkr::io::basename(brokkr::core::path_to_utf8(p)))) continue;
 
     BRK_TRYV(source, brokkr::io::open_file_source(p));
     sources.push_back(std::move(source));
@@ -545,9 +521,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
         if (!retry) return brokkr::core::fail(std::move(retry.error()));
 
         if (std::memcmp(retry->md5.data(), j.expected.data(), j.expected.size()) != 0) {
-          return brokkr::core::fail("MD5 mismatch: " + j.display_name + "\n  expected:   " + md5_hex32(j.expected) +
-                                    "\n  calculated: " + md5_hex32(retry->md5) +
-                                    "\n  byte count: " + std::to_string(j.bytes_to_hash));
+          return brokkr::core::fail(format_md5_mismatch(j, retry->md5));
         }
 
         if (cache_enabled) {
@@ -565,9 +539,7 @@ brokkr::core::Status md5_verify(const std::vector<Md5Job>& jobs, const brokkr::o
       if (!digest) return brokkr::core::fail(std::move(digest.error()));
 
       if (std::memcmp(digest->md5.data(), j.expected.data(), j.expected.size()) != 0) {
-        return brokkr::core::fail("MD5 mismatch: " + j.display_name + "\n  expected:   " + md5_hex32(j.expected) +
-                                  "\n  calculated: " + md5_hex32(digest->md5) +
-                                  "\n  byte count: " + std::to_string(j.bytes_to_hash));
+        return brokkr::core::fail(format_md5_mismatch(j, digest->md5));
       }
 
       if (cache_enabled) {

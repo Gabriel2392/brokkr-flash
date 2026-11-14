@@ -19,7 +19,7 @@
 
 #include "core/status.hpp"
 #include "io/random_access.hpp"
-#include "protocol/odin/group_flasher.hpp"
+#include "protocol/odin/flash.hpp"
 
 #include <array>
 #include <atomic>

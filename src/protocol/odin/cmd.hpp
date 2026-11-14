@@ -19,7 +19,7 @@
 
 #include "core/byte_transport.hpp"
 #include "core/status.hpp"
-#include "protocol/odin/odin_wire.hpp"
+#include "protocol/odin/packet.hpp"
 
 #include <cstddef>
 #include <cstdint>

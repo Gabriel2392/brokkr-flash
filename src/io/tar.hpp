@@ -18,6 +18,7 @@
 #pragma once
 
 #include "core/status.hpp"
+#include "core/str.hpp"
 #include "io/random_access.hpp"
 
 #include <cstddef>
@@ -30,6 +31,12 @@
 #include <vector>
 
 namespace brokkr::io {
+
+inline bool is_md5_name(std::string_view base) noexcept { return brokkr::core::ends_with_ci(base, ".md5"); }
+
+inline bool is_tar_name(std::string_view base) noexcept {
+  return brokkr::core::ends_with_ci(base, ".tar") || brokkr::core::ends_with_ci(base, ".tar.md5");
+}
 
 struct TarEntry {
   std::string name;

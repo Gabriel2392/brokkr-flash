@@ -17,15 +17,13 @@
 
 #include "platform/linux/sysfs_usb.hpp"
 
-#include <algorithm>
-#include <charconv>
+#include "core/utils.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -44,36 +42,6 @@ std::string read_text_file(const fs::path& p) {
   std::string s;
   std::getline(in, s);
   return s;
-}
-
-std::optional<int> parse_int_dec(std::string_view s) {
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
-    s.remove_suffix(1);
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-
-  int v = 0;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, 10);
-  if (ec != std::errc{}) return std::nullopt;
-  if (ptr != s.data() + s.size()) return std::nullopt;
-  return v;
-}
-
-std::optional<std::uint16_t> parse_u16_hex(std::string_view s) {
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
-    s.remove_suffix(1);
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-
-  unsigned v = 0;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, 16);
-  if (ec != std::errc{}) return std::nullopt;
-  if (ptr != s.data() + s.size()) return std::nullopt;
-  if (v > 0xFFFFu) return std::nullopt;
-  return static_cast<std::uint16_t>(v);
-}
-
-bool product_allowed(std::uint16_t product, const std::vector<std::uint16_t>& allowed) {
-  if (allowed.empty()) return true;
-  return std::find(allowed.begin(), allowed.end(), product) != allowed.end();
 }
 
 std::vector<std::string> find_serial_nodes(std::string_view sysname) {
@@ -108,10 +76,10 @@ std::optional<UsbDeviceSysfsInfo> load_one(const fs::path& dir, std::string sysn
     return std::nullopt;
   }
 
-  const auto vend = parse_u16_hex(read_text_file(idVendorPath));
-  const auto prod = parse_u16_hex(read_text_file(idProductPath));
-  const auto bus = parse_int_dec(read_text_file(busnumPath));
-  const auto dev = parse_int_dec(read_text_file(devnumPath));
+  const auto vend = brokkr::core::parse_int_trimmed<std::uint16_t>(read_text_file(idVendorPath), 16);
+  const auto prod = brokkr::core::parse_int_trimmed<std::uint16_t>(read_text_file(idProductPath), 16);
+  const auto bus = brokkr::core::parse_int_trimmed<int>(read_text_file(busnumPath), 10);
+  const auto dev = brokkr::core::parse_int_trimmed<int>(read_text_file(devnumPath), 10);
 
   if (!vend || !prod || !bus || !dev) return std::nullopt;
 
@@ -127,7 +95,7 @@ std::optional<UsbDeviceSysfsInfo> load_one(const fs::path& dir, std::string sysn
 
   const fs::path cdPath = dir / "power" / "connected_duration";
   if (fs::exists(cdPath)) {
-    if (auto ms = parse_int_dec(read_text_file(cdPath))) {
+    if (auto ms = brokkr::core::parse_int_trimmed<int>(read_text_file(cdPath), 10)) {
       out.connected_duration_sec = *ms / 1000;
     }
   }
@@ -160,7 +128,7 @@ std::vector<UsbDeviceSysfsInfo> enumerate_usb_devices_sysfs(const EnumerateFilte
     spdlog::debug("Found USB device: {} (VID: 0x{:04x}, PID: 0x{:04x})", info->sysname, info->vendor, info->product);
 
     if (info->vendor != filter.vendor) continue;
-    if (!product_allowed(info->product, filter.products)) continue;
+    if (!brokkr::core::matches_filter_or_all<std::uint16_t>(filter.products, info->product)) continue;
 
     info->serial_nodes = find_serial_nodes(info->sysname);
     spdlog::debug("Matched USB device: {}", info->describe());

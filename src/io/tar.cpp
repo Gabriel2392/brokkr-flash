@@ -17,9 +17,10 @@
 
 #include "io/tar.hpp"
 
+#include "core/utils.hpp"
+
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -34,9 +35,7 @@ namespace {
 
 constexpr std::size_t kBlock = 512;
 
-inline std::uint64_t round_up_512(std::uint64_t n) noexcept {
-  return (n + (kBlock - 1)) & ~(static_cast<std::uint64_t>(kBlock - 1));
-}
+inline std::uint64_t round_up_512(std::uint64_t n) noexcept { return brokkr::core::round_up_u64(n, kBlock); }
 
 inline std::string basename_of(std::string_view s) {
   const auto pos1 = s.find_last_of('/');
@@ -48,14 +47,9 @@ inline std::string basename_of(std::string_view s) {
 }
 
 static brokkr::core::Result<std::uint64_t> parse_u64_dec(std::string_view s) noexcept {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
-    s.remove_suffix(1);
-
-  std::uint64_t v = 0;
-  auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, 10);
-  if (ec != std::errc{} || ptr != s.data() + s.size()) return brokkr::core::fail("PAX: invalid decimal number");
-  return v;
+  const auto v = brokkr::core::parse_int_trimmed<std::uint64_t>(s, 10);
+  if (!v) return brokkr::core::fail("PAX: invalid decimal number");
+  return *v;
 }
 
 } // namespace
@@ -109,14 +103,7 @@ bool TarArchive::header_all_zero(std::span<const std::byte, 512> header) noexcep
   return true;
 }
 
-std::string TarArchive::trim_cstr_field(const char* p, std::size_t n) {
-  const auto* nul = static_cast<const char*>(std::memchr(p, '\0', n));
-  const std::size_t len = nul ? static_cast<std::size_t>(nul - p) : n;
-
-  std::size_t end = len;
-  while (end > 0 && (p[end - 1] == ' ' || p[end - 1] == '\t' || p[end - 1] == '\r' || p[end - 1] == '\n')) --end;
-  return std::string(p, p + end);
-}
+std::string TarArchive::trim_cstr_field(const char* p, std::size_t n) { return brokkr::core::trim_cstr_field(p, n); }
 
 std::uint64_t TarArchive::parse_octal(std::string_view s) noexcept {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\0')) s.remove_prefix(1);
